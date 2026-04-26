@@ -1132,9 +1132,7 @@ impl AssetServer {
 
         let mut combined_data = Vec::with_capacity((width * height * 4 * 6) as usize);
         for img in &face_images {
-            if let Some(data) = &img.data {
-                combined_data.extend_from_slice(data);
-            }
+            img.with_data(|data| combined_data.extend_from_slice(data));
         }
 
         Ok(Image::new(

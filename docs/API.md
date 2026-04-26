@@ -957,13 +957,50 @@ TextureTransform {
 
 #### Image
 
-Thread-safe (`Arc<ImageInner>`) with atomic version tracking:
+CPU-side pixel container. `Image` owns dimensions and bytes; asset version
+tracking lives in `AssetStorage`, which decides when the renderer must re-sync
+GPU textures.
 
 ```rust
-image.update_data(new_bytes);    // Content update (bumps version)
-image.resize(1024, 1024);        // Structural change (bumps generation_id)
-image.set_format(new_format);    // Format change
+// Static image or placeholder
+let static_image = Image::new(
+    1920,
+    1080,
+    1,
+    ImageDimension::D2,
+    PixelFormat::Rgba8Unorm,
+    Some(bytes),
+);
+
+// Dynamic image for video frames / camera feeds / CPU streaming
+let dynamic_image = Image::new_dynamic(
+    1920,
+    1080,
+    1,
+    ImageDimension::D2,
+    PixelFormat::Rgba8Unorm,
+    initial_frame,
+);
+
+// Read without cloning
+dynamic_image.with_data(|bytes| {
+    // inspect or upload bytes here
+});
+
+// Store and update in place without replacing the Arc<Image>
+let image_h = assets.images.add(dynamic_image);
+assets.images.update_dynamic_data(image_h, &next_frame)?;
+
+// Structural changes still replace the whole image asset
+assets.images.update(
+    image_h,
+    Image::new(1024, 1024, 1, ImageDimension::D2, PixelFormat::Rgba8Unorm, Some(new_bytes)),
+);
 ```
+
+- `update_dynamic_data()` is the zero-allocation path for same-size updates.
+- Dynamic updates require the incoming byte slice to match the original buffer length.
+- Size, format, dimension, or mip topology changes still use full asset replacement.
 
 ---
 

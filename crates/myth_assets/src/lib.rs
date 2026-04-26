@@ -31,7 +31,7 @@ pub use myth_scene::GeometryQuery;
 pub use prefab::{Prefab, PrefabNode, PrefabSkeleton, SharedPrefab};
 pub use resolve::{ResolveGeometry, ResolveMaterial};
 pub use scene_ext::SceneExt;
-pub use storage::{AssetSlot, AssetStorage};
+pub use storage::{AssetSlot, AssetStorage, DynamicImageUpdateError};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use io::FileAssetReader;

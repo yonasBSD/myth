@@ -7,7 +7,8 @@
 //! - AssetServer construction and storage access
 
 use myth::assets::AssetServer;
-use myth::assets::storage::AssetStorage;
+use myth::assets::storage::{AssetStorage, DynamicImageUpdateError};
+use myth::resources::image::{DynamicImageError, Image, ImageDimension, PixelFormat};
 use myth::resources::Geometry;
 use slotmap::new_key_type;
 use uuid::Uuid;
@@ -156,5 +157,80 @@ fn asset_server_clone_shares_storage() {
     assert!(
         server2.geometries.get(handle).is_some(),
         "Cloned server should share the same storage"
+    );
+}
+
+#[test]
+fn dynamic_image_update_reuses_storage_and_bumps_version() {
+    let server = AssetServer::new();
+    let image = Image::new_dynamic(
+        2,
+        1,
+        1,
+        ImageDimension::D2,
+        PixelFormat::Rgba8Unorm,
+        vec![0, 1, 2, 3, 4, 5, 6, 7],
+    );
+    let handle = server.images.add(image);
+    let before_version = server.images.get_version(handle).unwrap();
+    let before_ptr = {
+        let image = server.images.get(handle).unwrap();
+        let data = image.data().unwrap();
+        data.as_ref().as_ptr()
+    };
+
+    let next_version = server
+        .images
+        .update_dynamic_data(handle, &[8, 9, 10, 11, 12, 13, 14, 15])
+        .unwrap();
+    let image = server.images.get(handle).unwrap();
+
+    assert_eq!(next_version, before_version + 1);
+    assert_eq!(server.images.get_version(handle).unwrap(), next_version);
+    let data = image.data().unwrap();
+    assert_eq!(before_ptr, data.as_ref().as_ptr());
+    assert_eq!(data.as_ref(), &[8, 9, 10, 11, 12, 13, 14, 15]);
+}
+
+#[test]
+fn dynamic_image_update_rejects_static_images() {
+    let server = AssetServer::new();
+    let handle = server.images.add(Image::new(
+        1,
+        1,
+        1,
+        ImageDimension::D2,
+        PixelFormat::Rgba8Unorm,
+        Some(vec![1, 2, 3, 4]),
+    ));
+
+    let err = server.images.update_dynamic_data(handle, &[5, 6, 7, 8]).unwrap_err();
+
+    assert_eq!(
+        err,
+        DynamicImageUpdateError::Update(DynamicImageError::NotDynamic)
+    );
+}
+
+#[test]
+fn dynamic_image_update_rejects_size_mismatch() {
+    let server = AssetServer::new();
+    let handle = server.images.add(Image::new_dynamic(
+        1,
+        1,
+        1,
+        ImageDimension::D2,
+        PixelFormat::Rgba8Unorm,
+        vec![1, 2, 3, 4],
+    ));
+
+    let err = server.images.update_dynamic_data(handle, &[9, 10]).unwrap_err();
+
+    assert_eq!(
+        err,
+        DynamicImageUpdateError::Update(DynamicImageError::SizeMismatch {
+            expected: 4,
+            actual: 2,
+        })
     );
 }

@@ -33,10 +33,10 @@ def on_init(ctx: myth.Engine):
 
     # Load the compressed NPZ Gaussian cloud
     cloud = ctx.load_gaussian_npz(get_asset("3dgs/point_cloud.npz"))
-    cloud.color_space = "linear"
-    scene.add_gaussian_cloud("gaussian_cloud", cloud)
 
-    scene.set_tone_mapping("linear", gamma=1.0 / 2.2)
+    gs = scene.add_gaussian_cloud("gaussian_cloud", cloud)
+
+    gs.rotation_euler = [90, 0, 0]
 
     # Camera
     cam = scene.add_camera(myth.PerspectiveCamera(fov=45, near=0.1))

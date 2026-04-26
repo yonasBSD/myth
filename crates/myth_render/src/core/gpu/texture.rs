@@ -173,7 +173,7 @@ impl GpuImage {
         src_depth: u32,
         src_format: wgpu::TextureFormat,
     ) {
-        if let Some(data) = &image.data {
+        image.with_data(|data| {
             let block_size = src_format.block_copy_size(None).unwrap_or(4);
             let bytes_per_row = src_width * block_size;
 
@@ -196,7 +196,7 @@ impl GpuImage {
                     depth_or_array_layers: src_depth,
                 },
             );
-        }
+        });
     }
 }
 

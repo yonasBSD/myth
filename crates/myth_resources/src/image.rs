@@ -13,7 +13,19 @@
 //! * [`ColorSpace`] — rendering intent; lives on [`Texture`] and is combined
 //!   with `PixelFormat` at GPU upload time to produce the final
 //!   `wgpu::TextureFormat`.
+//!
+//! # Storage modes
+//!
+//! * [`Image::new`] creates a static image or an empty placeholder when data is
+//!   not resident yet.
+//! * [`Image::new_dynamic`] creates a fixed-capacity CPU buffer for streaming
+//!   workloads such as video frames or camera feeds.
+//! * Asset version tracking lives in the asset storage layer. When an image is
+//!   stored in `AssetStorage`, use the storage's dynamic update API so render
+//!   synchronization stays coherent.
 
+use parking_lot::{RwLock, RwLockReadGuard};
+use std::ops::Deref;
 use uuid::Uuid;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -114,19 +126,79 @@ pub enum ColorSpace {
 // Image
 // ────────────────────────────────────────────────────────────────────────────
 
+/// Backing storage for CPU-side image bytes.
+///
+/// Static images keep the existing lock-free path. Dynamic images pre-allocate
+/// their CPU buffer and reuse it behind an internal lock so callers can stream
+/// new bytes without allocating a replacement [`Image`].
+#[derive(Debug)]
+pub enum ImageStorage {
+    /// Placeholder image with no resident CPU data yet.
+    Empty,
+    /// Immutable image payload.
+    Static(Vec<u8>),
+    /// Mutable image payload for high-frequency updates.
+    Dynamic(RwLock<Vec<u8>>),
+}
+
+/// Borrowed image bytes.
+///
+/// Static images expose a plain slice. Dynamic images hold a read lock for the
+/// duration of the borrow, allowing upload code to read without cloning.
+pub enum ImageDataRef<'a> {
+    Static(&'a [u8]),
+    Dynamic(RwLockReadGuard<'a, Vec<u8>>),
+}
+
+impl Deref for ImageDataRef<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Static(data) => data,
+            Self::Dynamic(guard) => guard.as_slice(),
+        }
+    }
+}
+
+impl AsRef<[u8]> for ImageDataRef<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self.deref()
+    }
+}
+
+/// Failure modes for in-place dynamic image updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicImageError {
+    MissingData,
+    NotDynamic,
+    SizeMismatch { expected: usize, actual: usize },
+}
+
+impl std::fmt::Display for DynamicImageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingData => f.write_str("image has no resident CPU data"),
+            Self::NotDynamic => f.write_str("image was not created with Image::new_dynamic"),
+            Self::SizeMismatch { expected, actual } => {
+                write!(f, "image byte length mismatch: expected {expected}, got {actual}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DynamicImageError {}
+
 /// CPU-side image data.
 ///
-/// A lightweight, purely owned container of pixel bytes plus the minimal
-/// metadata the GPU uploader needs (size, format, dimension).
+/// Carries pixel bytes plus the minimal metadata the GPU uploader needs
+/// (size, format, dimension). Dynamic images keep their CPU buffer behind a
+/// small internal lock so callers can update bytes in place while the asset
+/// storage continues to own version tracking.
 ///
-/// `Image` deliberately carries **no** `Arc`, `RwLock`, atomic fields, or
-/// `wgpu` types. Thread-safe shared access is provided by the
-/// [`AssetStorage`] layer, which wraps every stored asset in `Arc` and
-/// guards mutations with a version counter.
-///
-/// Colour-space semantics are intentionally absent — the same image data
-/// can be upload as sRGB or Linear depending on the [`Texture`] that
-/// references it.
+/// Colour-space semantics are intentionally absent — the same image data can
+/// be uploaded as sRGB or Linear depending on the [`Texture`] that references
+/// it.
 #[derive(Debug)]
 pub struct Image {
     pub uuid: Uuid,
@@ -136,8 +208,8 @@ pub struct Image {
     pub mip_level_count: u32,
     pub dimension: ImageDimension,
     pub format: PixelFormat,
-    /// Raw pixel bytes. `None` indicates a placeholder awaiting async load.
-    pub data: Option<Vec<u8>>,
+    /// Raw pixel bytes.
+    storage: ImageStorage,
 }
 
 impl Image {
@@ -159,7 +231,37 @@ impl Image {
             mip_level_count: 1,
             dimension,
             format,
-            data,
+            storage: match data {
+                Some(data) => ImageStorage::Static(data),
+                None => ImageStorage::Empty,
+            },
+        }
+    }
+
+    /// Creates a dynamic image whose CPU buffer can be updated in place.
+    ///
+    /// The allocation backing `initial_data` is retained for the lifetime of
+    /// the image. Subsequent dynamic updates must preserve the exact byte
+    /// length so the storage can reuse the existing capacity without
+    /// reallocating.
+    #[must_use]
+    pub fn new_dynamic(
+        width: u32,
+        height: u32,
+        depth_or_array_layers: u32,
+        dimension: ImageDimension,
+        format: PixelFormat,
+        initial_data: Vec<u8>,
+    ) -> Self {
+        Self {
+            uuid: Uuid::new_v4(),
+            width,
+            height,
+            depth: depth_or_array_layers,
+            mip_level_count: 1,
+            dimension,
+            format,
+            storage: ImageStorage::Dynamic(RwLock::new(initial_data)),
         }
     }
 
@@ -175,6 +277,66 @@ impl Image {
     #[must_use]
     pub fn dimension(&self) -> ImageDimension {
         self.dimension
+    }
+
+    /// Returns `true` when the image has CPU-resident bytes.
+    #[inline]
+    #[must_use]
+    pub fn has_data(&self) -> bool {
+        !matches!(self.storage, ImageStorage::Empty)
+    }
+
+    /// Returns `true` when the image uses the dynamic update path.
+    #[inline]
+    #[must_use]
+    pub fn is_dynamic(&self) -> bool {
+        matches!(self.storage, ImageStorage::Dynamic(_))
+    }
+
+    /// Borrows the current image bytes without allocating.
+    ///
+    /// Static images return a plain slice. Dynamic images hold a read lock for
+    /// the lifetime of the returned guard.
+    #[must_use]
+    pub fn data(&self) -> Option<ImageDataRef<'_>> {
+        match &self.storage {
+            ImageStorage::Empty => None,
+            ImageStorage::Static(data) => Some(ImageDataRef::Static(data.as_slice())),
+            ImageStorage::Dynamic(data) => Some(ImageDataRef::Dynamic(data.read())),
+        }
+    }
+
+    /// Executes `f` with the current image bytes, if present.
+    ///
+    /// This is the preferred read path for upload code that only needs a
+    /// temporary byte slice and wants to avoid naming the guard type.
+    #[inline]
+    pub fn with_data<R>(&self, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        self.data().map(|data| f(data.as_ref()))
+    }
+
+    /// Overwrites a dynamic image buffer in place without reallocating.
+    ///
+    /// This mutates only the CPU-side bytes. It does not bump any asset
+    /// version counters. When the image is managed by the asset system, call
+    /// the storage-layer dynamic update API so render synchronization can see
+    /// the change.
+    pub fn update_dynamic_data(&self, new_data: &[u8]) -> Result<(), DynamicImageError> {
+        match &self.storage {
+            ImageStorage::Empty => Err(DynamicImageError::MissingData),
+            ImageStorage::Static(_) => Err(DynamicImageError::NotDynamic),
+            ImageStorage::Dynamic(data) => {
+                let mut buffer = data.write();
+                if buffer.len() != new_data.len() {
+                    return Err(DynamicImageError::SizeMismatch {
+                        expected: buffer.len(),
+                        actual: new_data.len(),
+                    });
+                }
+                buffer.copy_from_slice(new_data);
+                Ok(())
+            }
+        }
     }
 
     /// Creates a 1×1 RGBA8 image with the specified colour.

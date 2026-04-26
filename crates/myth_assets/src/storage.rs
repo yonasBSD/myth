@@ -5,6 +5,29 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
+use myth_resources::image::{DynamicImageError, Image};
+use myth_resources::ImageHandle;
+
+/// Failure modes for zero-allocation dynamic image updates in [`AssetStorage`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicImageUpdateError {
+    InvalidHandle,
+    NotLoaded,
+    Update(DynamicImageError),
+}
+
+impl std::fmt::Display for DynamicImageUpdateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidHandle => f.write_str("image handle is not present in storage"),
+            Self::NotLoaded => f.write_str("image handle is not loaded yet"),
+            Self::Update(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for DynamicImageUpdateError {}
+
 /// Versioned wrapper around a loaded asset in [`AssetStorage`].
 ///
 /// The `version` counter is bumped every time the asset data is replaced
@@ -386,5 +409,35 @@ impl<H: Key, T> AssetStorage<H, T> {
         }
         guard.lookup.clear();
         self.global_version.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl AssetStorage<ImageHandle, Image> {
+    /// Overwrites a dynamic image buffer in place and bumps the asset version.
+    ///
+    /// This is the zero-allocation update path for streaming images. The image
+    /// must have been created with [`Image::new_dynamic`] and `new_bytes` must
+    /// match the preallocated buffer length exactly.
+    pub fn update_dynamic_data(
+        &self,
+        handle: ImageHandle,
+        new_bytes: &[u8],
+    ) -> Result<u32, DynamicImageUpdateError> {
+        let mut guard = self.inner.write();
+        let Some(slot) = guard.map.get_mut(handle) else {
+            return Err(DynamicImageUpdateError::InvalidHandle);
+        };
+        let Some(entry) = slot.as_loaded_mut() else {
+            return Err(DynamicImageUpdateError::NotLoaded);
+        };
+
+        entry
+            .asset
+            .update_dynamic_data(new_bytes)
+            .map_err(DynamicImageUpdateError::Update)?;
+
+        entry.version = entry.version.wrapping_add(1);
+        self.global_version.fetch_add(1, Ordering::Relaxed);
+        Ok(entry.version)
     }
 }
