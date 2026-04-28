@@ -179,6 +179,15 @@ class Renderer:
     def load_texture(
         self, path: str, color_space: str = "srgb", generate_mipmaps: bool = True
     ) -> TextureHandle: ...
+    def create_dynamic_texture(
+        self,
+        name: str,
+        width: int,
+        height: int,
+        data: object,
+        color_space: str = "srgb",
+        generate_mipmaps: bool = False,
+    ) -> TextureHandle: ...
     def load_hdr_texture(self, path: str) -> TextureHandle: ...
     def load_gltf(self, path: str) -> Object3D: ...
 
@@ -489,6 +498,28 @@ class Engine:
 
     def load_hdr_texture(self, path: str) -> TextureHandle:
         """Load an HDR environment texture (e.g. ``.hdr`` files)."""
+        ...
+
+    def create_dynamic_texture(
+        self,
+        name: str,
+        width: int,
+        height: int,
+        data: object,
+        color_space: str = "srgb",
+        generate_mipmaps: bool = False,
+    ) -> TextureHandle:
+        """Create a dynamic RGBA8 texture backed by a reusable CPU buffer.
+
+        Args:
+            name: Debug label for the texture asset.
+            width: Texture width in pixels.
+            height: Texture height in pixels.
+            data: Any C-contiguous ``uint8`` buffer, such as ``bytes``,
+                ``bytearray``, ``memoryview``, or ``numpy.ndarray``.
+            color_space: ``'srgb'`` or ``'linear'``.
+            generate_mipmaps: Whether to regenerate mipmaps after updates.
+        """
         ...
 
     def load_gltf(self, path: str) -> Object3D:
@@ -1389,11 +1420,19 @@ class SpotLight:
 class TextureHandle:
     """An opaque handle to a loaded texture.
 
-    Obtain via ``engine.load_texture()`` or ``engine.load_hdr_texture()``.
+    Obtain via ``engine.load_texture()``, ``engine.load_hdr_texture()``, or
+    ``engine.create_dynamic_texture()``.
     Pass to material methods like ``mat.set_map(handle)``.
     """
 
     def __eq__(self, other: object) -> bool: ...
+    def update_data(self, data: object) -> None:
+        """Update the bytes of a dynamic texture in place.
+
+        ``data`` may be any C-contiguous ``uint8`` buffer, including
+        ``bytes``, ``bytearray``, ``memoryview``, or ``numpy.ndarray``.
+        """
+        ...
 
 class GaussianCloud:
     """A loaded 3D Gaussian Splatting point cloud.

@@ -221,6 +221,36 @@ impl AssetServer {
         Uuid::new_v5(&MYTH_ASSET_NAMESPACE, signature.as_bytes())
     }
 
+    fn expected_image_byte_len(
+        width: u32,
+        height: u32,
+        depth_or_array_layers: u32,
+        format: PixelFormat,
+    ) -> Result<usize> {
+        let texel_count = u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|count| count.checked_mul(u64::from(depth_or_array_layers)))
+            .ok_or_else(|| {
+                Error::Asset(AssetError::InvalidData(
+                    "image dimensions overflow byte-length calculation".to_string(),
+                ))
+            })?;
+
+        let byte_len = texel_count
+            .checked_mul(u64::from(format.block_copy_size()))
+            .ok_or_else(|| {
+                Error::Asset(AssetError::InvalidData(
+                    "image byte-length overflowed u64".to_string(),
+                ))
+            })?;
+
+        usize::try_from(byte_len).map_err(|_| {
+            Error::Asset(AssetError::InvalidData(
+                "image byte-length does not fit in usize".to_string(),
+            ))
+        })
+    }
+
     // ── Image loading (fire-and-forget, URI-only deduplication) ─────────
 
     /// Loads a raw [`Image`] asset from the given URI, returning a handle
@@ -855,6 +885,66 @@ impl AssetServer {
         texture.color_space = ColorSpace::Linear;
         let handle = self.textures.add(texture);
         Ok(handle)
+    }
+
+    /// Creates a dynamic 2D RGBA8 texture backed by a reusable CPU buffer.
+    ///
+    /// This is intended for streaming workloads such as video frames or camera
+    /// feeds. The returned [`TextureHandle`] can be assigned to materials like
+    /// any other texture, while subsequent content updates can reuse the same
+    /// CPU allocation and GPU texture object.
+    pub fn create_dynamic_texture(
+        &self,
+        name: &str,
+        width: u32,
+        height: u32,
+        initial_bytes: Vec<u8>,
+        color_space: ColorSpace,
+        generate_mipmaps: bool,
+    ) -> Result<TextureHandle> {
+        let expected_len =
+            Self::expected_image_byte_len(width, height, 1, PixelFormat::Rgba8Unorm)?;
+        if initial_bytes.len() != expected_len {
+            return Err(Error::Asset(AssetError::InvalidData(format!(
+                "dynamic texture '{name}' expects {expected_len} bytes for {width}x{height} RGBA8 data, got {}",
+                initial_bytes.len()
+            ))));
+        }
+
+        let image = Image::new_dynamic(
+            width,
+            height,
+            1,
+            ImageDimension::D2,
+            PixelFormat::Rgba8Unorm,
+            initial_bytes,
+        );
+        let image_handle = self.images.add(image);
+
+        let mut texture = Texture::new_2d(Some(name), image_handle);
+        texture.color_space = color_space;
+        texture.generate_mipmaps = generate_mipmaps;
+        Ok(self.textures.add(texture))
+    }
+
+    /// Updates a dynamic texture's image bytes in place and bumps its version.
+    ///
+    /// The texture must have been created with [`create_dynamic_texture`](Self::create_dynamic_texture),
+    /// and `new_bytes` must match the original buffer length exactly.
+    pub fn update_dynamic_texture(&self, handle: TextureHandle, new_bytes: &[u8]) -> Result<u32> {
+        let texture = self.textures.get(handle).ok_or_else(|| {
+            Error::Asset(AssetError::NotFound(format!(
+                "dynamic texture handle {handle:?} is not loaded"
+            )))
+        })?;
+
+        self.images
+            .update_dynamic_data(texture.image, new_bytes)
+            .map_err(|err| {
+                Error::Asset(AssetError::InvalidData(format!(
+                    "dynamic texture update failed: {err}"
+                )))
+            })
     }
 
     // ========================================================================

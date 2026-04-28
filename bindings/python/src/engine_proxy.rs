@@ -3,7 +3,7 @@
 use pyo3::prelude::*;
 
 use crate::scene::PyScene;
-use crate::texture::PyTextureHandle;
+use crate::texture::{self, PyTextureHandle};
 use crate::with_engine;
 use myth_engine::SceneExt;
 
@@ -46,10 +46,7 @@ impl PyEngine {
         color_space: &str,
         generate_mipmaps: bool,
     ) -> PyResult<PyTextureHandle> {
-        let cs = match color_space {
-            "linear" | "Linear" => myth_engine::ColorSpace::Linear,
-            _ => myth_engine::ColorSpace::Srgb,
-        };
+        let cs = texture::parse_color_space(color_space);
 
         with_engine(|engine| {
             engine
@@ -61,6 +58,30 @@ impl PyEngine {
                         "Failed to load texture '{path}': {e}"
                     ))
                 })
+        })?
+    }
+
+    /// Create a dynamic RGBA8 texture that can be updated in place.
+    #[pyo3(signature = (name, width, height, data, color_space="srgb", generate_mipmaps=false))]
+    fn create_dynamic_texture(
+        &self,
+        name: &str,
+        width: u32,
+        height: u32,
+        data: &Bound<'_, PyAny>,
+        color_space: &str,
+        generate_mipmaps: bool,
+    ) -> PyResult<PyTextureHandle> {
+        with_engine(|engine| {
+            texture::create_dynamic_texture_for_engine(
+                engine,
+                name,
+                width,
+                height,
+                data,
+                color_space,
+                generate_mipmaps,
+            )
         })?
     }
 

@@ -379,10 +379,7 @@ impl PyMythRenderer {
         color_space: &str,
         generate_mipmaps: bool,
     ) -> PyResult<crate::texture::PyTextureHandle> {
-        let cs = match color_space {
-            "linear" | "Linear" => myth_engine::ColorSpace::Linear,
-            _ => myth_engine::ColorSpace::Srgb,
-        };
+        let cs = crate::texture::parse_color_space(color_space);
         let engine = self.engine_mut()?;
         engine
             .assets
@@ -393,6 +390,29 @@ impl PyMythRenderer {
                     "Failed to load texture '{path}': {e}"
                 ))
             })
+    }
+
+    /// Create a dynamic RGBA8 texture that can be updated in place.
+    #[pyo3(signature = (name, width, height, data, color_space="srgb", generate_mipmaps=false))]
+    fn create_dynamic_texture(
+        &mut self,
+        name: &str,
+        width: u32,
+        height: u32,
+        data: &Bound<'_, PyAny>,
+        color_space: &str,
+        generate_mipmaps: bool,
+    ) -> PyResult<crate::texture::PyTextureHandle> {
+        let engine = self.engine_mut()?;
+        crate::texture::create_dynamic_texture_for_engine(
+            engine,
+            name,
+            width,
+            height,
+            data,
+            color_space,
+            generate_mipmaps,
+        )
     }
 
     /// Load an HDR environment texture.

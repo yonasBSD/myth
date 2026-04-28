@@ -10,6 +10,7 @@ use myth::assets::AssetServer;
 use myth::assets::storage::{AssetStorage, DynamicImageUpdateError};
 use myth::resources::image::{DynamicImageError, Image, ImageDimension, PixelFormat};
 use myth::resources::Geometry;
+use myth::ColorSpace;
 use slotmap::new_key_type;
 use uuid::Uuid;
 
@@ -233,4 +234,32 @@ fn dynamic_image_update_rejects_size_mismatch() {
             actual: 2,
         })
     );
+}
+
+#[test]
+fn asset_server_dynamic_texture_updates_underlying_image() {
+    let server = AssetServer::new();
+    let texture_handle = server
+        .create_dynamic_texture(
+            "video",
+            2,
+            1,
+            vec![0, 1, 2, 3, 4, 5, 6, 7],
+            ColorSpace::Srgb,
+            false,
+        )
+        .unwrap();
+
+    let texture = server.textures.get(texture_handle).unwrap();
+    let image_handle = texture.image;
+    let before_version = server.images.get_version(image_handle).unwrap();
+
+    let next_version = server
+        .update_dynamic_texture(texture_handle, &[8, 9, 10, 11, 12, 13, 14, 15])
+        .unwrap();
+
+    assert_eq!(next_version, before_version + 1);
+    let image = server.images.get(image_handle).unwrap();
+    let data = image.data().unwrap();
+    assert_eq!(data.as_ref(), &[8, 9, 10, 11, 12, 13, 14, 15]);
 }

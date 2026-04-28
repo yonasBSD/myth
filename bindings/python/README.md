@@ -133,6 +133,7 @@ The `examples/` directory contains ready-to-run demos:
 | [`demo.py`](examples/demo.py) | Rotating cube, sphere, and ground with orbit controls |
 | [`earth.py`](examples/earth.py) | Textured Earth with normal maps, night lights, and clouds |
 | [`bloom_demo.py`](examples/bloom_demo.py) | HDR bloom with glTF model |
+| [`video_texture.py`](examples/video_texture.py) | Dynamic video frames streamed into a reusable texture |
 | [`shadows.py`](examples/shadows.py) | Directional light shadow mapping |
 | [`sponza.py`](examples/sponza.py) | Classic Sponza Atrium scene |
 | [`gltf_viewer.py`](examples/gltf_viewer.py) | General-purpose glTF/GLB viewer |
@@ -142,6 +143,8 @@ The `examples/` directory contains ready-to-run demos:
 
 ```bash
 python examples/demo.py
+pip install opencv-python
+python examples/video_texture.py
 python examples/gltf_viewer.py path/to/model.glb
 ```
 
