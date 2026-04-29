@@ -28,6 +28,8 @@ Also migrated major compute-heavy paths such as 3D Gaussian Splatting, atmospher
 
 ### Added
 - Added `#[myth::main]` macro for ergonomic application entry point definition, unifying entry points across Native and WASM platforms.
+- Added "dynamic image/texture" support, via `Image::new_dynamic` and `AssetServer::update_dynamic_texture`. This provides a simple API for real-time updating of texture content from CPU data (without allocation), ideal for video streaming, dynamic UI elements, or procedural textures.
+- Added some custom material examples to the Gallery, showcasing the use of custom shader code and material definitions.
 
 ### Fixed
 - Fixed an issue of UnlitMaterial UV transform not taking effect.
