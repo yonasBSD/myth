@@ -1,50 +1,66 @@
 //! [gallery]
 //! name = "Custom Material"
 //! category = "Materials"
-//! description = "Registers a custom WGSL shader template and visualises normals in world space."
+//! description = "Animated hologram material with custom uniforms, vertex displacement and transparent scan effects."
 //! order = 130
 //!
 
-//! Custom Material Example — Normal Visualization
+//! Custom Material Example — Hologram Energy Field
 //!
-//! Demonstrates the custom shader registration API by defining a material
-//! that visualises surface normals as RGB colours.
-//!
-//! Key steps shown:
-//! 1. Define a material struct with `#[myth_material(shader = "custom_normal")]`
-//! 2. Write a WGSL template that uses engine chunks (`vertex_output_def`,
-//!    `fragment_output_def`, `pack_fragment_output`)
-//! 3. Register the template at init time via `register_shader_template`
+//! Demonstrates a more advanced custom material by combining:
+//! 1. A custom material struct with several tweakable uniforms
+//! 2. A WGSL shader template with animated vertex displacement
+//! 3. View-dependent Fresnel glow, scan lines and procedural grids
+//! 4. Multiple material instances sharing one shader with different parameters
 
-use glam::Vec4;
+use std::f32::consts::FRAC_PI_2;
+
 use myth::prelude::*;
 use myth_resources::myth_material;
 
-// ── Custom WGSL Template ───────────────────────────────────────────────
-//
-// Embedded at compile-time.  The template engine resolves `{% include %}`
-// directives against the built-in chunk library, so `vertex_output`
-// and `fragment_output` work out of the box.
-
-const CUSTOM_NORMAL_SHADER: &str = r#"
+const HOLOGRAM_SHADER: &str = r#"
 {{ vertex_input_code }}
 {{ binding_code }}
 {$ include 'core/vertex_output' $}
 {$ include 'core/fragment_output' $}
 
+fn saturate(value: f32) -> f32 {
+    return clamp(value, 0.0, 1.0);
+}
+
+fn hash12(p: vec2<f32>) -> f32 {
+    let h = dot(p, vec2<f32>(127.1, 311.7));
+    return fract(sin(h) * 43758.5453123);
+}
+
 @vertex
-fn vs_main(in: VertexInput, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     var local_position = vec3<f32>(in.position.xyz);
+    var local_normal = vec3<f32>(0.0, 1.0, 0.0);
 
     $$ if HAS_NORMAL is defined
-    var local_normal = vec3<f32>(in.normal.xyz);
+    local_normal = normalize(vec3<f32>(in.normal.xyz));
     $$ endif
 
-    var local_pos = vec4<f32>(local_position, 1.0);
+    let time = u_render_state.time * u_material.pulse_speed;
+    let sweep = sin(local_position.y * u_material.scan_density - time * 2.4);
+    let radial = length(local_position.xz);
+    let ripple = sin(radial * (u_material.grid_scale * 2.0) - time * 3.5);
+    let glitch = hash12(local_position.xz * 8.0 + vec2<f32>(floor(u_render_state.time * 12.0), 0.0)) - 0.5;
+    let displacement =
+        (0.35 + 0.65 * sweep) * u_material.displacement +
+        ripple * u_material.displacement * 0.35 +
+        glitch * u_material.displacement * 0.12;
 
-    let world_pos = u_model.world_matrix * local_pos;
+    $$ if HAS_NORMAL is defined
+    local_position += local_normal * displacement;
+    $$ else
+    local_position.y += displacement;
+    $$ endif
+
+    let world_pos = u_model.world_matrix * vec4<f32>(local_position, 1.0);
     out.position = u_render_state.view_projection * world_pos;
     out.world_position = world_pos.xyz / world_pos.w;
 
@@ -63,91 +79,323 @@ fn vs_main(in: VertexInput, @builtin(vertex_index) vertex_index: u32) -> VertexO
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
-    // Map world-space normal from [-1,1] to [0,1] for visualisation.
+    let time = u_render_state.time * u_material.pulse_speed;
+    var normal = vec3<f32>(0.0, 1.0, 0.0);
+
     $$ if HAS_NORMAL is defined
-    let n = normalize(in.normal);
-    let color = vec4<f32>(n * 0.5 + 0.5, u_material.opacity);
-    $$ else
-    let color = vec4<f32>(0.5, 0.5, 1.0, u_material.opacity);
+    normal = normalize(in.normal);
     $$ endif
 
-    return pack_fragment_output(color * u_material.tint);
+    let view = normalize(u_render_state.camera_position - in.world_position);
+    let fresnel = pow(1.0 - saturate(dot(normal, view)), u_material.fresnel_power);
+
+    let scan = saturate(sin(in.world_position.y * u_material.scan_density - time * 6.0) * 0.5 + 0.5);
+    let radial = length(in.world_position.xz);
+    let rings = saturate(sin(radial * (u_material.grid_scale * 3.0) - time * 4.0) * 0.5 + 0.5);
+
+    $$ if HAS_UV is defined
+    let grid_uv = abs(fract(in.uv * u_material.grid_scale) - 0.5);
+    let grid = smoothstep(0.42, 0.5, max(grid_uv.x, grid_uv.y));
+    $$ else
+    let grid_uv = abs(fract(in.world_position.xz * u_material.grid_scale * 0.35) - 0.5);
+    let grid = smoothstep(0.42, 0.5, max(grid_uv.x, grid_uv.y));
+    $$ endif
+
+    let sparkle = hash12(
+        floor(in.world_position.xz * 12.0) + vec2<f32>(floor(time * 7.0), floor(in.world_position.y * 5.0))
+    );
+    let flicker = 0.88 + 0.12 * sin(time * 11.0 + in.world_position.y * 9.0);
+
+    let base = u_material.base_color.rgb * (0.18 + grid * 0.40 + rings * 0.18);
+    let sweep = u_material.scan_color.rgb * (scan * 0.65 + sparkle * 0.10);
+    let edge = u_material.edge_color.rgb * fresnel * u_material.fresnel_intensity;
+
+    let color = (base + sweep + edge) * flicker;
+    let alpha = saturate(
+        u_material.opacity * (0.14 + grid * 0.24 + rings * 0.14 + scan * 0.20 + fresnel * 0.72)
+    );
+
+    if (alpha < u_material.alpha_test) {
+        discard;
+    }
+
+    return pack_fragment_output(vec4<f32>(color, alpha));
 }
 "#;
 
-// ── Material Definition ────────────────────────────────────────────────
+#[myth_material(shader = "hologram_energy")]
+pub struct HologramMaterial {
+    /// Main body color of the hologram.
+    #[uniform(default = "Vec4::new(0.08, 0.78, 1.15, 1.0)")]
+    pub base_color: Vec4,
 
-#[myth_material(shader = "custom_normal")]
-pub struct NormalMaterial {
-    /// Tint color multiplied with the normal visualisation.
-    #[uniform(default = "Vec4::ONE")]
-    pub tint: Vec4,
+    /// Fresnel edge glow color.
+    #[uniform(default = "Vec4::new(0.85, 0.98, 1.35, 1.0)")]
+    pub edge_color: Vec4,
 
-    /// Opacity value.
-    #[uniform(default = "1.0")]
+    /// Moving scan-line accent color.
+    #[uniform(default = "Vec4::new(0.10, 0.58, 1.30, 1.0)")]
+    pub scan_color: Vec4,
+
+    /// Overall transparency.
+    #[uniform(default = "0.92")]
     pub opacity: f32,
 
-    /// Alpha test threshold.
+    /// Optional alpha cutoff.
     #[uniform]
     pub alpha_test: f32,
+
+    /// Density of the procedural grid pattern.
+    #[uniform(default = "8.0")]
+    pub grid_scale: f32,
+
+    /// Density of the vertical scan effect.
+    #[uniform(default = "13.0")]
+    pub scan_density: f32,
+
+    /// Animation speed multiplier.
+    #[uniform(default = "2.4")]
+    pub pulse_speed: f32,
+
+    /// Fresnel falloff exponent.
+    #[uniform(default = "4.0")]
+    pub fresnel_power: f32,
+
+    /// Fresnel glow strength.
+    #[uniform(default = "1.8")]
+    pub fresnel_intensity: f32,
+
+    /// Vertex displacement amplitude.
+    #[uniform(default = "0.12")]
+    pub displacement: f32,
 }
 
-impl NormalMaterial {
+impl HologramMaterial {
     #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(NormalUniforms::default())
+    pub fn new(base_color: Vec4, edge_color: Vec4, scan_color: Vec4) -> Self {
+        Self::from_uniforms(HologramUniforms {
+            base_color,
+            edge_color,
+            scan_color,
+            ..Default::default()
+        })
     }
 
     #[must_use]
-    pub fn with_tint(self, tint: Vec4) -> Self {
-        self.uniforms.write().tint = tint;
+    pub fn with_opacity(self, opacity: f32) -> Self {
+        self.uniforms.write().opacity = opacity;
+        self
+    }
+
+    #[must_use]
+    pub fn with_grid_scale(self, grid_scale: f32) -> Self {
+        self.uniforms.write().grid_scale = grid_scale;
+        self
+    }
+
+    #[must_use]
+    pub fn with_scan_density(self, scan_density: f32) -> Self {
+        self.uniforms.write().scan_density = scan_density;
+        self
+    }
+
+    #[must_use]
+    pub fn with_pulse_speed(self, pulse_speed: f32) -> Self {
+        self.uniforms.write().pulse_speed = pulse_speed;
+        self
+    }
+
+    #[must_use]
+    pub fn with_displacement(self, displacement: f32) -> Self {
+        self.uniforms.write().displacement = displacement;
+        self
+    }
+
+    #[must_use]
+    pub fn with_fresnel(self, power: f32, intensity: f32) -> Self {
+        let mut uniforms = self.uniforms.write();
+        uniforms.fresnel_power = power;
+        uniforms.fresnel_intensity = intensity;
+        drop(uniforms);
+        self
+    }
+
+    #[must_use]
+    pub fn with_side(self, side: Side) -> Self {
+        self.set_side(side);
+        self
+    }
+
+    #[must_use]
+    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
+        self.set_alpha_mode(mode);
+        self
+    }
+
+    #[must_use]
+    pub fn with_depth_write(self, enabled: bool) -> Self {
+        self.set_depth_write(enabled);
         self
     }
 }
 
-impl Default for NormalMaterial {
+impl Default for HologramMaterial {
     fn default() -> Self {
-        Self::new()
+        Self::from_uniforms(HologramUniforms::default())
     }
 }
 
-// ── Application ────────────────────────────────────────────────────────
-
 struct CustomMaterialDemo {
+    core_node: NodeHandle,
+    satellite_box: NodeHandle,
+    satellite_sphere: NodeHandle,
     controls: OrbitControls,
+    time: f32,
 }
 
 impl AppHandler for CustomMaterialDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        // 1. Register the custom shader template
         engine
             .renderer
-            .register_shader_template("custom_normal", CUSTOM_NORMAL_SHADER);
+            .register_shader_template("hologram_energy", HOLOGRAM_SHADER);
 
-        // 2. Build the scene
         let scene = engine.scene_manager.create_active();
 
-        // Spawn a sphere with the custom normal-visualisation material
-        let mat = Material::new_custom(NormalMaterial::new());
-        scene.spawn_sphere(2.0, mat, &engine.assets);
-
-        // Camera
-        let cam = scene.add_camera(Camera::new_perspective(45.0, 1280.0 / 720.0, 0.1));
+        let ground = scene.spawn_plane(
+            18.0,
+            18.0,
+            PhongMaterial::new(Vec4::new(0.05, 0.07, 0.11, 1.0)).with_side(Side::Double),
+            &engine.assets,
+        );
         scene
-            .node(&cam)
-            .set_position(0.0, 2.0, 6.0)
-            .look_at(Vec3::ZERO);
-        scene.active_camera = Some(cam);
+            .node(&ground)
+            .set_position(0.0, -0.05, 0.0)
+            .set_rotation(Quat::from_rotation_x(-FRAC_PI_2));
+
+        let key_light = scene.add_light(Light::new_directional(Vec3::new(0.85, 0.92, 1.0), 3.5));
+        scene
+            .node(&key_light)
+            .set_position(6.0, 10.0, 4.0)
+            .look_at(Vec3::new(0.0, 1.4, 0.0));
+
+        let fill_light = scene.add_light(Light::new_directional(Vec3::new(0.2, 0.35, 0.7), 1.1));
+        scene
+            .node(&fill_light)
+            .set_position(-5.0, 4.0, -8.0)
+            .look_at(Vec3::new(0.0, 1.2, 0.0));
+
+        let core_node = scene.spawn_sphere(
+            1.55,
+            Material::new_custom(
+                HologramMaterial::default()
+                    .with_grid_scale(10.0)
+                    .with_scan_density(15.0)
+                    .with_pulse_speed(2.1)
+                    .with_displacement(0.18)
+                    .with_fresnel(3.2, 2.4)
+                    .with_opacity(0.92)
+                    .with_side(Side::Double)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false),
+            ),
+            &engine.assets,
+        );
+        scene.node(&core_node).set_position(0.0, 1.55, 0.0);
+
+        let satellite_box = scene.spawn_box(
+            0.85,
+            2.6,
+            0.85,
+            Material::new_custom(
+                HologramMaterial::new(
+                    Vec4::new(1.00, 0.18, 0.55, 1.0),
+                    Vec4::new(1.30, 0.75, 1.00, 1.0),
+                    Vec4::new(0.75, 0.10, 0.95, 1.0),
+                )
+                .with_grid_scale(6.0)
+                .with_scan_density(18.0)
+                .with_pulse_speed(3.4)
+                .with_displacement(0.10)
+                .with_fresnel(4.8, 1.7)
+                .with_opacity(0.78)
+                .with_side(Side::Double)
+                .with_alpha_mode(AlphaMode::Blend)
+                .with_depth_write(false),
+            ),
+            &engine.assets,
+        );
+        scene.node(&satellite_box).set_position(-3.2, 1.4, 0.0);
+
+        let satellite_sphere = scene.spawn_sphere(
+            0.9,
+            Material::new_custom(
+                HologramMaterial::new(
+                    Vec4::new(0.10, 1.05, 0.68, 1.0),
+                    Vec4::new(0.95, 1.45, 1.10, 1.0),
+                    Vec4::new(0.15, 0.95, 0.55, 1.0),
+                )
+                .with_grid_scale(9.0)
+                .with_scan_density(11.0)
+                .with_pulse_speed(2.8)
+                .with_displacement(0.14)
+                .with_fresnel(2.8, 2.1)
+                .with_opacity(0.84)
+                .with_side(Side::Double)
+                .with_alpha_mode(AlphaMode::Blend)
+                .with_depth_write(false),
+            ),
+            &engine.assets,
+        );
+        scene.node(&satellite_sphere).set_position(3.0, 1.25, -0.8);
+
+        let camera = scene.add_camera(Camera::new_perspective(45.0, 16.0 / 9.0, 0.1));
+        scene
+            .node(&camera)
+            .set_position(0.0, 2.8, 8.5)
+            .look_at(Vec3::new(0.0, 1.4, 0.0));
+        scene.active_camera = Some(camera);
 
         Self {
-            controls: OrbitControls::new(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO),
+            core_node,
+            satellite_box,
+            satellite_sphere,
+            controls: OrbitControls::new(Vec3::new(0.0, 2.8, 8.5), Vec3::new(0.0, 1.4, 0.0)),
+            time: 0.0,
         }
     }
 
     fn update(&mut self, engine: &mut Engine, _window: &dyn Window, frame: &FrameState) {
+        self.time += frame.dt;
+
         let Some(scene) = engine.scene_manager.active_scene_mut() else {
             return;
         };
+
+        let orbit_a = self.time * 0.85;
+        let orbit_b = -self.time * 1.15;
+
+        scene
+            .node(&self.core_node)
+            .set_rotation(Quat::from_rotation_y(self.time * 0.45));
+
+        scene
+            .node(&self.satellite_box)
+            .set_position(
+                orbit_a.cos() * 3.1,
+                1.35 + (self.time * 1.7).sin() * 0.35,
+                orbit_a.sin() * 3.1,
+            )
+            .set_rotation(Quat::from_rotation_x(self.time * 1.4) * Quat::from_rotation_z(self.time * 0.9));
+
+        scene
+            .node(&self.satellite_sphere)
+            .set_position(
+                orbit_b.cos() * 2.2,
+                1.15 + (self.time * 2.3).sin() * 0.25,
+                orbit_b.sin() * 2.2,
+            )
+            .set_rotation(Quat::from_rotation_y(-self.time * 1.1) * Quat::from_rotation_x(self.time * 0.7));
+
         if let Some((transform, camera)) = scene.query_main_camera_bundle() {
             self.controls
                 .update(transform, &engine.input, camera.fov(), frame.dt);
