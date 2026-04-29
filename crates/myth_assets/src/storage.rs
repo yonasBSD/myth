@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
-use myth_resources::image::{DynamicImageError, Image};
 use myth_resources::ImageHandle;
+use myth_resources::image::{DynamicImageError, Image};
 
 /// Failure modes for zero-allocation dynamic image updates in [`AssetStorage`].
 #[derive(Debug, Clone, PartialEq, Eq)]

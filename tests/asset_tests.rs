@@ -6,11 +6,11 @@
 //! - Thread safety: concurrent reads via RwLock
 //! - AssetServer construction and storage access
 
+use myth::ColorSpace;
 use myth::assets::AssetServer;
 use myth::assets::storage::{AssetStorage, DynamicImageUpdateError};
-use myth::resources::image::{DynamicImageError, Image, ImageDimension, PixelFormat};
 use myth::resources::Geometry;
-use myth::ColorSpace;
+use myth::resources::image::{DynamicImageError, Image, ImageDimension, PixelFormat};
 use slotmap::new_key_type;
 use uuid::Uuid;
 
@@ -205,7 +205,10 @@ fn dynamic_image_update_rejects_static_images() {
         Some(vec![1, 2, 3, 4]),
     ));
 
-    let err = server.images.update_dynamic_data(handle, &[5, 6, 7, 8]).unwrap_err();
+    let err = server
+        .images
+        .update_dynamic_data(handle, &[5, 6, 7, 8])
+        .unwrap_err();
 
     assert_eq!(
         err,
@@ -225,7 +228,10 @@ fn dynamic_image_update_rejects_size_mismatch() {
         vec![1, 2, 3, 4],
     ));
 
-    let err = server.images.update_dynamic_data(handle, &[9, 10]).unwrap_err();
+    let err = server
+        .images
+        .update_dynamic_data(handle, &[9, 10])
+        .unwrap_err();
 
     assert_eq!(
         err,

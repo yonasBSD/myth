@@ -385,7 +385,9 @@ impl AppHandler for CustomMaterialDemo {
                 1.35 + (self.time * 1.7).sin() * 0.35,
                 orbit_a.sin() * 3.1,
             )
-            .set_rotation(Quat::from_rotation_x(self.time * 1.4) * Quat::from_rotation_z(self.time * 0.9));
+            .set_rotation(
+                Quat::from_rotation_x(self.time * 1.4) * Quat::from_rotation_z(self.time * 0.9),
+            );
 
         scene
             .node(&self.satellite_sphere)
@@ -394,7 +396,9 @@ impl AppHandler for CustomMaterialDemo {
                 1.15 + (self.time * 2.3).sin() * 0.25,
                 orbit_b.sin() * 2.2,
             )
-            .set_rotation(Quat::from_rotation_y(-self.time * 1.1) * Quat::from_rotation_x(self.time * 0.7));
+            .set_rotation(
+                Quat::from_rotation_y(-self.time * 1.1) * Quat::from_rotation_x(self.time * 0.7),
+            );
 
         if let Some((transform, camera)) = scene.query_main_camera_bundle() {
             self.controls

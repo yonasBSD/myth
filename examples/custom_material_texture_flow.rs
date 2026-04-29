@@ -334,13 +334,15 @@ impl AppHandler for TextureFlowDemo {
             return;
         };
 
-        scene.node(&self.panel_left).set_rotation(
-            Quat::from_rotation_y(0.38 + (self.time * 0.8).sin() * 0.12),
-        );
+        scene
+            .node(&self.panel_left)
+            .set_rotation(Quat::from_rotation_y(0.38 + (self.time * 0.8).sin() * 0.12));
 
-        scene.node(&self.panel_right).set_rotation(
-            Quat::from_rotation_y(-0.42 + (self.time * 0.9).cos() * 0.14),
-        );
+        scene
+            .node(&self.panel_right)
+            .set_rotation(Quat::from_rotation_y(
+                -0.42 + (self.time * 0.9).cos() * 0.14,
+            ));
 
         scene.node(&self.center_box).set_rotation(
             Quat::from_rotation_y(self.time * 0.9) * Quat::from_rotation_x(self.time * 0.35),

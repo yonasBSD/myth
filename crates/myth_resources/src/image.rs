@@ -163,7 +163,7 @@ impl Deref for ImageDataRef<'_> {
 
 impl AsRef<[u8]> for ImageDataRef<'_> {
     fn as_ref(&self) -> &[u8] {
-        self.deref()
+        self
     }
 }
 
@@ -181,7 +181,10 @@ impl std::fmt::Display for DynamicImageError {
             Self::MissingData => f.write_str("image has no resident CPU data"),
             Self::NotDynamic => f.write_str("image was not created with Image::new_dynamic"),
             Self::SizeMismatch { expected, actual } => {
-                write!(f, "image byte length mismatch: expected {expected}, got {actual}")
+                write!(
+                    f,
+                    "image byte length mismatch: expected {expected}, got {actual}"
+                )
             }
         }
     }
