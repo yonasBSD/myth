@@ -25,7 +25,7 @@ use crate::window::Window;
 ///
 /// 1. [`init`](Self::init) - Called once when the window and renderer are ready
 /// 2. [`update`](Self::update) - Called each frame before rendering
-/// 3. [`compose_frame`](Self::compose_frame) - Called to configure the render pipeline
+/// 3. [`render`](Self::render) - Called to render the frame or customize the frame graph
 ///
 /// # Input Handling
 ///
@@ -69,14 +69,15 @@ pub trait AppHandler: Sized + 'static {
     #[allow(unused_variables)]
     fn update(&mut self, engine: &mut Engine, window: &dyn Window, frame: &FrameState) {}
 
-    /// Configures the render pipeline for this frame.
+    /// Renders the current frame.
     ///
-    /// Override this method to add custom render passes (UI, post-processing, etc.)
-    /// via the hook-based API. The default implementation only renders the built-in
-    /// pipeline (BasicForward or HighFidelity depending on `RenderPath`).
-    // fn compose_frame<'a>(&'a mut self, composer: FrameComposer<'a>) {
-    //     composer.render();
-    // }
+    /// Override this method when you need to customize the built-in frame graph.
+    /// The common pattern is to call `engine.compose_frame()`, inject any custom
+    /// passes via `FrameComposer::add_custom_pass(...)`, then finish with
+    /// `composer.render()`.
+    ///
+    /// The default implementation renders the active scene with the built-in
+    /// pipeline selected by the current `RenderPath`.
     #[allow(unused_variables)]
     fn render(&mut self, engine: &mut Engine, window: &dyn Window) {
         engine.render_active_scene();

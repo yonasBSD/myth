@@ -130,7 +130,6 @@ class Renderer:
         self,
         render_path: Union[str, RenderPath] = ...,
         vsync: bool = True,
-        clear_color: list[float] = ...,
     ) -> None: ...
     def init_with_handle(
         self,
@@ -150,7 +149,7 @@ class Renderer:
         """
         ...
 
-    def resize(self, width: int, height: int, scale_factor: float = 1.0) -> None:
+    def resize(self, width: int, height: int) -> None:
         """Notify the renderer that the window has been resized."""
         ...
 
@@ -893,7 +892,7 @@ class Object3D:
 
     @property
     def rotation_euler(self) -> list[float]:
-        """Euler rotation in radians as ``[x, y, z]`` (XYZ order)."""
+        """Euler rotation in degrees as ``[x, y, z]`` (XYZ order)."""
         ...
 
     @rotation_euler.setter

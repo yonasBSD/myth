@@ -2,7 +2,6 @@
 //! name = "Cube Wave"
 //! category = "Showcase"
 //! description = "A classic wave-field of animated cubes that highlights transform updates, lighting, and scene scale."
-//! instructions = "Mouse drag: orbit camera\nMouse wheel: zoom"
 //! order = 160
 //!
 

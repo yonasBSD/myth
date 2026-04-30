@@ -2,7 +2,7 @@
 //! name = "Skybox & Backgrounds"
 //! category = "Environment"
 //! description = "Compares solid, gradient, panoramic, cubemap, and procedural background modes."
-//! instructions = "1 — Solid color (hardware clear)\n2 — Gradient (procedural sky)\n3 — Planar Texture\n4 — Equirectangular HDR panorama\n5 — Cubemap Skybox\n6 — Procedural Sky (Hillaire 2020)\nH — Toggle HighFidelity/BasicForward\nMouse drag / Scroll — Orbit / Zoom"
+//! instructions = "1 — Solid color (hardware clear)\n2 — Gradient\n3 — Planar Texture\n4 — Equirectangular HDR panorama\n5 — Cubemap Skybox\n6 — Procedural Sky (Hillaire 2020)\nH — Toggle HighFidelity/BasicForward"
 //! order = 220
 //!
 
@@ -100,7 +100,7 @@ impl SkyboxDemo {
         println!("║          Skybox Demo Controls         ║");
         println!("╠═══════════════════════════════════════╣");
         println!("║  1 — Solid color (hardware clear)     ║");
-        println!("║  2 — Gradient (procedural sky)        ║");
+        println!("║  2 — Gradient                         ║");
         println!("║  3 — Planar Texture                   ║");
         println!("║  4 — Equirectangular HDR panorama     ║");
         println!("║  5 — Cubemap Skybox                   ║");

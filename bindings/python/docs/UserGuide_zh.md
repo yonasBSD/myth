@@ -1,37 +1,37 @@
-# Myth Engine Python User Guide
+# Myth Engine Python 用户指南
 
-This guide follows the current Python binding surface exposed by myth and the examples under bindings/python/examples.
+本指南基于当前 myth Python 绑定的真实公开接口编写，并以 bindings/python/examples 下的示例作为参照。
 
-Use this document together with [API.md](API.md) when you want concrete signatures and object names.
-
----
-
-## 1. Runtime Model
-
-The current Python API is easiest to understand as five layers:
-
-1. App: built-in window and event loop.
-2. Renderer: external-window or headless runtime.
-3. Engine: callback-time proxy for scene creation and asset loading.
-4. Scene: active-scene proxy for cameras, lights, environment, and animation.
-5. Object3D: scene node handle with transform helpers and component proxies.
-
-Two practical rules matter immediately:
-
-- App and Renderer default to the basic render path if you omit render_path.
-- Advanced effects such as bloom, tone mapping, SSAO, and Gaussian splatting should use RenderPath.HIGH_FIDELITY explicitly.
+如果你需要查精确签名和属性名，请配合 [API_zh.md](API_zh.md) 阅读。
 
 ---
 
-## 2. Installation
+## 1. 运行模型
 
-### From PyPI
+当前 Python API 最容易按下面五层理解：
+
+1. App：内置窗口和事件循环。
+2. Renderer：外部窗口或 headless 运行时。
+3. Engine：回调期间用于建场景和加载资产的代理。
+4. Scene：当前活动场景的相机、灯光、环境与动画入口。
+5. Object3D：带变换助手和组件代理的场景节点句柄。
+
+先记住两条规则：
+
+- App 和 Renderer 在不传 render_path 时默认走基础渲染路径。
+- bloom、色调映射、SSAO、Gaussian splatting 这类能力应显式使用 RenderPath.HIGH_FIDELITY。
+
+---
+
+## 2. 安装
+
+### 直接安装
 
 ```bash
 pip install myth-py
 ```
 
-### From source
+### 从源码构建
 
 ```bash
 git clone https://github.com/panxinmiao/myth.git
@@ -40,13 +40,13 @@ pip install maturin
 maturin develop --release
 ```
 
-The bindings currently target Python 3.10+.
+当前绑定面向 Python 3.10+。
 
 ---
 
-## 3. Quick Start with App
+## 3. 用 App 快速启动
 
-App is the shortest path to a running scene.
+App 是最直接的入口。
 
 ```python
 import myth
@@ -93,20 +93,20 @@ def on_update(ctx: myth.Engine, frame: myth.FrameState) -> None:
 app.run()
 ```
 
-The important parts are:
+这里最关键的是：
 
-- create the scene inside @app.init
-- assign scene.active_camera before rendering
-- use frame.dt for motion and controller updates
-- use RenderPath.HIGH_FIDELITY when you want post-processing
+- 在 @app.init 中创建场景
+- 在渲染前设置 scene.active_camera
+- 用 frame.dt 驱动动画与控制器
+- 需要后处理时显式选择 RenderPath.HIGH_FIDELITY
 
 ---
 
-## 4. Building Scenes
+## 4. 场景构建
 
-### Meshes
+### 网格
 
-Use Scene.add_mesh(...) with a geometry object and a material object:
+通过 Scene.add_mesh(...) 传入几何体与材质对象：
 
 ```python
 box = scene.add_mesh(
@@ -120,22 +120,22 @@ sphere = scene.add_mesh(
 )
 ```
 
-Built-in geometry classes:
+内置几何体类型：
 
 - BoxGeometry
 - SphereGeometry
 - PlaneGeometry
-- Geometry for custom vertex/index buffers
+- Geometry，用于自定义顶点/索引数据
 
-Built-in material classes:
+内置材质类型：
 
 - UnlitMaterial
 - PhongMaterial
 - PhysicalMaterial
 
-### Cameras and lights
+### 相机与灯光
 
-All cameras and lights are attached to Object3D nodes.
+相机和灯光都挂在 Object3D 节点上：
 
 ```python
 camera = scene.add_camera(myth.PerspectiveCamera(fov=45.0, near=0.1))
@@ -148,11 +148,11 @@ sun.position = [4.0, 6.0, 2.0]
 sun.look_at([0.0, 0.0, 0.0])
 ```
 
-If scene.active_camera is never assigned, the scene will update but nothing will be drawn.
+如果没有给 scene.active_camera 赋值，场景逻辑会照常运行，但不会有任何画面输出。
 
-### Background, environment, and post-processing
+### 背景、环境与后处理
 
-Current convenience methods on Scene include:
+当前 Scene 上常用的便捷方法包括：
 
 - set_background_color(r, g, b)
 - set_environment_map(texture)
@@ -162,7 +162,7 @@ Current convenience methods on Scene include:
 - set_tone_mapping(...)
 - set_ssao_*...
 
-Typical high-fidelity setup:
+典型的高保真设置：
 
 ```python
 scene.set_background_color(0.04, 0.05, 0.08)
@@ -171,23 +171,23 @@ scene.set_tone_mapping("agx", exposure=1.0)
 scene.set_ssao_enabled(True)
 ```
 
-### Transform conventions
+### 变换约定
 
-Object3D exposes both radians and degrees, but they are not interchangeable:
+Object3D 同时暴露弧度和角度接口，但两者不可混用：
 
-- node.rotation uses radians.
-- node.rotation_euler uses degrees.
+- node.rotation 用弧度。
+- node.rotation_euler 用角度。
 
-Common helpers:
+常用助手：
 
 - set_uniform_scale(...)
-- rotate_x(...), rotate_y(...), rotate_z(...)
-- rotate_world_x(...), rotate_world_y(...), rotate_world_z(...)
+- rotate_x(...)、rotate_y(...)、rotate_z(...)
+- rotate_world_x(...)、rotate_world_y(...)、rotate_world_z(...)
 - look_at(...)
 
-### Orbit controls
+### OrbitControls
 
-OrbitControls follows the current scene camera node directly:
+OrbitControls 直接控制相机节点：
 
 ```python
 orbit = myth.OrbitControls(position=[0.0, 2.0, 5.0], target=[0.0, 0.0, 0.0])
@@ -197,11 +197,11 @@ def on_update(ctx: myth.Engine, frame: myth.FrameState) -> None:
     orbit.update(camera_node, frame.dt)
 ```
 
-The controller works with the camera Object3D, not the camera component proxy.
+控制器接收的是相机对应的 Object3D，不是相机组件代理。
 
-### Component proxies
+### 组件代理
 
-Nodes expose live typed component proxies:
+节点可直接暴露实时组件代理：
 
 ```python
 if camera.camera:
@@ -214,13 +214,13 @@ if cube_node.mesh:
     cube_node.mesh.cast_shadows = True
 ```
 
-This is the preferred way to inspect or tune an attached component after node creation.
+这是在节点创建之后继续微调相机、灯光和网格组件的推荐方式。
 
 ---
 
-## 5. Loading Assets
+## 5. 资产加载
 
-### Textures and HDR environments
+### 普通纹理与 HDR 环境贴图
 
 ```python
 albedo = ctx.load_texture("assets/albedo.png", color_space="srgb", generate_mipmaps=True)
@@ -231,31 +231,31 @@ scene.set_environment_map(hdr)
 scene.set_environment_intensity(1.0)
 ```
 
-Use srgb for color textures and linear for data textures such as normal maps.
+颜色纹理用 srgb，法线贴图等数据纹理用 linear。
 
-### glTF and animation
+### glTF 与动画
 
 ```python
 root = ctx.load_gltf("assets/helmet.glb")
 scene.play_if_any_animation(root)
 ```
 
-Animation helpers on Scene:
+Scene 上的动画助手：
 
 - play_animation(node, name)
 - play_if_any_animation(node)
 - list_animations(node)
 - get_animation_mixer(node)
 
-Reference examples:
+参考示例：
 
 - [../examples/gltf_viewer.py](../examples/gltf_viewer.py)
 - [../examples/sponza.py](../examples/sponza.py)
 - [../examples/morph.py](../examples/morph.py)
 
-### Dynamic textures
+### 动态纹理
 
-The current bindings expose a direct dynamic-texture workflow for video frames, CPU effects, and GUI surfaces:
+当前绑定已经直接提供视频帧、CPU 特效和 GUI 表面的动态纹理工作流：
 
 ```python
 texture = ctx.create_dynamic_texture(
@@ -269,20 +269,20 @@ texture = ctx.create_dynamic_texture(
 texture.update_data(next_rgba_bytes)
 ```
 
-Accepted buffers include:
+支持的缓冲包括：
 
 - bytes
 - bytearray
 - memoryview
-- C-contiguous uint8 arrays such as NumPy RGBA buffers
+- NumPy 等提供的 C 连续 uint8 RGBA 缓冲
 
-Reference example:
+参考示例：
 
 - [../examples/video_texture.py](../examples/video_texture.py)
 
-### 3D Gaussian splatting
+### 3D Gaussian Splatting
 
-The bindings now expose Gaussian cloud loading and scene attachment directly:
+绑定层现在已经直接暴露 Gaussian cloud 加载与挂场景能力：
 
 ```python
 cloud = ctx.load_gaussian_npz("assets/point_cloud.npz")
@@ -292,17 +292,17 @@ node = scene.add_gaussian_cloud("gaussian_cloud", cloud)
 node.rotation_euler = [90.0, 0.0, 0.0]
 ```
 
-Use RenderPath.HIGH_FIDELITY for these scenes.
+这类场景应使用 RenderPath.HIGH_FIDELITY。
 
-Reference example:
+参考示例：
 
 - [../examples/gaussian_splatting.py](../examples/gaussian_splatting.py)
 
 ---
 
-## 6. Renderer Mode and External Windows
+## 6. Renderer 模式与外部窗口
 
-Use Renderer when another toolkit owns the window.
+当窗口由别的 GUI 框架持有时，使用 Renderer。
 
 ```python
 import myth
@@ -320,13 +320,13 @@ while running:
 renderer.dispose()
 ```
 
-Important responsibilities in this mode:
+此模式下你需要自己负责：
 
-- forward resize events with renderer.resize(width, height)
-- inject keyboard and mouse input with inject_* methods
-- drive the render loop yourself via update(), render(), or frame()
+- 在窗口尺寸变化时调用 renderer.resize(width, height)
+- 用 inject_* 方法转发键盘和鼠标事件
+- 通过 update()、render() 或 frame() 自己驱动主循环
 
-Reference examples:
+参考示例：
 
 - [../examples/glfw_demo.py](../examples/glfw_demo.py)
 - [../examples/pyside_demo.py](../examples/pyside_demo.py)
@@ -334,32 +334,32 @@ Reference examples:
 
 ---
 
-## 7. Headless Rendering and Readback
+## 7. Headless 渲染与回读
 
-### Simple headless rendering
+### 简单离屏渲染
 
 ```python
 renderer = myth.Renderer(render_path=myth.RenderPath.HIGH_FIDELITY)
 renderer.init_headless(1280, 720)
 
 scene = renderer.create_scene()
-# build scene
+# 构建场景
 
 renderer.frame(1.0 / 60.0)
 pixels = renderer.readback_pixels()
 renderer.dispose()
 ```
 
-This is the simplest path for exporters, tests, and one-shot renders.
+这条路径适合导出器、测试和一次性截图。
 
-Reference examples:
+参考示例：
 
 - [../examples/headless_simple_test.py](../examples/headless_simple_test.py)
 - [../examples/headless_readback_test.py](../examples/headless_readback_test.py)
 
-### Streaming readback
+### 流式回读
 
-For continuous capture, use ReadbackStream:
+连续抓帧时使用 ReadbackStream：
 
 ```python
 renderer = myth.Renderer(render_path=myth.RenderPath.HIGH_FIDELITY)
@@ -381,23 +381,23 @@ for frame in stream.flush(renderer):
     consume(frame["pixels"], frame["frame_index"])
 ```
 
-Reference example:
+参考示例：
 
 - [../examples/headless_stream_test.py](../examples/headless_stream_test.py)
 
 ---
 
-## 8. Input and Frame Logic
+## 8. 输入与逐帧逻辑
 
-FrameState exposes the current timing information:
+FrameState 暴露当前帧时序信息：
 
-- frame.delta_time and frame.dt
-- frame.elapsed and frame.time
+- frame.delta_time 与 frame.dt
+- frame.elapsed 与 frame.time
 - frame.frame_count
 
-Engine.input and Renderer.input expose the input proxy. In external-window mode you populate it with the inject_* methods on Renderer.
+Engine.input 和 Renderer.input 暴露输入状态代理。外部窗口模式下，需要靠 Renderer 的 inject_* 方法把事件灌进去。
 
-Typical pattern:
+典型模式：
 
 ```python
 @app.update
@@ -413,32 +413,32 @@ def on_update(ctx: myth.Engine, frame: myth.FrameState) -> None:
 
 ---
 
-## 9. Example Roadmap
+## 9. 示例阅读顺序
 
-These examples match the current public binding surface best:
+下面这些示例最贴近当前公开绑定接口：
 
-| Example | Coverage |
+| 示例 | 覆盖内容 |
 | --- | --- |
-| [../examples/demo.py](../examples/demo.py) | Core scene setup, mesh creation, orbit controls |
-| [../examples/earth.py](../examples/earth.py) | Textures and layered scene composition |
-| [../examples/bloom_demo.py](../examples/bloom_demo.py) | High-fidelity post-processing |
-| [../examples/video_texture.py](../examples/video_texture.py) | Dynamic texture updates |
+| [../examples/demo.py](../examples/demo.py) | 基础场景、网格创建、轨道控制 |
+| [../examples/earth.py](../examples/earth.py) | 纹理与分层场景构建 |
+| [../examples/bloom_demo.py](../examples/bloom_demo.py) | 高保真后处理 |
+| [../examples/video_texture.py](../examples/video_texture.py) | 动态纹理更新 |
 | [../examples/gaussian_splatting.py](../examples/gaussian_splatting.py) | Gaussian splatting |
-| [../examples/shadows.py](../examples/shadows.py) | Light setup and shadow toggles |
-| [../examples/gltf_viewer.py](../examples/gltf_viewer.py) | General GLB viewer |
-| [../examples/glfw_demo.py](../examples/glfw_demo.py) | External window integration |
-| [../examples/pyside_demo.py](../examples/pyside_demo.py) | Qt embedding |
-| [../examples/rendercanvas_demo.py](../examples/rendercanvas_demo.py) | rendercanvas embedding |
-| [../examples/headless_simple_test.py](../examples/headless_simple_test.py) | Minimal offscreen render |
-| [../examples/headless_stream_test.py](../examples/headless_stream_test.py) | Streaming readback |
+| [../examples/shadows.py](../examples/shadows.py) | 灯光与阴影开关 |
+| [../examples/gltf_viewer.py](../examples/gltf_viewer.py) | 通用 GLB 查看器 |
+| [../examples/glfw_demo.py](../examples/glfw_demo.py) | 外部窗口集成 |
+| [../examples/pyside_demo.py](../examples/pyside_demo.py) | Qt 嵌入 |
+| [../examples/rendercanvas_demo.py](../examples/rendercanvas_demo.py) | rendercanvas 嵌入 |
+| [../examples/headless_simple_test.py](../examples/headless_simple_test.py) | 最小离屏渲染 |
+| [../examples/headless_stream_test.py](../examples/headless_stream_test.py) | 流式回读 |
 
 ---
 
-## 10. Common Pitfalls
+## 10. 常见问题
 
-- No active camera means the scene updates but nothing is rendered.
-- rotation is radians while rotation_euler is degrees.
-- App and Renderer default to the basic render path if render_path is omitted.
-- TextureHandle.update_data(...) only works for textures created through create_dynamic_texture(...).
-- In external-window mode, forgetting renderer.resize(...) or input injection usually looks like a camera or viewport bug.
-- For headless streaming loops, call renderer.poll_device() so completed frames can become available.
+- 没有活动相机时，场景会更新但不会出图。
+- rotation 是弧度，rotation_euler 是角度。
+- 如果省略 render_path，App 与 Renderer 默认都是基础渲染路径。
+- TextureHandle.update_data(...) 只对 create_dynamic_texture(...) 创建出来的纹理有效。
+- 外部窗口模式下忘记 renderer.resize(...) 或忘记输入注入，通常会表现成视口或相机异常。
+- headless 流式回读循环里记得调用 renderer.poll_device()，否则完成的帧不会及时变为可接收状态。
