@@ -9,13 +9,13 @@
 use std::borrow::Cow;
 
 use myth::prelude::*;
-use myth::resources::Key;
 use myth::renderer::HDR_TEXTURE_FORMAT;
 use myth::renderer::core::gpu::{CommonSampler, Tracked};
 use myth::renderer::graph::core::{
     ExecuteContext, GraphBlackboard, HookStage, PassNode, PrepareContext, RenderTargetOps,
     TextureDesc, TextureNodeId,
 };
+use myth::resources::Key;
 use myth_dev_utils::FpsCounter;
 
 const CUSTOM_POST_SHADER: &str = r#"
@@ -139,27 +139,29 @@ impl AppHandler for CustomPostFxDemo {
             .expect("renderer should be initialized before example setup");
         let device = &wgpu_ctx.device;
 
-        let post_layout = Tracked::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("CustomPostFX Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let post_layout = Tracked::new(device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("CustomPostFX Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        }));
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            },
+        ));
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Custom Post FX Shader"),
@@ -197,11 +199,14 @@ impl AppHandler for CustomPostFxDemo {
         });
 
         let sphere_geo = engine.assets.geometries.add(Geometry::new_sphere(1.0));
-        let box_geo = engine.assets.geometries.add(Geometry::new_box(1.0, 1.0, 1.0));
-        let floor_material = engine.assets.materials.add(
-            PhysicalMaterial::new(Vec4::new(0.05, 0.06, 0.08, 1.0))
-                .with_roughness(0.95),
-        );
+        let box_geo = engine
+            .assets
+            .geometries
+            .add(Geometry::new_box(1.0, 1.0, 1.0));
+        let floor_material = engine
+            .assets
+            .materials
+            .add(PhysicalMaterial::new(Vec4::new(0.05, 0.06, 0.08, 1.0)).with_roughness(0.95));
         let palette = [
             engine.assets.materials.add(
                 PhysicalMaterial::new(Vec4::new(0.06, 0.10, 0.16, 1.0))
@@ -319,7 +324,11 @@ impl AppHandler for CustomPostFxDemo {
         }
 
         if let Some(fps) = self.fps_counter.update() {
-            let mode = if self.effect_enabled { "Custom Post FX" } else { "Raw Scene" };
+            let mode = if self.effect_enabled {
+                "Custom Post FX"
+            } else {
+                "Raw Scene"
+            };
             window.set_title(&format!("Custom Post-FX Pass | {} | FPS: {:.1}", mode, fps));
         }
     }

@@ -186,7 +186,10 @@ impl SineScrollerDemo {
 
 impl AppHandler for SineScrollerDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        let box_geo = engine.assets.geometries.add(Geometry::new_box(1.0, 1.0, 1.0));
+        let box_geo = engine
+            .assets
+            .geometries
+            .add(Geometry::new_box(1.0, 1.0, 1.0));
         let plane_geo = engine.assets.geometries.add(Geometry::new_plane(1.0, 1.0));
 
         let frame_material = engine.assets.materials.add(
@@ -194,10 +197,10 @@ impl AppHandler for SineScrollerDemo {
                 .with_metalness(0.20)
                 .with_roughness(0.55),
         );
-        let floor_material = engine.assets.materials.add(
-            PhysicalMaterial::new(Vec4::new(0.05, 0.05, 0.07, 1.0))
-                .with_roughness(0.96),
-        );
+        let floor_material = engine
+            .assets
+            .materials
+            .add(PhysicalMaterial::new(Vec4::new(0.05, 0.05, 0.07, 1.0)).with_roughness(0.96));
         let tube_material = engine.assets.materials.add(
             PhysicalMaterial::new(Vec4::new(0.10, 0.10, 0.18, 1.0))
                 .with_emissive(Vec3::new(0.35, 0.85, 1.0), 4.0)

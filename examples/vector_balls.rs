@@ -45,10 +45,10 @@ impl AppHandler for VectorBallsDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
         let sphere_geo = engine.assets.geometries.add(Geometry::new_sphere(1.0));
 
-        let floor_material = engine.assets.materials.add(
-            PhysicalMaterial::new(Vec4::new(0.07, 0.08, 0.10, 1.0))
-                .with_roughness(0.94),
-        );
+        let floor_material = engine
+            .assets
+            .materials
+            .add(PhysicalMaterial::new(Vec4::new(0.07, 0.08, 0.10, 1.0)).with_roughness(0.94));
         let palette = [
             engine.assets.materials.add(
                 PhysicalMaterial::new(Vec4::new(0.08, 0.10, 0.20, 1.0))
@@ -79,12 +79,7 @@ impl AppHandler for VectorBallsDemo {
         scene.bloom.set_radius(0.006);
         scene.bloom.set_karis_average(true);
 
-        let floor = scene.spawn_plane(
-            24.0,
-            24.0,
-            floor_material,
-            &engine.assets,
-        );
+        let floor = scene.spawn_plane(24.0, 24.0, floor_material, &engine.assets);
         scene
             .node(&floor)
             .set_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
@@ -106,7 +101,8 @@ impl AppHandler for VectorBallsDemo {
 
         let orbit_light = scene.add_light(Light::new_point(Vec3::new(0.55, 0.9, 1.0), 1.8, 28.0));
         scene.node(&orbit_light).set_position(0.0, 5.0, 8.0);
-        let magenta_light = scene.add_light(Light::new_point(Vec3::new(1.0, 0.25, 0.85), 1.4, 28.0));
+        let magenta_light =
+            scene.add_light(Light::new_point(Vec3::new(1.0, 0.25, 0.85), 1.4, 28.0));
         scene.node(&magenta_light).set_position(0.0, -1.0, -6.0);
 
         let mut rng = 0x51A2_BA11;
@@ -172,7 +168,11 @@ impl AppHandler for VectorBallsDemo {
             );
             position.y += ((index as f32 * 0.21) + t * 0.8).cos() * 0.6;
 
-            let pulse = 0.82 + 0.38 * (t * (1.2 + ball.frequency.x * 0.25) + ball.phase.z).sin().abs();
+            let pulse = 0.82
+                + 0.38
+                    * (t * (1.2 + ball.frequency.x * 0.25) + ball.phase.z)
+                        .sin()
+                        .abs();
             scene
                 .node(&ball.handle)
                 .set_position_vec(position)

@@ -108,8 +108,10 @@ impl FeedbackPortalDemo {
                         (sample_y as usize * PORTAL_SIZE as usize + sample_x as usize) * 4;
                     let dst_index = (y * PORTAL_SIZE as usize + x) * 4;
                     self.current[dst_index] = (self.previous[src_index] as f32 * 0.92) as u8;
-                    self.current[dst_index + 1] = (self.previous[src_index + 1] as f32 * 0.95) as u8;
-                    self.current[dst_index + 2] = (self.previous[src_index + 2] as f32 * 0.97) as u8;
+                    self.current[dst_index + 1] =
+                        (self.previous[src_index + 1] as f32 * 0.95) as u8;
+                    self.current[dst_index + 2] =
+                        (self.previous[src_index + 2] as f32 * 0.97) as u8;
                     self.current[dst_index + 3] = 255;
                 }
 
@@ -150,7 +152,10 @@ impl FeedbackPortalDemo {
 
 impl AppHandler for FeedbackPortalDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        let box_geo = engine.assets.geometries.add(Geometry::new_box(1.0, 1.0, 1.0));
+        let box_geo = engine
+            .assets
+            .geometries
+            .add(Geometry::new_box(1.0, 1.0, 1.0));
         let plane_geo = engine.assets.geometries.add(Geometry::new_plane(1.0, 1.0));
 
         let frame_material = engine.assets.materials.add(
@@ -158,10 +163,10 @@ impl AppHandler for FeedbackPortalDemo {
                 .with_metalness(0.22)
                 .with_roughness(0.52),
         );
-        let floor_material = engine.assets.materials.add(
-            PhysicalMaterial::new(Vec4::new(0.05, 0.06, 0.08, 1.0))
-                .with_roughness(0.95),
-        );
+        let floor_material = engine
+            .assets
+            .materials
+            .add(PhysicalMaterial::new(Vec4::new(0.05, 0.06, 0.08, 1.0)).with_roughness(0.95));
         let neon_material = engine.assets.materials.add(
             PhysicalMaterial::new(Vec4::new(0.10, 0.10, 0.16, 1.0))
                 .with_emissive(Vec3::new(0.38, 0.92, 1.0), 4.8)
@@ -222,7 +227,8 @@ impl AppHandler for FeedbackPortalDemo {
         for segment in 0..32 {
             let angle = segment as f32 / 32.0 * TAU;
             let radial = Vec3::new(angle.cos(), angle.sin(), 0.0);
-            let segment_handle = scene.add_mesh_to_parent(Mesh::new(box_geo, neon_material), ring_root);
+            let segment_handle =
+                scene.add_mesh_to_parent(Mesh::new(box_geo, neon_material), ring_root);
             scene
                 .node(&segment_handle)
                 .set_position_vec(radial * 2.9)
@@ -311,12 +317,7 @@ impl AppHandler for FeedbackPortalDemo {
 
         scene
             .node(&self.ring_root)
-            .set_rotation(Quat::from_euler(
-                EulerRot::XYZ,
-                0.0,
-                0.0,
-                self.phase * 0.16,
-            ))
+            .set_rotation(Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, self.phase * 0.16))
             .set_scale(1.0 + self.phase.sin() * 0.03);
 
         if let Some(fps) = self.fps_counter.update() {
