@@ -1,7 +1,7 @@
 use flume::{Receiver, Sender, unbounded};
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
 use crate::io::{AssetReaderVariant, AssetSource};
