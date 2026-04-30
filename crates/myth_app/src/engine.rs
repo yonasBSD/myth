@@ -43,6 +43,17 @@ use myth_render::Renderer;
 use myth_render::settings::{RendererInitConfig, RendererSettings};
 use myth_resources::input::Input;
 
+#[cfg(target_arch = "wasm32")]
+use crate::platform::web;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Default, Clone, Copy)]
+struct WebLoadingState {
+    pending: u32,
+    completed: u32,
+    scene_ready_sent: bool,
+}
+
 /// The core engine instance that orchestrates all rendering subsystems.
 ///
 /// `Engine` is a pure engine implementation without window management,
@@ -68,6 +79,9 @@ pub struct Engine {
     pub input: Input,
 
     frame_time: FrameTime,
+
+    #[cfg(target_arch = "wasm32")]
+    web_loading: WebLoadingState,
 }
 
 impl Engine {
@@ -89,6 +103,8 @@ impl Engine {
             assets,
             input: Input::new(),
             frame_time: FrameTime::default(),
+            #[cfg(target_arch = "wasm32")]
+            web_loading: WebLoadingState::default(),
         }
     }
 
@@ -288,6 +304,9 @@ impl Engine {
         // Promote any assets that finished loading in the background.
         self.assets.process_loading_events();
 
+        #[cfg(target_arch = "wasm32")]
+        self.update_web_loading_status();
+
         self.frame_time.time += dt;
         self.frame_time.frame_count += 1;
         self.frame_time.delta_time = dt;
@@ -307,6 +326,33 @@ impl Engine {
     #[inline]
     pub fn maybe_prune(&mut self) {
         self.renderer.maybe_prune();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn update_web_loading_status(&mut self) {
+        if self.web_loading.scene_ready_sent {
+            return;
+        }
+
+        let progress = self.assets.loading_progress();
+        if progress.pending > 0 {
+            if self.web_loading.pending != progress.pending
+                || self.web_loading.completed != progress.completed
+            {
+                web::update_loading_progress(
+                    "Fetching assets...",
+                    progress.completion_ratio() * 100.0,
+                );
+                self.web_loading.pending = progress.pending;
+                self.web_loading.completed = progress.completed;
+            }
+            return;
+        }
+
+        web::notify_scene_ready();
+        self.web_loading.pending = 0;
+        self.web_loading.completed = progress.completed;
+        self.web_loading.scene_ready_sent = true;
     }
 
     fn update_camera_viewport(&mut self, width: f32, height: f32) {

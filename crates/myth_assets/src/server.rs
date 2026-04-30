@@ -1,5 +1,6 @@
 use flume::{Receiver, Sender, unbounded};
 use parking_lot::RwLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -91,12 +92,81 @@ impl<T> LoadingChannel<T> {
     }
 }
 
+/// Snapshot of the fire-and-forget asset pipeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AssetLoadingProgress {
+    /// Number of background tasks that have not settled yet.
+    pub pending: u32,
+    /// Number of background tasks that have completed or failed.
+    pub completed: u32,
+}
+
+impl AssetLoadingProgress {
+    #[inline]
+    #[must_use]
+    pub fn total_requested(self) -> u32 {
+        self.pending.saturating_add(self.completed)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_idle(self) -> bool {
+        self.pending == 0
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn completion_ratio(self) -> f32 {
+        let total = self.total_requested();
+        if total == 0 {
+            1.0
+        } else {
+            self.completed as f32 / total as f32
+        }
+    }
+}
+
+struct LoadingStats {
+    pending: AtomicU32,
+    completed: AtomicU32,
+}
+
+impl LoadingStats {
+    fn new() -> Self {
+        Self {
+            pending: AtomicU32::new(0),
+            completed: AtomicU32::new(0),
+        }
+    }
+
+    #[inline]
+    fn begin_request(&self) {
+        self.pending.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    fn finish_request(&self) {
+        let previous = self.pending.fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(previous > 0, "asset loading counter underflowed");
+        self.completed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    fn snapshot(&self) -> AssetLoadingProgress {
+        AssetLoadingProgress {
+            pending: self.pending.load(Ordering::Relaxed),
+            completed: self.completed.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// Shared state for the internal background-loading pipeline.
 struct LoadingPipeline {
     image_channel: LoadingChannel<ImageLoadEvent>,
     prefab_channel: LoadingChannel<PrefabLoadEvent>,
     #[cfg(feature = "3dgs")]
     gaussian_channel: LoadingChannel<GaussianLoadEvent>,
+    stats: LoadingStats,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -202,6 +272,7 @@ impl AssetServer {
                 prefab_channel: LoadingChannel::new(),
                 #[cfg(feature = "3dgs")]
                 gaussian_channel: LoadingChannel::new(),
+                stats: LoadingStats::new(),
             }),
 
             default_white_texture,
@@ -219,6 +290,23 @@ impl AssetServer {
     fn generate_asset_uuid(type_tag: &str, uri: &str, params: &str) -> Uuid {
         let signature = format!("{type_tag}|{uri}|{params}");
         Uuid::new_v5(&MYTH_ASSET_NAMESPACE, signature.as_bytes())
+    }
+
+    #[inline]
+    fn begin_background_load(&self) {
+        self.loading.stats.begin_request();
+    }
+
+    #[inline]
+    fn finish_background_load(&self) {
+        self.loading.stats.finish_request();
+    }
+
+    /// Returns the current background-loading snapshot.
+    #[inline]
+    #[must_use]
+    pub fn loading_progress(&self) -> AssetLoadingProgress {
+        self.loading.stats.snapshot()
     }
 
     fn expected_image_byte_len(
@@ -267,6 +355,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.image_channel.sender();
         let uri_owned = uri.to_string();
         let filename_owned = filename.to_string();
@@ -298,6 +387,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.image_channel.sender();
         let uri_owned = uri.to_string();
         let filename_owned = filename.to_string();
@@ -329,6 +419,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.image_channel.sender();
         let uri_owned = uri.to_string();
         let filename_owned = filename.to_string();
@@ -485,6 +576,7 @@ impl AssetServer {
         let (image_handle, img_is_new) = self.images.reserve_with_uuid(img_uuid);
 
         if img_is_new {
+            self.begin_background_load();
             let tx = self.loading.image_channel.sender();
 
             spawn_asset_task(async move {
@@ -526,6 +618,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.gaussian_channel.sender();
         let source_str = uri.clone();
 
@@ -558,6 +651,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.gaussian_channel.sender();
         let source_str = uri.clone();
 
@@ -593,6 +687,7 @@ impl AssetServer {
             return handle;
         }
 
+        self.begin_background_load();
         let tx = self.loading.prefab_channel.sender();
         let assets = self.clone();
 
@@ -630,6 +725,8 @@ impl AssetServer {
                     self.images.mark_failed(event.handle, msg.clone());
                 }
             }
+
+            self.finish_background_load();
         }
 
         // Drain prefab completions into unified AssetStorage.
@@ -644,6 +741,8 @@ impl AssetServer {
                     self.prefabs.mark_failed(event.handle, msg.clone());
                 }
             }
+
+            self.finish_background_load();
         }
 
         #[cfg(feature = "3dgs")]
@@ -658,6 +757,8 @@ impl AssetServer {
                     self.gaussian_clouds.mark_failed(event.handle, msg.clone());
                 }
             }
+
+            self.finish_background_load();
         }
     }
 

@@ -7,6 +7,7 @@
 pub mod app;
 pub mod engine;
 pub mod orbit_controls;
+mod platform;
 pub mod window;
 
 #[cfg(feature = "winit")]

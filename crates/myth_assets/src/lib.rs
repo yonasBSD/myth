@@ -20,7 +20,7 @@ pub mod storage;
 pub use myth_resources::{
     GaussianCloudHandle, GeometryHandle, ImageHandle, MaterialHandle, PrefabHandle, TextureHandle,
 };
-pub use server::AssetServer;
+pub use server::{AssetLoadingProgress, AssetServer};
 
 pub use handle::{AssetTracker, StrongHandle, TrackedAsset, WeakHandle};
 pub use io::{AssetReader, AssetReaderVariant, AssetSource};
