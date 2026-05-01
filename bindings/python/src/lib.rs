@@ -146,7 +146,7 @@ pub(crate) fn extract_geometry_handle(
         .and_then(|v| v.extract::<u64>())
         .map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err(
-                "Expected a Geometry object (BoxGeometry, SphereGeometry, PlaneGeometry, Geometry)",
+                "Expected a Geometry object (BoxGeometry, SphereGeometry, PlaneGeometry, CylinderGeometry, ConeGeometry, TorusGeometry, Geometry)",
             )
         })?;
     Ok(myth_engine::GeometryHandle::from(
@@ -189,6 +189,9 @@ fn myth_binding(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<geometry::PyBoxGeometry>()?;
     m.add_class::<geometry::PySphereGeometry>()?;
     m.add_class::<geometry::PyPlaneGeometry>()?;
+    m.add_class::<geometry::PyCylinderGeometry>()?;
+    m.add_class::<geometry::PyConeGeometry>()?;
+    m.add_class::<geometry::PyTorusGeometry>()?;
     m.add_class::<geometry::PyCustomGeometry>()?;
 
     // Material

@@ -176,6 +176,52 @@ fn geometry_plane_has_attributes() {
     assert!(geom.get_attribute("uv").is_some());
 }
 
+#[test]
+fn geometry_cylinder_has_attributes() {
+    let geom = Geometry::new_cylinder(1.5, 4.0);
+    assert!(geom.get_attribute("position").is_some());
+    assert!(geom.get_attribute("normal").is_some());
+    assert!(geom.get_attribute("uv").is_some());
+    assert!(geom.index_attribute().is_some());
+}
+
+#[test]
+fn geometry_cylinder_bounding_volume() {
+    let geom = Geometry::new_cylinder(1.5, 4.0);
+    assert!(approx(geom.bounding_box.min.x, -1.5));
+    assert!(approx(geom.bounding_box.max.x, 1.5));
+    assert!(approx(geom.bounding_box.min.y, -2.0));
+    assert!(approx(geom.bounding_box.max.y, 2.0));
+}
+
+#[test]
+fn geometry_cone_has_attributes() {
+    let geom = Geometry::new_cone(1.5, 4.0);
+    assert!(geom.get_attribute("position").is_some());
+    assert!(geom.get_attribute("normal").is_some());
+    assert!(geom.get_attribute("uv").is_some());
+    assert!(geom.index_attribute().is_some());
+}
+
+#[test]
+fn geometry_torus_has_attributes() {
+    let geom = Geometry::new_torus(2.0, 0.5);
+    assert!(geom.get_attribute("position").is_some());
+    assert!(geom.get_attribute("normal").is_some());
+    assert!(geom.get_attribute("uv").is_some());
+    assert!(geom.index_attribute().is_some());
+}
+
+#[test]
+fn geometry_torus_bounding_sphere_radius() {
+    let geom = Geometry::new_torus(2.0, 0.5);
+    assert!(
+        (geom.bounding_sphere.radius - 2.5).abs() < 0.15,
+        "Expected radius ≈ 2.5, got {}",
+        geom.bounding_sphere.radius
+    );
+}
+
 // ============================================================================
 // Geometry Attribute Management Tests
 // ============================================================================

@@ -58,6 +58,33 @@ pub trait SceneExt {
         material: impl ResolveMaterial,
         assets: &AssetServer,
     ) -> NodeHandle;
+
+    /// Spawns a cylinder mesh node.
+    fn spawn_cylinder(
+        &mut self,
+        radius: f32,
+        height: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle;
+
+    /// Spawns a cone mesh node.
+    fn spawn_cone(
+        &mut self,
+        radius: f32,
+        height: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle;
+
+    /// Spawns a torus mesh node.
+    fn spawn_torus(
+        &mut self,
+        radius: f32,
+        tube: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle;
 }
 
 impl SceneExt for Scene {
@@ -228,5 +255,35 @@ impl SceneExt for Scene {
         assets: &AssetServer,
     ) -> NodeHandle {
         self.spawn(Geometry::new_plane(width, height), material, assets)
+    }
+
+    fn spawn_cylinder(
+        &mut self,
+        radius: f32,
+        height: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle {
+        self.spawn(Geometry::new_cylinder(radius, height), material, assets)
+    }
+
+    fn spawn_cone(
+        &mut self,
+        radius: f32,
+        height: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle {
+        self.spawn(Geometry::new_cone(radius, height), material, assets)
+    }
+
+    fn spawn_torus(
+        &mut self,
+        radius: f32,
+        tube: f32,
+        material: impl ResolveMaterial,
+        assets: &AssetServer,
+    ) -> NodeHandle {
+        self.spawn(Geometry::new_torus(radius, tube), material, assets)
     }
 }

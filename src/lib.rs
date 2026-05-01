@@ -204,7 +204,8 @@ pub use myth_scene::{
 #[cfg(feature = "3dgs")]
 pub use myth_resources::gaussian_splat::GaussianCloud;
 pub use myth_resources::primitives::{
-    PlaneOptions, SphereOptions, create_box, create_plane, create_sphere,
+    ConeOptions, CylinderOptions, PlaneOptions, SphereOptions, TorusOptions, create_box,
+    create_cone, create_cylinder, create_plane, create_sphere, create_torus,
 };
 pub use myth_resources::{
     AgxLook, AlphaMode, AntiAliasingMode, Attribute, FxaaQuality, FxaaSettings, Geometry, Image,

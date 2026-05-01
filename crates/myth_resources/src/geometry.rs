@@ -1023,4 +1023,32 @@ impl Geometry {
             ..Default::default()
         })
     }
+
+    #[must_use]
+    pub fn new_cylinder(radius: f32, height: f32) -> Self {
+        primitives::create_cylinder(&primitives::CylinderOptions {
+            radius_top: radius,
+            radius_bottom: radius,
+            height,
+            ..Default::default()
+        })
+    }
+
+    #[must_use]
+    pub fn new_cone(radius: f32, height: f32) -> Self {
+        primitives::create_cone(&primitives::ConeOptions {
+            radius,
+            height,
+            ..Default::default()
+        })
+    }
+
+    #[must_use]
+    pub fn new_torus(radius: f32, tube: f32) -> Self {
+        primitives::create_torus(&primitives::TorusOptions {
+            radius,
+            tube,
+            ..Default::default()
+        })
+    }
 }

@@ -1046,6 +1046,81 @@ class PlaneGeometry:
 
     def __init__(self, width: float = 1.0, height: float = 1.0) -> None: ...
 
+class CylinderGeometry:
+    """A cylinder geometry.
+
+    Args:
+        radius: Radius for the top and bottom caps.
+        height: Height along Y axis.
+        radial_segments: Number of radial segments.
+        height_segments: Number of vertical segments.
+        open_ended: Whether to omit the caps.
+    """
+
+    radius: float
+    height: float
+    radial_segments: int
+    height_segments: int
+    open_ended: bool
+
+    def __init__(
+        self,
+        radius: float = 1.0,
+        height: float = 1.0,
+        radial_segments: int = 32,
+        height_segments: int = 1,
+        open_ended: bool = False,
+    ) -> None: ...
+
+class ConeGeometry:
+    """A cone geometry.
+
+    Args:
+        radius: Base radius.
+        height: Height along Y axis.
+        radial_segments: Number of radial segments.
+        height_segments: Number of vertical segments.
+        open_ended: Whether to omit the bottom cap.
+    """
+
+    radius: float
+    height: float
+    radial_segments: int
+    height_segments: int
+    open_ended: bool
+
+    def __init__(
+        self,
+        radius: float = 1.0,
+        height: float = 1.0,
+        radial_segments: int = 32,
+        height_segments: int = 1,
+        open_ended: bool = False,
+    ) -> None: ...
+
+class TorusGeometry:
+    """A torus geometry.
+
+    Args:
+        radius: Major radius from torus center to tube center.
+        tube: Tube radius.
+        radial_segments: Segments around the tube cross-section.
+        tubular_segments: Segments around the main ring.
+    """
+
+    radius: float
+    tube: float
+    radial_segments: int
+    tubular_segments: int
+
+    def __init__(
+        self,
+        radius: float = 1.0,
+        tube: float = 0.4,
+        radial_segments: int = 16,
+        tubular_segments: int = 32,
+    ) -> None: ...
+
 class Geometry:
     """A custom geometry built from raw vertex data.
 

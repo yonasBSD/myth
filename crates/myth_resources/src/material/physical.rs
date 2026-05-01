@@ -288,6 +288,13 @@ impl PhysicalMaterial {
         self
     }
 
+    /// Sets the index of refraction (builder).
+    #[must_use]
+    pub fn with_ior(self, ior: f32) -> Self {
+        self.uniforms.write().ior = ior;
+        self
+    }
+
     /// Sets the normal map scale (builder).
     #[must_use]
     pub fn with_normal_scale(self, scale: Vec2) -> Self {

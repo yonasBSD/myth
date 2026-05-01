@@ -115,6 +115,9 @@ For prototypes and examples, the helper methods are the most concise path:
 let cube = scene.spawn_box(1.0, 1.0, 1.0, material, &engine.assets);
 let sphere = scene.spawn_sphere(0.5, material, &engine.assets);
 let ground = scene.spawn_plane(20.0, 20.0, material, &engine.assets);
+let column = scene.spawn_cylinder(0.4, 2.5, material, &engine.assets);
+let marker = scene.spawn_cone(0.35, 0.9, material, &engine.assets);
+let ring = scene.spawn_torus(1.2, 0.2, material, &engine.assets);
 ```
 
 ### Manual resource registration
@@ -130,8 +133,8 @@ let node = scene.add_mesh(Mesh::new(geo, mat));
 ### Transforms and hierarchy
 
 ```rust
-let parent = scene.create_node_with_name("Parent");
-let child = scene.create_node_with_name("Child");
+let parent = scene.spawn_box(1.0, 1.0, 1.0, material, &engine.assets);
+let child = scene.spawn_sphere(0.35, material, &engine.assets);
 
 scene.attach(child, parent);
 scene.node(&parent).set_position(0.0, 1.0, 0.0);
@@ -139,6 +142,7 @@ scene.node(&child).set_position(1.0, 0.0, 0.0);
 ```
 
 Use `scene.node(&handle)` for fluent setup and `scene.get_node_mut(handle)` when you need direct access to the transform or optional components.
+Use `add_mesh`, `add_camera`, `add_light`, or the `spawn_*` helpers for root nodes. `create_node_with_name(...)` only creates a detached node handle; if you want an organizational node, attach it under an existing rooted node.
 
 ---
 
@@ -155,6 +159,18 @@ scene.active_camera = Some(camera);
 ```
 
 If you resize the window yourself in a custom loop, call `engine.resize(width, height)` so the active camera viewport stays in sync.
+For scripted focus changes, `OrbitControls` already provides `set_target(...)`, `set_position(...)`, and `fit(...)`.
+
+### Materials
+
+For PBR surfaces, start with `PhysicalMaterial`. Refraction-heavy materials can now stay in builder style:
+
+```rust
+let glass = PhysicalMaterial::new(Vec4::new(0.96, 0.98, 1.0, 1.0))
+    .with_ior(1.52)
+    .with_roughness(0.03)
+    .with_transmission(1.0, 0.35, 6.0, Vec3::ONE);
+```
 
 ### Lights
 

@@ -1,4 +1,5 @@
-//! Geometry types: BoxGeometry, SphereGeometry, PlaneGeometry, Geometry (custom).
+//! Geometry types: BoxGeometry, SphereGeometry, PlaneGeometry,
+//! CylinderGeometry, ConeGeometry, TorusGeometry, Geometry (custom).
 
 use pyo3::prelude::*;
 use slotmap::Key;
@@ -170,6 +171,233 @@ impl PyPlaneGeometry {
         }
         let h = with_engine(|engine| {
             let geo = myth_engine::Geometry::new_plane(self.width, self.height);
+            engine.assets.geometries.add(geo)
+        })?;
+        self.handle = Some(h);
+        Ok(h)
+    }
+}
+
+// ============================================================================
+
+/// A cylinder geometry.
+///
+/// Args:
+///     radius: Radius for the top and bottom caps (default: 1.0)
+///     height: Height along Y axis (default: 1.0)
+///     radial_segments: Number of radial segments (default: 32)
+///     height_segments: Number of vertical segments (default: 1)
+///     open_ended: Whether to omit the caps (default: False)
+#[pyclass(name = "CylinderGeometry")]
+pub struct PyCylinderGeometry {
+    #[pyo3(get)]
+    radius: f32,
+    #[pyo3(get)]
+    height: f32,
+    #[pyo3(get)]
+    radial_segments: u32,
+    #[pyo3(get)]
+    height_segments: u32,
+    #[pyo3(get)]
+    open_ended: bool,
+    handle: Option<myth_engine::GeometryHandle>,
+}
+
+#[pymethods]
+impl PyCylinderGeometry {
+    #[new]
+    #[pyo3(signature = (radius=1.0, height=1.0, radial_segments=32, height_segments=1, open_ended=false))]
+    fn new(
+        radius: f32,
+        height: f32,
+        radial_segments: u32,
+        height_segments: u32,
+        open_ended: bool,
+    ) -> Self {
+        Self {
+            radius,
+            height,
+            radial_segments,
+            height_segments,
+            open_ended,
+            handle: None,
+        }
+    }
+
+    fn _get_handle(&mut self) -> PyResult<u64> {
+        let h = self.get_or_create_handle()?;
+        Ok(h.data().as_ffi())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CylinderGeometry(radius={}, height={}, radial_segments={}, height_segments={}, open_ended={})",
+            self.radius, self.height, self.radial_segments, self.height_segments, self.open_ended
+        )
+    }
+}
+
+impl PyCylinderGeometry {
+    pub fn get_or_create_handle(&mut self) -> PyResult<myth_engine::GeometryHandle> {
+        if let Some(h) = self.handle {
+            return Ok(h);
+        }
+        let h = with_engine(|engine| {
+            let geo = myth_engine::create_cylinder(&myth_engine::CylinderOptions {
+                radius_top: self.radius,
+                radius_bottom: self.radius,
+                height: self.height,
+                radial_segments: self.radial_segments,
+                height_segments: self.height_segments,
+                open_ended: self.open_ended,
+            });
+            engine.assets.geometries.add(geo)
+        })?;
+        self.handle = Some(h);
+        Ok(h)
+    }
+}
+
+// ============================================================================
+
+/// A cone geometry.
+///
+/// Args:
+///     radius: Base radius (default: 1.0)
+///     height: Height along Y axis (default: 1.0)
+///     radial_segments: Number of radial segments (default: 32)
+///     height_segments: Number of vertical segments (default: 1)
+///     open_ended: Whether to omit the bottom cap (default: False)
+#[pyclass(name = "ConeGeometry")]
+pub struct PyConeGeometry {
+    #[pyo3(get)]
+    radius: f32,
+    #[pyo3(get)]
+    height: f32,
+    #[pyo3(get)]
+    radial_segments: u32,
+    #[pyo3(get)]
+    height_segments: u32,
+    #[pyo3(get)]
+    open_ended: bool,
+    handle: Option<myth_engine::GeometryHandle>,
+}
+
+#[pymethods]
+impl PyConeGeometry {
+    #[new]
+    #[pyo3(signature = (radius=1.0, height=1.0, radial_segments=32, height_segments=1, open_ended=false))]
+    fn new(
+        radius: f32,
+        height: f32,
+        radial_segments: u32,
+        height_segments: u32,
+        open_ended: bool,
+    ) -> Self {
+        Self {
+            radius,
+            height,
+            radial_segments,
+            height_segments,
+            open_ended,
+            handle: None,
+        }
+    }
+
+    fn _get_handle(&mut self) -> PyResult<u64> {
+        let h = self.get_or_create_handle()?;
+        Ok(h.data().as_ffi())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ConeGeometry(radius={}, height={}, radial_segments={}, height_segments={}, open_ended={})",
+            self.radius, self.height, self.radial_segments, self.height_segments, self.open_ended
+        )
+    }
+}
+
+impl PyConeGeometry {
+    pub fn get_or_create_handle(&mut self) -> PyResult<myth_engine::GeometryHandle> {
+        if let Some(h) = self.handle {
+            return Ok(h);
+        }
+        let h = with_engine(|engine| {
+            let geo = myth_engine::create_cone(&myth_engine::ConeOptions {
+                radius: self.radius,
+                height: self.height,
+                radial_segments: self.radial_segments,
+                height_segments: self.height_segments,
+                open_ended: self.open_ended,
+            });
+            engine.assets.geometries.add(geo)
+        })?;
+        self.handle = Some(h);
+        Ok(h)
+    }
+}
+
+// ============================================================================
+
+/// A torus geometry.
+///
+/// Args:
+///     radius: Major radius from torus center to tube center (default: 1.0)
+///     tube: Tube radius (default: 0.4)
+///     radial_segments: Segments around the tube cross-section (default: 16)
+///     tubular_segments: Segments around the main ring (default: 32)
+#[pyclass(name = "TorusGeometry")]
+pub struct PyTorusGeometry {
+    #[pyo3(get)]
+    radius: f32,
+    #[pyo3(get)]
+    tube: f32,
+    #[pyo3(get)]
+    radial_segments: u32,
+    #[pyo3(get)]
+    tubular_segments: u32,
+    handle: Option<myth_engine::GeometryHandle>,
+}
+
+#[pymethods]
+impl PyTorusGeometry {
+    #[new]
+    #[pyo3(signature = (radius=1.0, tube=0.4, radial_segments=16, tubular_segments=32))]
+    fn new(radius: f32, tube: f32, radial_segments: u32, tubular_segments: u32) -> Self {
+        Self {
+            radius,
+            tube,
+            radial_segments,
+            tubular_segments,
+            handle: None,
+        }
+    }
+
+    fn _get_handle(&mut self) -> PyResult<u64> {
+        let h = self.get_or_create_handle()?;
+        Ok(h.data().as_ffi())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TorusGeometry(radius={}, tube={}, radial_segments={}, tubular_segments={})",
+            self.radius, self.tube, self.radial_segments, self.tubular_segments
+        )
+    }
+}
+
+impl PyTorusGeometry {
+    pub fn get_or_create_handle(&mut self) -> PyResult<myth_engine::GeometryHandle> {
+        if let Some(h) = self.handle {
+            return Ok(h);
+        }
+        let h = with_engine(|engine| {
+            let geo = myth_engine::create_torus(&myth_engine::TorusOptions {
+                radius: self.radius,
+                tube: self.tube,
+                radial_segments: self.radial_segments,
+                tubular_segments: self.tubular_segments,
+            });
             engine.assets.geometries.add(geo)
         })?;
         self.handle = Some(h);
