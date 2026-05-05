@@ -431,6 +431,47 @@ fn multi_light_scene() {
     assert_images_differ(&dir_only, &dir_plus_point, "multi_light");
 }
 
+/// Dense point-light scene should render correctly through the clustered
+/// forward-lighting path without panicking or producing an all-black image.
+#[test]
+fn clustered_dense_point_lights() {
+    let (mut engine, expected) = setup_headless(160, 160);
+    let scene = engine.scene_manager.create_active();
+
+    let mat = PhysicalMaterial::new(Vec4::new(0.72, 0.74, 0.78, 1.0))
+        .with_roughness(0.42)
+        .with_metalness(0.08);
+    scene.spawn_sphere(1.0, mat, &engine.assets);
+
+    for ring in 0..4 {
+        let radius = 1.8 + ring as f32 * 0.7;
+        let height = 0.4 + ring as f32 * 0.55;
+        for i in 0..16 {
+            let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
+            let color = Vec3::new(
+                0.25 + (i as f32 / 16.0) * 0.75,
+                0.35 + ring as f32 * 0.12,
+                1.0 - (i as f32 / 16.0) * 0.55,
+            );
+            let light = scene.add_light(Light::new_point(color, 7.5, 4.2));
+            scene
+                .node(&light)
+                .set_position(angle.cos() * radius, height, angle.sin() * radius);
+        }
+    }
+
+    let cam = scene.add_camera(Camera::new_perspective(45.0, 1.0, 0.1));
+    scene
+        .node(&cam)
+        .set_position(0.0, 2.6, 5.2)
+        .look_at(Vec3::ZERO);
+    scene.active_camera = Some(cam);
+
+    let pixels = render_and_capture(&mut engine, 2);
+    assert_eq!(pixels.len(), expected);
+    assert_not_black(&pixels, "clustered_dense_point_lights");
+}
+
 // ── Alpha Mode Tests ─────────────────────────────────────────────────────
 
 /// A semi-transparent (AlphaMode::Blend) object in front of a solid

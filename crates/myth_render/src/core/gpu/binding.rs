@@ -559,7 +559,7 @@ impl ResourceManager {
             "environment",
             &scene.uniforms_buffer.handle(),
             None,
-            wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX,
+            wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
             false,
             None,
             Some(WgslStructName::Generator(
@@ -573,7 +573,7 @@ impl ResourceManager {
             &scene.light_storage_buffer.handle(),
             None,
             true,
-            wgpu::ShaderStages::FRAGMENT,
+            wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
             Some(WgslStructName::Generator(GpuLightStorage::wgsl_struct_def)),
         );
 

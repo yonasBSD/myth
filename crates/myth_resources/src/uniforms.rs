@@ -251,6 +251,16 @@ pub trait WgslStruct: Pod + Zeroable {
     fn wgsl_struct_def(struct_name: &str) -> String;
 }
 
+#[must_use]
+pub fn clustered_lighting_structs_wgsl() -> String {
+    format!(
+        "{}\n{}\n{}",
+        ClusteredLightingParams::wgsl_struct_def("ClusteredLightingParams"),
+        ClusterAabb::wgsl_struct_def("ClusterAabb"),
+        ClusterRecord::wgsl_struct_def("ClusterRecord"),
+    )
+}
+
 // ============================================================================
 // GPU Data Struct Definitions (std140, auto-padded by #[gpu_struct])
 // ============================================================================
@@ -364,6 +374,37 @@ pub struct GpuLightStorage {
     pub shadow_matrices: UniformArray<Mat4, 4>,
 }
 
+/// Clustered-lighting frame parameters shared by compute and fragment stages.
+#[gpu_struct(crate_path = "crate")]
+pub struct ClusteredLightingParams {
+    /// (screen_width, screen_height, cluster_count_x, cluster_count_y)
+    pub screen_dimensions: UVec4,
+    /// (cluster_count_z, total_clusters, tile_size_x, tile_size_y)
+    pub grid_dimensions: UVec4,
+    /// (max_lights_per_cluster, max_light_indices, reserved, reserved)
+    pub budget: UVec4,
+    /// (camera_near, camera_far, slice_scale, slice_bias)
+    pub depth_params: Vec4,
+}
+
+/// Per-cluster view-space bounds used during light culling.
+#[gpu_struct(crate_path = "crate")]
+pub struct ClusterAabb {
+    /// xyz = minimum corner in view space, w unused.
+    pub min_point: Vec4,
+    /// xyz = maximum corner in view space, w unused.
+    pub max_point: Vec4,
+}
+
+/// Offset/count pair into the compact clustered light-index list.
+#[gpu_struct(crate_path = "crate")]
+pub struct ClusterRecord {
+    pub offset: u32,
+    pub count: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
 /// Morph target animation uniforms.
 ///
 /// Weights and indices are packed into Vec4/UVec4 to satisfy the uniform
@@ -400,6 +441,21 @@ mod tests {
             mem::size_of::<PhongUniforms>() % 16,
             0,
             "Phong Uniforms not aligned to 16 bytes"
+        );
+        assert_eq!(
+            mem::size_of::<ClusteredLightingParams>() % 16,
+            0,
+            "ClusteredLightingParams not aligned to 16 bytes"
+        );
+        assert_eq!(
+            mem::size_of::<ClusterAabb>() % 16,
+            0,
+            "ClusterAabb not aligned to 16 bytes"
+        );
+        assert_eq!(
+            mem::size_of::<ClusterRecord>() % 16,
+            0,
+            "ClusterRecord not aligned to 16 bytes"
         );
     }
 

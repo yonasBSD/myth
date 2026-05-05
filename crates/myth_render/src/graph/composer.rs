@@ -63,10 +63,10 @@ use crate::graph::frame::{PreparedSkyboxDraw, RenderLists};
 use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::utils::add_msaa_resolve_pass;
 use crate::graph::passes::{
-    AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, EquirectToCubeFeature,
-    FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature,
-    SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature, TaaFeature, ToneMappingFeature,
-    TransmissionCopyFeature, TransparentFeature,
+    AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
+    EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
+    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature,
+    TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
@@ -124,6 +124,7 @@ pub struct ComposerContext<'a> {
     pub equirect_to_cube_pass: &'a mut EquirectToCubeFeature,
     pub ibl_pass: &'a mut IblComputeFeature,
     pub atmosphere_pass: &'a mut AtmosphereFeature,
+    pub clustered_lighting_pass: &'a mut ClusteredLightingFeature,
 
     #[cfg(feature = "3dgs")]
     // Gaussian Splatting
@@ -554,6 +555,8 @@ impl<'a> FrameComposer<'a> {
                 let fxaa_enabled = self.ctx.camera.aa_mode.is_fxaa();
 
                 let (mut active_color, mut scene_depth) = graph_ctx.with_group("Scene", |c| {
+                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(c);
+
                     // 1. Prepass
                     let prepass_out = self.ctx.prepass.add_to_graph(
                         c,
@@ -590,6 +593,9 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
+                        Some(clustered_out.params_buffer),
+                        Some(clustered_out.cluster_records),
+                        Some(clustered_out.light_indices),
                     );
 
                     let mut active_color = opaque_out.active_color;
@@ -688,6 +694,9 @@ impl<'a> FrameComposer<'a> {
                         ssao_output,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
+                        Some(clustered_out.params_buffer),
+                        Some(clustered_out.cluster_records),
+                        Some(clustered_out.light_indices),
                     );
 
                     // Capture intermediate IDs for debug view resolution.
@@ -811,6 +820,7 @@ impl<'a> FrameComposer<'a> {
                 };
 
                 graph_ctx.with_group("BasicForward", |c| {
+                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(c);
                     self.ctx.simple_forward_pass.add_to_graph(
                         c,
                         surface_out,
@@ -820,6 +830,9 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
+                        Some(clustered_out.params_buffer),
+                        Some(clustered_out.cluster_records),
+                        Some(clustered_out.light_indices),
                     );
                 });
             }

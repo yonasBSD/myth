@@ -34,7 +34,7 @@ use crate::graph::frame::DrawCommand;
 /// * **Group 1** (material) — set per-command from [`DrawCommand::bind_group_1`].
 /// * **Group 2** (object / transform) — set per-command from
 ///   [`DrawCommand::bind_group_2`] with its dynamic offset.
-/// * **Group 3** (screen / transient) — set per-command from
+/// * **Group 3** (screen / transient + clustered lighting) — set per-command from
 ///   [`DrawCommand::bind_group_3`] when present.
 pub fn submit_draw_commands<'pass, 'cmd: 'pass>(
     pass: &mut wgpu::RenderPass<'pass>,

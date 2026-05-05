@@ -61,6 +61,7 @@ Myth 通过引入**严格的基于 SSA（静态单赋值）的渲染图 (RenderG
 
 * **高级渲染与光照**
     * **基于物理的材质 (PBR)**：强大的 PBR 管线，支持清漆 (Clearcoat)、彩虹色 (Iridescence)、透射 (Transmission)、光泽 (Sheen) 和各向异性 (Anisotropy)。
+    * **集群前向光照**：通过 Compute Shader 为 Opaque、Transparent 和 BasicForward 通道预分配 cluster 光源列表，适用于高密度动态点光/聚光灯场景。
     * **基于图像的光照 (IBL)** + **动态阴影 (CSM)**。
     * **屏幕空间环境光遮蔽 (SSAO) / 屏幕空间次表面散射 (SSSS) / 天空盒 (Skybox)**。
     * **程序化天空系统**：基于物理的散射模型 (Hillaire 2020)，支持程序化天体（太阳、月亮和星空）。内置昼夜循环组件，自动同步太阳、月亮和星空的轨迹。
@@ -88,6 +89,8 @@ Myth 使用了严格的基于 SSA 的 RenderGraph，因此引擎能够：
 所有这些都无需手动设置内存屏障。
 
 深入了解：[docs/RenderGraph_zh.md](https://github.com/panxinmiao/myth/blob/main/docs/RenderGraph_zh.md)
+
+集群渲染说明：[docs/ClusteredShading_zh.md](docs/ClusteredShading_zh.md)
 
 以下是 Myth 引擎在渲染复杂帧时，自动生成的 RenderGraph 的真实拓扑转储：
 

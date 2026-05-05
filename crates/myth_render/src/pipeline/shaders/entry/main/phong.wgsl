@@ -5,6 +5,7 @@
 
 {{ vertex_input_code }} 
 {{ binding_code }}
+{{ clustered_lighting_structs }}
 {$ include 'core/vertex_output' $}
 {$ include 'core/fragment_output' $}
 
@@ -19,6 +20,9 @@
 @group(3) @binding(3) var t_shadow_map_2d_array: texture_depth_2d_array;
 @group(3) @binding(4) var t_shadow_map_cube_array: texture_depth_cube_array;
 @group(3) @binding(5) var s_shadow_map_compare: sampler_comparison;
+@group(3) @binding(6) var<uniform> u_clustered_lighting: ClusteredLightingParams;
+@group(3) @binding(7) var<storage, read> st_cluster_records: array<ClusterRecord>;
+@group(3) @binding(8) var<storage, read> st_cluster_light_indices: array<u32>;
 
 {$ include 'modules/bsdf/phong' $}
 {$ include 'core/alpha_test' $}
@@ -108,7 +112,10 @@ fn vs_main(in: VertexInput, @builtin(vertex_index) vertex_index: u32) -> VertexO
 }
 
 @fragment
-fn fs_main(varyings: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+fn fs_main(
+    varyings: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
     var normal = normalize(varyings.normal);
     $$ if FLAT_SHADING
         let u = dpdx(varyings.world_position);
@@ -166,7 +173,7 @@ fn fs_main(varyings: VertexOutput, @builtin(front_facing) is_front: bool) -> Fra
 
     let material = build_phong_material(diffuse_color.rgb, u_material.specular.rgb, u_material.shininess, specular_strength);
 
-    evaluate_punctual_lights(geometry, material, &reflected_light);
+    evaluate_punctual_lights(geometry, material, &reflected_light, varyings.position);
 
     // Indirect Diffuse Light
     let ambient_color = u_environment.ambient_light.rgb;

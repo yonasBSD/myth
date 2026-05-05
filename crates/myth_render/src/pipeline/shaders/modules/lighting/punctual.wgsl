@@ -107,11 +107,39 @@ fn evaluate_light_visibility(
 fn evaluate_punctual_lights(
     geometry: GeometricContext,
     material: SurfaceContext,
-    reflected_light: ptr<function, ReflectedLight>
+    reflected_light: ptr<function, ReflectedLight>,
+    frag_coord: vec4<f32>
 ) {
 
-    for (var i = 0u; i < u_environment.num_lights; i ++ ) {
-        let punctual_light = evaluate_light_visibility(i, geometry);
+    let grid_x = max(u_clustered_lighting.screen_dimensions.z, 1u);
+    let grid_y = max(u_clustered_lighting.screen_dimensions.w, 1u);
+    let grid_z = max(u_clustered_lighting.grid_dimensions.x, 1u);
+    let tile_size_x = max(f32(u_clustered_lighting.grid_dimensions.z), 1.0);
+    let tile_size_y = max(f32(u_clustered_lighting.grid_dimensions.w), 1.0);
+
+    let cluster_x = min(u32(frag_coord.x / tile_size_x), grid_x - 1u);
+    let cluster_y = min(u32(frag_coord.y / tile_size_y), grid_y - 1u);
+
+    let view_pos = u_render_state.view_matrix * vec4<f32>(geometry.position, 1.0);
+    let view_depth = max(-view_pos.z, u_clustered_lighting.depth_params.x);
+    let cluster_z = min(
+        u32(max(
+            floor(log(view_depth) * u_clustered_lighting.depth_params.z
+                + u_clustered_lighting.depth_params.w),
+            0.0,
+        )),
+        grid_z - 1u,
+    );
+
+    let cluster_index = min(
+        cluster_z * (grid_x * grid_y) + cluster_y * grid_x + cluster_x,
+        max(u_clustered_lighting.grid_dimensions.y, 1u) - 1u,
+    );
+    let cluster = st_cluster_records[cluster_index];
+
+    for (var i = 0u; i < cluster.count; i ++ ) {
+        let light_index = st_cluster_light_indices[cluster.offset + i];
+        let punctual_light = evaluate_light_visibility(light_index, geometry);
         if (punctual_light.visible) {
             RE_Direct( punctual_light, geometry, material, reflected_light );
         }

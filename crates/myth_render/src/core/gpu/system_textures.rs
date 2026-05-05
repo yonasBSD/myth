@@ -32,6 +32,7 @@
 //! `ScreenBindGroupInfo` and `ResourceManager`.
 
 use super::Tracked;
+use myth_resources::uniforms::{ClusterRecord, ClusteredLightingParams};
 
 /// Global system fallback texture pool and Group 3 bind-group infrastructure.
 ///
@@ -67,8 +68,18 @@ pub struct SystemTextures {
     /// 1×1×6 Depth32Float CubeArray — point shadow map fallback.
     pub depth_cube_array: Tracked<wgpu::TextureView>,
 
+    /// Default clustered-lighting parameters used when the scene pass has no
+    /// active cluster buffers wired.
+    pub clustered_params: Tracked<wgpu::Buffer>,
+
+    /// Default cluster record buffer containing a single empty record.
+    pub clustered_records: Tracked<wgpu::Buffer>,
+
+    /// Default clustered light-index buffer containing a single zero entry.
+    pub clustered_light_indices: Tracked<wgpu::Buffer>,
+
     // ─── Screen BindGroup Infrastructure (Group 3) ─────────────────
-    /// `BindGroupLayout` for Group 3 (transmission, SSAO, shadow).
+    /// `BindGroupLayout` for Group 3 (screen-space textures + clustered buffers).
     pub screen_layout: Tracked<wgpu::BindGroupLayout>,
 
     /// Linear-clamp sampler shared by transmission / SSAO sampling.
@@ -96,6 +107,9 @@ impl SystemTextures {
         let black_hdr = create_1x1_hdr(device, "sys_black_hdr");
         let depth_d2array = create_1x1_depth_d2array(device, "sys_depth_d2array");
         let depth_cube_array = create_1x1_depth_cube_array(device, "sys_depth_cube_array");
+        let clustered_params = create_default_clustered_params(device, queue);
+        let clustered_records = create_default_clustered_records(device, queue);
+        let clustered_light_indices = create_default_clustered_light_indices(device, queue);
 
         // ── Group 3 Layout ─────────────────────────────────────────────
 
@@ -155,6 +169,36 @@ impl SystemTextures {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             },
         ));
@@ -193,6 +237,9 @@ impl SystemTextures {
             black_hdr,
             depth_d2array,
             depth_cube_array,
+            clustered_params,
+            clustered_records,
+            clustered_light_indices,
             screen_layout,
             screen_sampler,
             shadow_compare_sampler,
@@ -346,6 +393,55 @@ fn create_1x1_hdr(device: &wgpu::Device, label: &str) -> Tracked<wgpu::TextureVi
         view_formats: &[],
     });
     Tracked::new(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+}
+
+fn create_default_clustered_params(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_clustered_params"),
+        size: std::mem::size_of::<ClusteredLightingParams>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+
+    let params = ClusteredLightingParams {
+        screen_dimensions: glam::UVec4::new(1, 1, 1, 1),
+        grid_dimensions: glam::UVec4::new(1, 1, 1, 1),
+        budget: glam::UVec4::new(1, 1, 0, 0),
+        depth_params: glam::Vec4::new(0.1, 1.0, 0.0, 0.0),
+    };
+    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&params));
+    buffer
+}
+
+fn create_default_clustered_records(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_clustered_records"),
+        size: std::mem::size_of::<ClusterRecord>() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&ClusterRecord::default()));
+    buffer
+}
+
+fn create_default_clustered_light_indices(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_clustered_light_indices"),
+        size: std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&0u32));
+    buffer
 }
 
 /// Depth32Float 1×1 D2Array fallback for shadow-less frames.

@@ -79,6 +79,13 @@ pub struct PrepareContext<'a> {
     pub system_textures: &'a SystemTextures,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClusteredScreenBindings {
+    pub params: Option<BufferNodeId>,
+    pub records: Option<BufferNodeId>,
+    pub light_indices: Option<BufferNodeId>,
+}
+
 pub struct ViewResolver<'a> {
     pub resources: &'a [ResourceRecord],
     pub pool: &'a mut TransientPool,
@@ -728,25 +735,101 @@ impl ViewResolver<'_> {
 ///
 /// Encapsulates key construction and cache lookup for the screen bind group
 /// used by Opaque, Transparent, and SimpleForward passes.
-///
-/// Callers must destructure [`PrepareContext`] to obtain split borrows of
-/// `global_bind_group_cache` and `device` before calling this function.
 pub fn build_screen_bind_group<'a>(
-    cache: &mut GlobalBindGroupCache,
-    device: &wgpu::Device,
-    sys: &SystemTextures,
-    transmission_view: &Tracked<wgpu::TextureView>,
-    ssao_view: &Tracked<wgpu::TextureView>,
-    shadow_view: &Tracked<wgpu::TextureView>,
-    shadow_cube_view: &Tracked<wgpu::TextureView>,
+    ctx: &mut PrepareContext<'a>,
+    transmission_input: Option<TextureNodeId>,
+    ssao_input: Option<TextureNodeId>,
+    shadow_input: Option<TextureNodeId>,
+    shadow_cube_input: Option<TextureNodeId>,
+    clustered: ClusteredScreenBindings,
 ) -> &'a wgpu::BindGroup {
+    let d2array_key = SubViewKey {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    };
+    if let Some(id) = shadow_input {
+        ctx.views.get_or_create_sub_view(id, &d2array_key);
+    }
+
+    let cube_key = SubViewKey {
+        dimension: Some(wgpu::TextureViewDimension::CubeArray),
+        ..Default::default()
+    };
+    let PrepareContext {
+        views,
+        global_bind_group_cache: cache,
+        device,
+        system_textures: sys,
+        ..
+    } = ctx;
+    let device = *device;
+
+    if let Some(id) = shadow_cube_input {
+        views.get_or_create_sub_view(id, &cube_key);
+    }
+
+    let transmission_view = transmission_input
+        .map(|id| views.get_texture_view(id))
+        .unwrap_or(&sys.black_hdr);
+    let ssao_view = ssao_input
+        .map(|id| views.get_texture_view(id))
+        .unwrap_or(&sys.white_r8);
+    let shadow_view = shadow_input
+        .map(|id| {
+            views
+                .get_sub_view(id, &d2array_key)
+                .expect("Group 3 D2Array shadow view must exist")
+        })
+        .unwrap_or(&sys.depth_d2array);
+    let shadow_cube_view = shadow_cube_input
+        .map(|id| {
+            views
+                .get_sub_view(id, &cube_key)
+                .expect("Group 3 cube-array shadow view must exist")
+        })
+        .unwrap_or(&sys.depth_cube_array);
+
+    let (cluster_params_id, cluster_params_binding) = match clustered.params {
+        Some(id) => (
+            views.get_physical_buffer_uid(id),
+            wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+        ),
+        None => (
+            sys.clustered_params.id(),
+            sys.clustered_params.as_entire_binding(),
+        ),
+    };
+    let (cluster_records_id, cluster_records_binding) = match clustered.records {
+        Some(id) => (
+            views.get_physical_buffer_uid(id),
+            wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+        ),
+        None => (
+            sys.clustered_records.id(),
+            sys.clustered_records.as_entire_binding(),
+        ),
+    };
+    let (cluster_light_indices_id, cluster_light_indices_binding) = match clustered.light_indices {
+        Some(id) => (
+            views.get_physical_buffer_uid(id),
+            wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+        ),
+        None => (
+            sys.clustered_light_indices.id(),
+            sys.clustered_light_indices.as_entire_binding(),
+        ),
+    };
+
     let key = BindGroupKey::new(sys.screen_layout.id())
         .with_resource(transmission_view.id())
         .with_resource(sys.screen_sampler.id())
         .with_resource(ssao_view.id())
         .with_resource(shadow_view.id())
+        .with_resource(shadow_cube_view.id())
         .with_resource(sys.shadow_compare_sampler.id())
-        .with_resource(shadow_cube_view.id());
+        .with_resource(cluster_params_id)
+        .with_resource(cluster_records_id)
+        .with_resource(cluster_light_indices_id);
 
     cache.get_or_create_bg(key, || {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -776,6 +859,18 @@ pub fn build_screen_bind_group<'a>(
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&sys.shadow_compare_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: cluster_params_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: cluster_records_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: cluster_light_indices_binding,
                 },
             ],
         })

@@ -30,11 +30,10 @@
 //!
 //! Transparent commands are sorted back-to-front for correct alpha blending.
 
-use crate::core::gpu::Tracked;
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
-    ExecuteContext, PassNode, PrepareContext, RenderTargetOps, TextureNodeId,
-    build_screen_bind_group,
+    BufferNodeId, ClusteredScreenBindings, ExecuteContext, PassNode, PrepareContext,
+    RenderTargetOps, TextureNodeId, build_screen_bind_group,
 };
 use crate::graph::passes::draw::submit_draw_commands;
 
@@ -74,6 +73,9 @@ impl TransparentFeature {
         ssao_tex: Option<TextureNodeId>,
         shadow_tex: Option<TextureNodeId>,
         shadow_cube_tex: Option<TextureNodeId>,
+        clustered_params: Option<BufferNodeId>,
+        clustered_records: Option<BufferNodeId>,
+        clustered_light_indices: Option<BufferNodeId>,
     ) -> TextureNodeId {
         let fc = ctx.frame_config;
 
@@ -103,6 +105,15 @@ impl TransparentFeature {
             if let Some(shadow_cube) = shadow_cube_tex {
                 builder.read_texture(shadow_cube);
             }
+            if let Some(params) = clustered_params {
+                builder.read_buffer(params);
+            }
+            if let Some(records) = clustered_records {
+                builder.read_buffer(records);
+            }
+            if let Some(indices) = clustered_light_indices {
+                builder.read_buffer(indices);
+            }
 
             let result = resolve_target.unwrap_or(color_output);
 
@@ -115,6 +126,9 @@ impl TransparentFeature {
                 ssao_tex,
                 shadow_tex,
                 shadow_cube_tex,
+                clustered_params,
+                clustered_records,
+                clustered_light_indices,
             );
 
             (node, result)
@@ -124,7 +138,7 @@ impl TransparentFeature {
 
 // ─── Pass Node ─────────────────────────────────────────────────────────
 
-pub struct TransparentPassNode {
+pub struct TransparentPassNode<'a> {
     out_color: TextureNodeId,
     depth_target: TextureNodeId,
     resolve_target: Option<TextureNodeId>,
@@ -132,10 +146,13 @@ pub struct TransparentPassNode {
     ssao_input: Option<TextureNodeId>,
     shadow_input: Option<TextureNodeId>,
     shadow_cube_input: Option<TextureNodeId>,
-    screen_bind_group: Option<&'static wgpu::BindGroup>,
+    clustered_params: Option<BufferNodeId>,
+    clustered_records: Option<BufferNodeId>,
+    clustered_light_indices: Option<BufferNodeId>,
+    screen_bind_group: Option<&'a wgpu::BindGroup>,
 }
 
-impl TransparentPassNode {
+impl TransparentPassNode<'_> {
     #[must_use]
     fn new(
         _in_color: TextureNodeId,
@@ -146,6 +163,9 @@ impl TransparentPassNode {
         ssao_input: Option<TextureNodeId>,
         shadow_input: Option<TextureNodeId>,
         shadow_cube_input: Option<TextureNodeId>,
+        clustered_params: Option<BufferNodeId>,
+        clustered_records: Option<BufferNodeId>,
+        clustered_light_indices: Option<BufferNodeId>,
     ) -> Self {
         Self {
             out_color,
@@ -155,68 +175,27 @@ impl TransparentPassNode {
             ssao_input,
             shadow_input,
             shadow_cube_input,
+            clustered_params,
+            clustered_records,
+            clustered_light_indices,
             screen_bind_group: None,
         }
     }
 }
 
-impl<'a> PassNode<'a> for TransparentPassNode {
+impl<'a> PassNode<'a> for TransparentPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        let PrepareContext {
-            views,
-            global_bind_group_cache: cache,
-            device,
-            system_textures: sys,
-            ..
-        } = ctx;
-        let device = *device;
-
-        let d2array_key = crate::graph::core::allocator::SubViewKey {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        };
-        if let Some(id) = self.shadow_input {
-            views.get_or_create_sub_view(id, &d2array_key);
-        }
-
-        // Pre-create CubeArray sub-view (mutable borrow, result dropped).
-        let cube_key = crate::graph::core::allocator::SubViewKey {
-            dimension: Some(wgpu::TextureViewDimension::CubeArray),
-            ..Default::default()
-        };
-        if let Some(id) = self.shadow_cube_input {
-            views.get_or_create_sub_view(id, &cube_key);
-        }
-
-        // All remaining borrows are immutable.
-        let ssao_view: &Tracked<wgpu::TextureView> = match self.ssao_input {
-            Some(id) => views.get_texture_view(id),
-            None => &sys.white_r8,
-        };
-
-        let transmission_view: &Tracked<wgpu::TextureView> = match self.transmission_input {
-            Some(id) => views.get_texture_view(id),
-            None => &sys.black_hdr,
-        };
-
-        let shadow_view: &Tracked<wgpu::TextureView> = match self.shadow_input {
-            Some(id) => views.get_sub_view(id, &d2array_key).unwrap(),
-            None => &sys.depth_d2array,
-        };
-
-        let shadow_cube_view: &Tracked<wgpu::TextureView> = match self.shadow_cube_input {
-            Some(id) => views.get_sub_view(id, &cube_key).unwrap(),
-            None => &sys.depth_cube_array,
-        };
-
         let bg = build_screen_bind_group(
-            cache,
-            device,
-            sys,
-            transmission_view,
-            ssao_view,
-            shadow_view,
-            shadow_cube_view,
+            ctx,
+            self.transmission_input,
+            self.ssao_input,
+            self.shadow_input,
+            self.shadow_cube_input,
+            ClusteredScreenBindings {
+                params: self.clustered_params,
+                records: self.clustered_records,
+                light_indices: self.clustered_light_indices,
+            },
         );
         self.screen_bind_group = Some(bg);
     }

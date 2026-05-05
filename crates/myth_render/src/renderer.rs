@@ -15,10 +15,10 @@ use crate::graph::passes::DebugViewFeature;
 #[cfg(feature = "3dgs")]
 use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::{
-    AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, EquirectToCubeFeature,
-    FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature,
-    SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature, TaaFeature, ToneMappingFeature,
-    TransmissionCopyFeature, TransparentFeature,
+    AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
+    EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
+    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature,
+    TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -97,6 +97,7 @@ struct RendererState {
     pub(crate) equirect_to_cube_pass: EquirectToCubeFeature,
     pub(crate) ibl_pass: IblComputeFeature,
     pub(crate) atmosphere_pass: AtmosphereFeature,
+    pub(crate) clustered_lighting_pass: ClusteredLightingFeature,
 
     #[cfg(feature = "3dgs")]
     // Gaussian Splatting
@@ -262,6 +263,7 @@ impl Renderer {
             equirect_to_cube_pass,
             ibl_pass,
             atmosphere_pass: AtmosphereFeature::new(),
+            clustered_lighting_pass: ClusteredLightingFeature::new(),
 
             #[cfg(feature = "3dgs")]
             gaussian_splatting_pass: GaussianSplattingFeature::new(),
@@ -438,6 +440,9 @@ impl Renderer {
                 .ibl_pass
                 .extract_and_prepare(&mut extract_ctx, scene.id());
             state.shadow_pass.extract_and_prepare(&mut extract_ctx);
+            state
+                .clustered_lighting_pass
+                .extract_and_prepare(&mut extract_ctx);
 
             // Procedural atmosphere (LUT + cubemap + PMREM compute)
             let procedural_skybox_resources =
@@ -632,6 +637,7 @@ impl Renderer {
             equirect_to_cube_pass: &mut state.equirect_to_cube_pass,
             ibl_pass: &mut state.ibl_pass,
             atmosphere_pass: &mut state.atmosphere_pass,
+            clustered_lighting_pass: &mut state.clustered_lighting_pass,
 
             #[cfg(feature = "3dgs")]
             gaussian_splatting_pass: &mut state.gaussian_splatting_pass,

@@ -22,11 +22,10 @@
 //!
 //! [`BasicForward`]: crate::settings::RenderPath::BasicForward
 
-use crate::core::gpu::Tracked;
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
-    ExecuteContext, PassNode, PrepareContext, RenderTargetOps, TextureDesc, TextureNodeId,
-    build_screen_bind_group,
+    BufferNodeId, ClusteredScreenBindings, ExecuteContext, PassNode, PrepareContext,
+    RenderTargetOps, TextureDesc, TextureNodeId, build_screen_bind_group,
 };
 use crate::graph::frame::PreparedSkyboxDraw;
 use crate::graph::passes::draw::submit_draw_commands;
@@ -57,6 +56,9 @@ impl SimpleForwardFeature {
         shadow_cube_tex: Option<TextureNodeId>,
         env_map_tex: Option<TextureNodeId>,
         pmrem_tex: Option<TextureNodeId>,
+        clustered_params: Option<BufferNodeId>,
+        clustered_records: Option<BufferNodeId>,
+        clustered_light_indices: Option<BufferNodeId>,
     ) {
         let fc = ctx.frame_config;
 
@@ -86,6 +88,15 @@ impl SimpleForwardFeature {
             }
             if let Some(pmrem) = pmrem_tex {
                 builder.read_texture(pmrem);
+            }
+            if let Some(params) = clustered_params {
+                builder.read_buffer(params);
+            }
+            if let Some(records) = clustered_records {
+                builder.read_buffer(records);
+            }
+            if let Some(indices) = clustered_light_indices {
+                builder.read_buffer(indices);
             }
             if let Some(skybox) = prepared_skybox {
                 for dependency in skybox.sampled_textures.into_iter().flatten() {
@@ -117,6 +128,9 @@ impl SimpleForwardFeature {
                 prepared_skybox,
                 shadow_input: shadow_tex,
                 shadow_cube_input: shadow_cube_tex,
+                clustered_params,
+                clustered_records,
+                clustered_light_indices,
                 screen_bind_group: None,
             };
             (node, ())
@@ -141,56 +155,25 @@ pub struct SimpleForwardPassNode<'a> {
     pub prepared_skybox: Option<PreparedSkyboxDraw<'a>>,
     pub shadow_input: Option<TextureNodeId>,
     pub shadow_cube_input: Option<TextureNodeId>,
-    screen_bind_group: Option<&'static wgpu::BindGroup>,
+    pub clustered_params: Option<BufferNodeId>,
+    pub clustered_records: Option<BufferNodeId>,
+    pub clustered_light_indices: Option<BufferNodeId>,
+    screen_bind_group: Option<&'a wgpu::BindGroup>,
 }
 
 impl<'a> PassNode<'a> for SimpleForwardPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        let PrepareContext {
-            views,
-            global_bind_group_cache: cache,
-            device,
-            system_textures: sys,
-            ..
-        } = ctx;
-        let device = *device;
-
-        let d2array_key = crate::graph::core::allocator::SubViewKey {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        };
-        if let Some(id) = self.shadow_input {
-            views.get_or_create_sub_view(id, &d2array_key);
-        }
-
-        // Pre-create CubeArray sub-view (mutable borrow, result dropped).
-        let cube_key = crate::graph::core::allocator::SubViewKey {
-            dimension: Some(wgpu::TextureViewDimension::CubeArray),
-            ..Default::default()
-        };
-        if let Some(id) = self.shadow_cube_input {
-            views.get_or_create_sub_view(id, &cube_key);
-        }
-
-        // All remaining borrows are immutable.
-        let shadow_view: &Tracked<wgpu::TextureView> = match self.shadow_input {
-            Some(id) => views.get_sub_view(id, &d2array_key).unwrap(),
-            None => &sys.depth_d2array,
-        };
-
-        let shadow_cube_view: &Tracked<wgpu::TextureView> = match self.shadow_cube_input {
-            Some(id) => views.get_sub_view(id, &cube_key).unwrap(),
-            None => &sys.depth_cube_array,
-        };
-
         let bg = build_screen_bind_group(
-            cache,
-            device,
-            sys,
-            &sys.black_hdr,
-            &sys.white_r8,
-            shadow_view,
-            shadow_cube_view,
+            ctx,
+            None,
+            None,
+            self.shadow_input,
+            self.shadow_cube_input,
+            ClusteredScreenBindings {
+                params: self.clustered_params,
+                records: self.clustered_records,
+                light_indices: self.clustered_light_indices,
+            },
         );
         self.screen_bind_group = Some(bg);
     }

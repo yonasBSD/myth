@@ -1,6 +1,7 @@
 pub mod atmosphere;
 pub mod bloom;
 pub mod cas;
+pub mod clustered_lighting;
 pub mod compute;
 #[cfg(feature = "debug_view")]
 pub mod debug_view;
@@ -27,6 +28,7 @@ pub mod utils;
 pub use atmosphere::AtmosphereFeature;
 pub use bloom::BloomFeature;
 pub use cas::CasFeature;
+pub use clustered_lighting::ClusteredLightingFeature;
 pub use compute::BrdfLutFeature;
 #[cfg(feature = "debug_view")]
 pub use debug_view::DebugViewFeature;
