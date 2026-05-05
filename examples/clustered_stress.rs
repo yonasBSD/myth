@@ -101,7 +101,7 @@ impl AppHandler for ClusteredStressDemo {
                     let hue = color_index as f32
                         / (LIGHT_LAYERS_X * LIGHT_LAYERS_Y * LIGHT_LAYERS_Z) as f32;
                     let color = hsv_to_rgb(hue, 0.78, 1.0);
-                    let light = scene.add_light(Light::new_point(color, 1.15, 5.0));
+                    let light = scene.add_light(Light::new_point(color, 1.15, 4.0));
                     let helper = scene.spawn_sphere(
                         0.08,
                         PhysicalMaterial::new((color * 0.22).extend(1.0))

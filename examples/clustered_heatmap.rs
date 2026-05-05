@@ -137,7 +137,7 @@ mod app {
                         let light = scene.add_light(Light::new_point(
                             color,
                             0.3 + iy as f32 * 0.22,
-                            7.2 + ix as f32 * 0.22,
+                            5.2 + ix as f32 * 0.22,
                         ));
                         let helper = scene.spawn_sphere(
                             0.04,

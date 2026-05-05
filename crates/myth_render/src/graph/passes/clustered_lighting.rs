@@ -13,7 +13,7 @@ use crate::pipeline::{
     ComputePipelineId, ComputePipelineKey, ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::uniforms::{
-    ClusterAabb, ClusterRecord, ClusteredLightingParams, clustered_lighting_structs_wgsl,
+    ClusterRecord, ClusteredLightingParams, clustered_lighting_structs_wgsl,
 };
 use myth_scene::light::LightKind;
 
@@ -21,8 +21,11 @@ use myth_scene::light::LightKind;
 pub const DEFAULT_CLUSTER_Z_SLICES: u32 = 24;
 /// Approximate screen-space tile size in pixels.
 pub const DEFAULT_CLUSTER_TILE_SIZE: u32 = 120;
-/// Hard cap per cluster for the first implementation.
-pub const DEFAULT_MAX_LIGHTS_PER_CLUSTER: u32 = 128;
+/// Soft per-cluster light budget used for heatmap normalization and global
+/// light-index capacity sizing.
+pub const DEFAULT_MAX_LIGHTS_PER_CLUSTER: u32 = 256;
+/// Workgroup width shared by the clustered light view transform pass.
+pub const CLUSTER_LIGHT_VIEW_TRANSFORM_WG_SIZE: u32 = 64;
 /// Fallback finite far depth when using an infinite reverse-Z camera.
 pub const DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK: f32 = 64.0;
 /// Bit flag stored in `ClusteredLightingParams::budget.z`.
@@ -50,9 +53,9 @@ impl Default for ClusteredLightingConfig {
 pub struct ClusteredLightingFeature {
     pub config: ClusteredLightingConfig,
     params_buffer: Option<Tracked<wgpu::Buffer>>,
-    build_layout: Option<Tracked<wgpu::BindGroupLayout>>,
+    light_view_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     cull_layout: Option<Tracked<wgpu::BindGroupLayout>>,
-    build_pipeline: Option<ComputePipelineId>,
+    light_view_pipeline: Option<ComputePipelineId>,
     cull_pipeline: Option<ComputePipelineId>,
     frame_params: ClusteredLightingParams,
 }
@@ -75,9 +78,9 @@ impl ClusteredLightingFeature {
         Self {
             config: ClusteredLightingConfig::default(),
             params_buffer: None,
-            build_layout: None,
+            light_view_layout: None,
             cull_layout: None,
-            build_pipeline: None,
+            light_view_pipeline: None,
             cull_pipeline: None,
             frame_params: ClusteredLightingParams::default(),
         }
@@ -89,16 +92,6 @@ impl ClusteredLightingFeature {
         BufferDesc::new(
             std::mem::size_of::<ClusteredLightingParams>() as u64,
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        )
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn cluster_aabb_desc(&self) -> BufferDesc {
-        BufferDesc::new(
-            u64::from(self.frame_params.grid_dimensions.y)
-                * std::mem::size_of::<ClusterAabb>() as u64,
-            wgpu::BufferUsages::STORAGE,
         )
     }
 
@@ -121,6 +114,25 @@ impl ClusteredLightingFeature {
         )
     }
 
+    #[inline]
+    #[must_use]
+    pub fn light_index_allocator_desc(&self) -> BufferDesc {
+        BufferDesc::new(
+            std::mem::size_of::<[u32; 4]>() as u64,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        )
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn light_view_positions_desc(&self) -> BufferDesc {
+        BufferDesc::new(
+            u64::from(self.frame_params.budget.w.max(1))
+                * std::mem::size_of::<[f32; 4]>() as u64,
+            wgpu::BufferUsages::STORAGE,
+        )
+    }
+
     #[must_use]
     pub fn params_buffer(&self) -> Option<&Tracked<wgpu::Buffer>> {
         self.params_buffer.as_ref()
@@ -132,14 +144,14 @@ impl ClusteredLightingFeature {
     }
 
     fn ensure_layouts(&mut self, device: &wgpu::Device) {
-        if self.build_layout.is_some() {
+        if self.light_view_layout.is_some() && self.cull_layout.is_some() {
             return;
         }
 
-        self.build_layout = Some(Tracked::new(device.create_bind_group_layout(
+        self.light_view_layout = Some(Tracked::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
-                label: Some("Cluster Build Layout"),
-                entries: &[uniform_entry(0), storage_entry(1, false)],
+                label: Some("Cluster Light View Layout"),
+                entries: &[storage_entry(0, false)],
             },
         )));
 
@@ -148,16 +160,17 @@ impl ClusteredLightingFeature {
                 label: Some("Cluster Cull Layout"),
                 entries: &[
                     uniform_entry(0),
-                    storage_entry(1, true),
+                    storage_entry(1, false),
                     storage_entry(2, false),
                     storage_entry(3, false),
+                    storage_entry(4, true),
                 ],
             },
         )));
     }
 
     fn ensure_pipelines(&mut self, ctx: &mut ExtractContext) {
-        if self.build_pipeline.is_some() && self.cull_pipeline.is_some() {
+        if self.light_view_pipeline.is_some() && self.cull_pipeline.is_some() {
             return;
         }
 
@@ -170,37 +183,33 @@ impl ClusteredLightingFeature {
             .expect("Clustered lighting requires a prepared global bind group");
 
         let compilation_options = wgpu::PipelineCompilationOptions::default();
-        let build_layout = self
-            .build_layout
+        let light_view_layout = self
+            .light_view_layout
             .as_ref()
-            .expect("cluster build layout missing");
+            .expect("cluster light view layout missing");
         let cull_layout = self
             .cull_layout
             .as_ref()
             .expect("cluster cull layout missing");
 
-        if self.build_pipeline.is_none() {
+        if self.light_view_pipeline.is_none() {
             let mut options = ShaderCompilationOptions::default();
             options.inject_code("binding_code", &gpu_world.binding_wgsl);
-            options.inject_code(
-                "clustered_lighting_structs",
-                &clustered_lighting_structs_wgsl(),
-            );
             let (module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/utility/clustered/cluster_build"),
+                ShaderSource::File("entry/utility/clustered/cluster_light_view_transform"),
                 &options,
             );
 
             let layout = ctx
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Cluster Build Pipeline Layout"),
-                    bind_group_layouts: &[Some(&gpu_world.layout), Some(build_layout)],
+                    label: Some("Cluster Light View Pipeline Layout"),
+                    bind_group_layouts: &[Some(&gpu_world.layout), Some(light_view_layout)],
                     immediate_size: 0,
                 });
 
-            self.build_pipeline = Some(
+            self.light_view_pipeline = Some(
                 ctx.pipeline_cache.get_or_create_compute(
                     ctx.device,
                     module,
@@ -208,7 +217,7 @@ impl ClusteredLightingFeature {
                     &ComputePipelineKey::new(shader_hash)
                         .with_compilation_options(&compilation_options),
                     &compilation_options,
-                    "Cluster Build Pipeline",
+                    "Cluster Light View Pipeline",
                 ),
             );
         }
@@ -285,7 +294,7 @@ impl ClusteredLightingFeature {
 
         if effective_max_lights < self.config.max_lights_per_cluster {
             log::warn!(
-                "Clustered lighting light-index buffer clamped from {} to {} lights per cluster by maxStorageBufferBindingSize",
+                "Clustered lighting compact light-index capacity reduced from an average of {} to {} lights per cluster by maxStorageBufferBindingSize; extremely dense scenes may still overflow the global index list",
                 self.config.max_lights_per_cluster,
                 effective_max_lights,
             );
@@ -364,60 +373,63 @@ impl ClusteredLightingFeature {
             };
         }
 
-        let build_layout = self
-            .build_layout
-            .as_ref()
-            .expect("Clustered lighting build layout must exist");
         let cull_layout = self
             .cull_layout
             .as_ref()
             .expect("Clustered lighting cull layout must exist");
-        let build_pipeline = ctx.pipeline_cache.get_compute_pipeline(
-            self.build_pipeline
-                .expect("Clustered build pipeline missing"),
+        let light_view_layout = self
+            .light_view_layout
+            .as_ref()
+            .expect("Clustered lighting light-view layout must exist");
+        let light_view_pipeline = ctx.pipeline_cache.get_compute_pipeline(
+            self.light_view_pipeline
+                .expect("Cluster light view pipeline missing"),
         );
         let cull_pipeline = ctx
             .pipeline_cache
             .get_compute_pipeline(self.cull_pipeline.expect("Clustered cull pipeline missing"));
 
-        let build_outputs = ctx.graph.add_pass("Cluster_Build_Pass", |builder| {
-            let params_buffer = builder.read_buffer(imported_params);
-            let cluster_aabbs = builder.create_buffer("Cluster_Aabbs", self.cluster_aabb_desc());
+        let light_view_positions = ctx.graph.add_pass("Cluster_Light_View_Pass", |builder| {
+            let light_view_positions = builder.create_buffer(
+                "Cluster_Light_View_Positions",
+                self.light_view_positions_desc(),
+            );
 
-            let node = ClusterBuildPassNode {
-                params_buffer,
-                cluster_aabbs,
-                build_layout,
-                build_pipeline,
+            let node = ClusterLightViewPassNode {
+                light_view_positions,
+                light_view_layout,
+                light_view_pipeline,
                 bind_group: None,
-                total_clusters: self.frame_params.grid_dimensions.y,
+                total_lights: self.frame_params.budget.w.max(1),
             };
-            (
-                node,
-                ClusterBuildOutputs {
-                    params_buffer,
-                    cluster_aabbs,
-                },
-            )
+
+            (node, light_view_positions)
         });
 
         ctx.graph.add_pass("Cluster_Cull_Pass", |builder| {
-            let params_buffer = builder.read_buffer(build_outputs.params_buffer);
-            let cluster_aabbs = builder.read_buffer(build_outputs.cluster_aabbs);
+            let params_buffer = builder.read_buffer(imported_params);
+            let light_view_positions = builder.read_buffer(light_view_positions);
             let cluster_records =
                 builder.create_buffer("Cluster_Records", self.cluster_record_desc());
             let light_indices =
                 builder.create_buffer("Cluster_Light_Indices", self.light_index_desc());
+            let light_index_allocator = builder.create_buffer(
+                "Cluster_Light_Index_Allocator",
+                self.light_index_allocator_desc(),
+            );
 
             let node = ClusterCullPassNode {
                 params_buffer,
-                cluster_aabbs,
+                light_view_positions,
                 cluster_records,
                 light_indices,
+                light_index_allocator,
                 cull_layout,
                 cull_pipeline,
                 bind_group: None,
-                total_clusters: self.frame_params.grid_dimensions.y,
+                dispatch_grid_x: self.frame_params.screen_dimensions.z.max(1),
+                dispatch_grid_y: self.frame_params.screen_dimensions.w.max(1),
+                dispatch_grid_z: self.frame_params.grid_dimensions.x.max(1),
             };
             (
                 node,
@@ -429,6 +441,7 @@ impl ClusteredLightingFeature {
             )
         })
     }
+
 }
 
 fn estimate_cluster_scene_max_depth(ctx: &ExtractContext) -> Option<f32> {
@@ -483,12 +496,6 @@ fn resolve_cluster_far_depth(
     (fallback_depth * 1.1).max(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK)
 }
 
-#[derive(Clone, Copy)]
-struct ClusterBuildOutputs {
-    params_buffer: BufferNodeId,
-    cluster_aabbs: BufferNodeId,
-}
-
 struct ClusterParamsImportPassNode;
 
 impl PassNode<'_> for ClusterParamsImportPassNode {
@@ -497,56 +504,68 @@ impl PassNode<'_> for ClusterParamsImportPassNode {
     fn execute(&self, _ctx: &ExecuteContext, _encoder: &mut wgpu::CommandEncoder) {}
 }
 
-struct ClusterBuildPassNode<'a> {
-    params_buffer: BufferNodeId,
-    cluster_aabbs: BufferNodeId,
-    build_layout: &'a Tracked<wgpu::BindGroupLayout>,
-    build_pipeline: &'a wgpu::ComputePipeline,
+struct ClusterLightViewPassNode<'a> {
+    light_view_positions: BufferNodeId,
+    light_view_layout: &'a Tracked<wgpu::BindGroupLayout>,
+    light_view_pipeline: &'a wgpu::ComputePipeline,
     bind_group: Option<&'a wgpu::BindGroup>,
-    total_clusters: u32,
+    total_lights: u32,
 }
 
-impl<'a> PassNode<'a> for ClusterBuildPassNode<'a> {
+impl<'a> PassNode<'a> for ClusterLightViewPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
         self.bind_group = Some(
-            ctx.build_bind_group(self.build_layout, Some("Cluster Build BG"))
-                .bind_buffer(0, self.params_buffer)
-                .bind_buffer(1, self.cluster_aabbs)
+            ctx.build_bind_group(self.light_view_layout, Some("Cluster Light View BG"))
+                .bind_buffer(0, self.light_view_positions)
                 .build(),
         );
     }
 
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Cluster Build Pass"),
+            label: Some("Cluster Light View Pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(self.build_pipeline);
+        pass.set_pipeline(self.light_view_pipeline);
         pass.set_bind_group(0, ctx.baked_lists.global_bind_group, &[]);
-        pass.set_bind_group(1, self.bind_group.expect("Cluster build BG missing"), &[]);
-        pass.dispatch_workgroups(self.total_clusters.div_ceil(64), 1, 1);
+        pass.set_bind_group(1, self.bind_group.expect("Cluster light view BG missing"), &[]);
+        pass.dispatch_workgroups(
+            self.total_lights.div_ceil(CLUSTER_LIGHT_VIEW_TRANSFORM_WG_SIZE),
+            1,
+            1,
+        );
     }
 }
 
 struct ClusterCullPassNode<'a> {
     params_buffer: BufferNodeId,
-    cluster_aabbs: BufferNodeId,
+    light_view_positions: BufferNodeId,
     cluster_records: BufferNodeId,
     light_indices: BufferNodeId,
+    light_index_allocator: BufferNodeId,
     cull_layout: &'a Tracked<wgpu::BindGroupLayout>,
     cull_pipeline: &'a wgpu::ComputePipeline,
     bind_group: Option<&'a wgpu::BindGroup>,
-    total_clusters: u32,
+    dispatch_grid_x: u32,
+    dispatch_grid_y: u32,
+    dispatch_grid_z: u32,
 }
 
 impl<'a> PassNode<'a> for ClusterCullPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
+        ctx.queue.write_buffer(
+            ctx.views.get_buffer(self.light_index_allocator),
+            0,
+            bytemuck::bytes_of(&[0u32; 4]),
+        );
+
         self.bind_group = Some(
             ctx.build_bind_group(self.cull_layout, Some("Cluster Cull BG"))
                 .bind_buffer(0, self.params_buffer)
-                .bind_buffer(1, self.cluster_aabbs)
-                .bind_buffer(2, self.cluster_records)
-                .bind_buffer(3, self.light_indices)
+                .bind_buffer(1, self.cluster_records)
+                .bind_buffer(2, self.light_indices)
+                .bind_buffer(3, self.light_index_allocator)
+                .bind_buffer(4, self.light_view_positions)
                 .build(),
         );
     }
@@ -559,7 +578,11 @@ impl<'a> PassNode<'a> for ClusterCullPassNode<'a> {
         pass.set_pipeline(self.cull_pipeline);
         pass.set_bind_group(0, ctx.baked_lists.global_bind_group, &[]);
         pass.set_bind_group(1, self.bind_group.expect("Cluster cull BG missing"), &[]);
-        pass.dispatch_workgroups(self.total_clusters.div_ceil(64), 1, 1);
+        pass.dispatch_workgroups(
+            self.dispatch_grid_x,
+            self.dispatch_grid_y,
+            self.dispatch_grid_z,
+        );
     }
 }
 

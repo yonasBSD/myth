@@ -1,62 +1,191 @@
-// Assigns visible punctual lights to each cluster using a fixed-capacity
-// light list per cluster to avoid global atomic contention.
+// Assigns visible punctual lights to each cluster using per-cluster frustum
+// tests and a compact global light-index allocator.
 
 {{ binding_code }}
 {{ clustered_lighting_structs }}
 
 @group(1) @binding(0) var<uniform> u_clustered_lighting: ClusteredLightingParams;
-@group(1) @binding(1) var<storage, read> st_cluster_aabbs: array<ClusterAabb>;
-@group(1) @binding(2) var<storage, read_write> st_cluster_records: array<ClusterRecord>;
-@group(1) @binding(3) var<storage, read_write> st_cluster_light_indices: array<u32>;
+@group(1) @binding(1) var<storage, read_write> st_cluster_records: array<ClusterRecord>;
+@group(1) @binding(2) var<storage, read_write> st_cluster_light_indices: array<u32>;
+@group(1) @binding(3) var<storage, read_write> st_light_index_allocator: array<atomic<u32>, 4>;
+@group(1) @binding(4) var<storage, read> st_light_view_positions: array<vec4<f32>>;
 
-fn sphere_intersects_aabb(
-    center: vec3<f32>,
-    radius: f32,
-    aabb_min: vec3<f32>,
-    aabb_max: vec3<f32>,
-) -> bool {
-    let closest = clamp(center, aabb_min, aabb_max);
-    let delta = closest - center;
-    return dot(delta, delta) <= radius * radius;
+const CLUSTER_CULL_WG_SIZE: u32 = 64u;
+const MAX_LOCAL_LIGHTS: u32 = 512u;
+const ALLOCATOR_OFFSET_SLOT: u32 = 0u;
+const ALLOCATOR_OVERFLOW_SLOT: u32 = 1u;
+
+var<workgroup> wg_plane_normals: array<vec4<f32>, 4>;
+var<workgroup> wg_slice_near: f32;
+var<workgroup> wg_slice_far: f32;
+var<workgroup> wg_cluster_index: u32;
+var<workgroup> wg_reserved_offset: u32;
+var<workgroup> wg_reserved_count: u32;
+var<workgroup> wg_total_match_count: u32;
+var<workgroup> wg_local_match_count: atomic<u32>;
+var<workgroup> wg_local_write_count: atomic<u32>;
+var<workgroup> wg_local_light_indices: array<u32, MAX_LOCAL_LIGHTS>;
+
+fn screen_to_ndc(pixel: vec2<f32>) -> vec2<f32> {
+    let size = vec2<f32>(
+        max(f32(u_clustered_lighting.screen_dimensions.x), 1.0),
+        max(f32(u_clustered_lighting.screen_dimensions.y), 1.0),
+    );
+    let uv = pixel / size;
+    return vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
 }
 
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cluster_index = global_id.x;
-    let total_clusters = u_clustered_lighting.grid_dimensions.y;
-    if (cluster_index >= total_clusters) {
+fn slice_depth(slice: u32) -> f32 {
+    let near_plane = u_clustered_lighting.depth_params.x;
+    let far_plane = u_clustered_lighting.depth_params.y;
+    let slice_count = max(f32(u_clustered_lighting.grid_dimensions.x), 1.0);
+    let ratio = max(far_plane / near_plane, 1.0001);
+    return near_plane * pow(ratio, f32(slice) / slice_count);
+}
+
+fn view_ray(pixel: vec2<f32>) -> vec3<f32> {
+    let ndc_xy = screen_to_ndc(pixel);
+    let view = u_render_state.projection_inverse * vec4<f32>(ndc_xy, 1.0, 1.0);
+    return normalize(view.xyz / view.w);
+}
+
+fn oriented_plane_normal(edge_a: vec3<f32>, edge_b: vec3<f32>, inside_dir: vec3<f32>) -> vec3<f32> {
+    var normal = normalize(cross(edge_a, edge_b));
+    if dot(normal, inside_dir) < 0.0 {
+        normal = -normal;
+    }
+    return normal;
+}
+
+fn sphere_intersects_cluster(
+    center: vec3<f32>,
+    radius: f32,
+    slice_near: f32,
+    slice_far: f32,
+) -> bool {
+    let light_depth = -center.z;
+    if light_depth + radius < slice_near || light_depth - radius > slice_far {
+        return false;
+    }
+
+    for (var plane_index = 0u; plane_index < 4u; plane_index += 1u) {
+        let plane_normal = wg_plane_normals[plane_index].xyz;
+        if dot(plane_normal, center) < -radius {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+fn light_intersects_cluster(light_index: u32) -> bool {
+    let light_view = st_light_view_positions[light_index];
+    if light_view.w < 0.0 {
+        return true;
+    }
+
+    return sphere_intersects_cluster(light_view.xyz, light_view.w, wg_slice_near, wg_slice_far);
+}
+
+@compute @workgroup_size(CLUSTER_CULL_WG_SIZE)
+fn main(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+) {
+    let grid_x = max(u_clustered_lighting.screen_dimensions.z, 1u);
+    let grid_y = max(u_clustered_lighting.screen_dimensions.w, 1u);
+    let grid_z = max(u_clustered_lighting.grid_dimensions.x, 1u);
+
+    if workgroup_id.x >= grid_x || workgroup_id.y >= grid_y || workgroup_id.z >= grid_z {
         return;
     }
 
-    let aabb = st_cluster_aabbs[cluster_index];
-    let aabb_min = aabb.min_point.xyz;
-    let aabb_max = aabb.max_point.xyz;
+    if local_id.x == 0u {
+        let cluster_xy = grid_x * grid_y;
+        let cluster_index = workgroup_id.z * cluster_xy + workgroup_id.y * grid_x + workgroup_id.x;
+        let tile_size = vec2<f32>(
+            max(f32(u_clustered_lighting.grid_dimensions.z), 1.0),
+            max(f32(u_clustered_lighting.grid_dimensions.w), 1.0),
+        );
+        let min_pixel = vec2<f32>(f32(workgroup_id.x) * tile_size.x, f32(workgroup_id.y) * tile_size.y);
+        let max_pixel = vec2<f32>(
+            min(f32(u_clustered_lighting.screen_dimensions.x), f32(workgroup_id.x + 1u) * tile_size.x),
+            min(f32(u_clustered_lighting.screen_dimensions.y), f32(workgroup_id.y + 1u) * tile_size.y),
+        );
 
-    let max_lights_per_cluster = max(u_clustered_lighting.budget.x, 1u);
-    let base_offset = cluster_index * max_lights_per_cluster;
+        let top_left = view_ray(min_pixel);
+        let top_right = view_ray(vec2<f32>(max_pixel.x, min_pixel.y));
+        let bottom_left = view_ray(vec2<f32>(min_pixel.x, max_pixel.y));
+        let bottom_right = view_ray(max_pixel);
+        let center_dir = normalize(top_left + top_right + bottom_left + bottom_right);
 
-    var count = 0u;
+        wg_plane_normals[0] = vec4<f32>(oriented_plane_normal(bottom_left, top_left, center_dir), 0.0);
+        wg_plane_normals[1] = vec4<f32>(oriented_plane_normal(top_right, bottom_right, center_dir), 0.0);
+        wg_plane_normals[2] = vec4<f32>(oriented_plane_normal(top_left, top_right, center_dir), 0.0);
+        wg_plane_normals[3] = vec4<f32>(oriented_plane_normal(bottom_right, bottom_left, center_dir), 0.0);
+        wg_slice_near = slice_depth(workgroup_id.z);
+        wg_slice_far = slice_depth(workgroup_id.z + 1u);
+        wg_cluster_index = cluster_index;
+        wg_reserved_offset = 0u;
+        wg_reserved_count = 0u;
+        wg_total_match_count = 0u;
+        atomicStore(&wg_local_match_count, 0u);
+        atomicStore(&wg_local_write_count, 0u);
+    }
 
-    for (var i = 0u; i < u_environment.num_lights; i += 1u) {
-        let light = st_lights[i];
-        var intersects = false;
+    workgroupBarrier();
 
-        if (light.light_type == 0u || light.range <= 0.0) {
-            intersects = true;
-        } else {
-            let view_pos = (u_render_state.view_matrix * vec4<f32>(light.position, 1.0)).xyz;
-            intersects = sphere_intersects_aabb(view_pos, light.range, aabb_min, aabb_max);
-        }
-
-        if (intersects) {
-            if (count >= max_lights_per_cluster) {
-                break;
+    for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
+        if light_intersects_cluster(light_index) {
+            let local_match_index = atomicAdd(&wg_local_match_count, 1u);
+            if local_match_index < MAX_LOCAL_LIGHTS {
+                wg_local_light_indices[local_match_index] = light_index;
             }
-
-            st_cluster_light_indices[base_offset + count] = i;
-            count += 1u;
         }
     }
 
-    st_cluster_records[cluster_index] = ClusterRecord(base_offset, count, 0u, 0u);
+    workgroupBarrier();
+
+    if local_id.x == 0u {
+        let matched_count = atomicLoad(&wg_local_match_count);
+        wg_total_match_count = matched_count;
+        let max_light_indices = max(u_clustered_lighting.budget.y, 1u);
+        let requested_offset = atomicAdd(&st_light_index_allocator[ALLOCATOR_OFFSET_SLOT], matched_count);
+        let clamped_offset = min(requested_offset, max_light_indices);
+        let available = max_light_indices - clamped_offset;
+        let reserved_count = min(matched_count, available);
+
+        if matched_count > reserved_count {
+            atomicAdd(
+                &st_light_index_allocator[ALLOCATOR_OVERFLOW_SLOT],
+                matched_count - reserved_count,
+            );
+        }
+
+        wg_reserved_offset = clamped_offset;
+        wg_reserved_count = reserved_count;
+        st_cluster_records[wg_cluster_index] = ClusterRecord(clamped_offset, reserved_count, 0u, 0u);
+    }
+
+    workgroupBarrier();
+
+    if wg_reserved_count == 0u {
+        return;
+    }
+
+    if wg_total_match_count <= MAX_LOCAL_LIGHTS {
+        for (var cached_index = local_id.x; cached_index < wg_reserved_count; cached_index += CLUSTER_CULL_WG_SIZE) {
+            st_cluster_light_indices[wg_reserved_offset + cached_index] = wg_local_light_indices[cached_index];
+        }
+        return;
+    }
+
+    for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
+        if light_intersects_cluster(light_index) {
+            let write_index = atomicAdd(&wg_local_write_count, 1u);
+            if write_index < wg_reserved_count {
+                st_cluster_light_indices[wg_reserved_offset + write_index] = light_index;
+            }
+        }
+    }
 }
