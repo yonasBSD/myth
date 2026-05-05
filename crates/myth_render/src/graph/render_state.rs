@@ -31,6 +31,7 @@ pub enum DebugViewTarget {
     SceneNormal,
     Velocity,
     SsaoRaw,
+    ClusterHeatmap,
 }
 
 #[cfg(feature = "debug_view")]
@@ -47,6 +48,7 @@ impl DebugViewTarget {
             DebugViewMode::Normal => Self::SceneNormal,
             DebugViewMode::Velocity => Self::Velocity,
             DebugViewMode::Depth => Self::SceneDepth,
+            DebugViewMode::ClusterHeatmap => Self::ClusterHeatmap,
             _ => Self::None,
         }
     }
@@ -58,6 +60,7 @@ impl DebugViewTarget {
     /// | 2    | Normal → signed vector remap |
     /// | 3    | Velocity → directional colour |
     /// | 4    | Depth → linearised reverse-Z |
+    /// | 5    | Cluster heatmap |
     #[must_use]
     pub const fn view_mode(self) -> u32 {
         match self {
@@ -66,6 +69,7 @@ impl DebugViewTarget {
             Self::SceneNormal => 2,
             Self::Velocity => 3,
             Self::SceneDepth => 4,
+            Self::ClusterHeatmap => 5,
         }
     }
 }

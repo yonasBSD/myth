@@ -47,6 +47,22 @@ Use `HIGH_FIDELITY` when you need bloom, tone mapping, SSAO, or Gaussian splatti
 
 ---
 
+## ClusteredShadingMode
+
+```python
+myth.ClusteredShadingMode.force_off()
+myth.ClusteredShadingMode.force_on()
+myth.ClusteredShadingMode.auto(threshold=16)
+```
+
+| Mode | Meaning |
+| --- | --- |
+| `force_off()` | Always use the classic forward light loop |
+| `force_on()` | Always run clustered-lighting compute passes |
+| `auto(threshold=N)` | Switch to clustered shading once the scene light count reaches `N` |
+
+---
+
 ## App
 
 `App` is the highest-level entry point.
@@ -56,6 +72,7 @@ app = myth.App(
     title="Myth Engine",
     render_path=myth.RenderPath.HIGH_FIDELITY,
     vsync=True,
+    clustered_shading=myth.ClusteredShadingMode.auto(20),
     clear_color=[0.1, 0.1, 0.1, 1.0],
 )
 ```
@@ -66,6 +83,7 @@ Core members:
 | --- | --- | --- |
 | `title` | `str` | Window title |
 | `render_path` | `str | RenderPath` | Defaults to the basic path when omitted |
+| `clustered_shading` | `str | ClusteredShadingMode` | Controls classic-vs-clustered forward lighting routing |
 | `vsync` | `bool` | Presentation mode toggle |
 | `clear_color` | `ColorInput` | Wrapper-side property; use `scene.set_background_color(...)` for visible scene background |
 
@@ -95,6 +113,7 @@ The engine context is only valid during `@app.init` and `@app.update` callbacks.
 renderer = myth.Renderer(
     render_path=myth.RenderPath.HIGH_FIDELITY,
     vsync=True,
+    clustered_shading=myth.ClusteredShadingMode.force_on(),
 )
 ```
 

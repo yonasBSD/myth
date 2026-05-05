@@ -139,6 +139,9 @@ fn prepare_main_camera_commands(
     let render_state_id = render_state.id;
     let scene_id = extracted_scene.scene_id;
     let pipeline_settings_version = wgpu_ctx.pipeline_settings_version;
+    let use_clustered_shading = extracted_scene
+        .scene_variants
+        .contains(SceneFeatures::USE_CLUSTERED_SHADING);
     let taa_enabled = matches!(camera.aa_mode, AntiAliasingMode::TAA { .. });
     let camera_frustum = camera.frustum;
     let camera_pos = camera.position;
@@ -232,6 +235,10 @@ fn prepare_main_camera_commands(
                     &item.item_shader_defines,
                 );
 
+                if use_clustered_shading {
+                    options.add_define("USE_CLUSTERED_SHADING", "1");
+                }
+
                 if final_a2c_enable {
                     options.add_define("ALPHA_TO_COVERAGE", "1");
                     flags |= PipelineFlags::ALPHA_TO_COVERAGE;
@@ -296,7 +303,11 @@ fn prepare_main_camera_commands(
                         gpu_world.layout_id,
                         gpu_material.layout_id,
                         object_bind_group.layout_id,
-                        resource_manager.system_textures.screen_layout.id(),
+                        if use_clustered_shading {
+                            resource_manager.system_textures.screen_layout_clustered.id()
+                        } else {
+                            resource_manager.system_textures.screen_layout.id()
+                        },
                     ],
                     topology: geometry.topology,
                     cull_mode: match material.side() {
@@ -331,7 +342,11 @@ fn prepare_main_camera_commands(
                     gpu_material,
                     object_bind_group,
                     gpu_world,
-                    &resource_manager.system_textures.screen_layout,
+                    if use_clustered_shading {
+                        &resource_manager.system_textures.screen_layout_clustered
+                    } else {
+                        &resource_manager.system_textures.screen_layout
+                    },
                 );
 
                 pipeline_cache.insert_pipeline_fast(fast_key, id);

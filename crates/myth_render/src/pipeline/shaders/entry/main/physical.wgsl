@@ -6,7 +6,9 @@
 
 {{ vertex_input_code }} 
 {{ binding_code }}
+$$ if USE_CLUSTERED_SHADING is defined
 {{ clustered_lighting_structs }}
+$$ endif
 {$ include 'core/vertex_output' $}
 {$ include 'core/fragment_output' $}
 
@@ -27,17 +29,18 @@ $$ endif
 
 // ── Screen / Transient BindGroup (Group 3) ──────────────────────────
 //
-// All entries are always bound.  When a feature is disabled the pass
-// substitutes a harmless 1×1 dummy texture so that the layout stays
-// fixed and no per-permutation rebinding is needed.
+// Bindings 0-5 are always present. Clustered variants append bindings 6-8
+// so non-clustered pipelines keep the original forward layout.
 @group(3) @binding(1) var s_screen_sampler: sampler;
 @group(3) @binding(2) var t_ssao: texture_2d<f32>;
 @group(3) @binding(3) var t_shadow_map_2d_array: texture_depth_2d_array;
 @group(3) @binding(4) var t_shadow_map_cube_array: texture_depth_cube_array;
 @group(3) @binding(5) var s_shadow_map_compare: sampler_comparison;
+$$ if USE_CLUSTERED_SHADING is defined
 @group(3) @binding(6) var<uniform> u_clustered_lighting: ClusteredLightingParams;
 @group(3) @binding(7) var<storage, read> st_cluster_records: array<ClusterRecord>;
 @group(3) @binding(8) var<storage, read> st_cluster_light_indices: array<u32>;
+$$ endif
 
 @vertex
 fn vs_main(in: VertexInput, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {

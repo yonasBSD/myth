@@ -34,12 +34,14 @@ use wgpu::CommandEncoder;
 use crate::core::gpu::{CommonSampler, Tracked};
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
-    ExecuteContext, ExtractContext, PassNode, PrepareContext, RenderTargetOps, TextureNodeId,
+    ClusteredScreenBindings, ExecuteContext, ExtractContext, PassNode, PrepareContext,
+    RenderTargetOps, TextureNodeId,
 };
 use crate::pipeline::{
     ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::buffer::CpuBuffer;
+use myth_resources::uniforms::clustered_lighting_structs_wgsl;
 
 // ─── GPU Uniform Layout ─────────────────────────────────────────────────────
 
@@ -159,32 +161,76 @@ impl DebugViewFeature {
         self.transient_layout_color = Some(Tracked::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("DebugView Transient Layout Color (G1)"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             },
         )));
 
         self.transient_layout_depth = Some(Tracked::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("DebugView Transient Layout Depth (G1)"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             },
         )));
     }
@@ -210,6 +256,10 @@ impl DebugViewFeature {
         // ── Pipeline (re)creation on format change ─────────────────
         if self.l1_cache_format != Some(output_format) || self.l1_cache_is_depth != Some(is_depth) {
             let mut options = ShaderCompilationOptions::default();
+            options.inject_code(
+                "clustered_lighting_structs",
+                &clustered_lighting_structs_wgsl(),
+            );
 
             if is_depth {
                 options.add_define("IS_DEPTH", "1");
@@ -297,6 +347,7 @@ impl DebugViewFeature {
         source_tex: TextureNodeId,
         target_surface: TextureNodeId,
         is_depth: bool,
+        clustered: ClusteredScreenBindings,
     ) -> TextureNodeId {
         let pipeline_id = self.pipeline_id.expect("DebugViewFeature not prepared");
         let pipeline = ctx.pipeline_cache.get_render_pipeline(pipeline_id);
@@ -312,6 +363,12 @@ impl DebugViewFeature {
 
         ctx.graph.add_pass("DebugView_Pass", |builder| {
             builder.read_texture(source_tex);
+            if let Some(params) = clustered.params {
+                builder.read_buffer(params);
+            }
+            if let Some(records) = clustered.records {
+                builder.read_buffer(records);
+            }
             let output = builder.mutate_texture(target_surface, "Surface_DebugView");
 
             let node = DebugViewPassNode {
@@ -320,6 +377,8 @@ impl DebugViewFeature {
                 pipeline,
                 static_bg,
                 transient_layout,
+                clustered_params: clustered.params,
+                clustered_records: clustered.records,
                 transient_bg: None,
             };
             (node, output)
@@ -339,17 +398,34 @@ struct DebugViewPassNode<'a> {
     static_bg: &'a wgpu::BindGroup,
     /// Layout for transient bind group (Group 1).
     transient_layout: &'a Tracked<wgpu::BindGroupLayout>,
+    clustered_params: Option<crate::graph::core::BufferNodeId>,
+    clustered_records: Option<crate::graph::core::BufferNodeId>,
     /// Transient bind group built in `prepare()`.
     transient_bg: Option<&'a wgpu::BindGroup>,
 }
 
 impl<'a> PassNode<'a> for DebugViewPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        self.transient_bg = Some(
-            crate::myth_bind_group!(ctx, self.transient_layout, Some("DebugView Transient BG (G1)"), [
-                0 => self.source_tex,
-            ]),
-        );
+        let fallback_params = &ctx.system_textures.clustered_params;
+        let fallback_records = &ctx.system_textures.clustered_records;
+
+        let mut builder = ctx
+            .build_bind_group(self.transient_layout, Some("DebugView Transient BG (G1)"))
+            .bind_texture(0, self.source_tex);
+
+        builder = if let Some(params) = self.clustered_params {
+            builder.bind_buffer(1, params)
+        } else {
+            builder.bind_tracked_buffer(1, fallback_params)
+        };
+
+        builder = if let Some(records) = self.clustered_records {
+            builder.bind_buffer(2, records)
+        } else {
+            builder.bind_tracked_buffer(2, fallback_records)
+        };
+
+        self.transient_bg = Some(builder.build());
     }
 
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut CommandEncoder) {

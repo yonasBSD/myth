@@ -115,7 +115,9 @@ pub mod math {
 pub mod render {
     pub use myth_render::graph::{FrameComposer, RenderState};
     pub use myth_render::renderer::Renderer;
-    pub use myth_render::settings::{RenderPath, RendererInitConfig, RendererSettings};
+    pub use myth_render::settings::{
+        ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings,
+    };
 
     /// Low-level GPU context access.
     pub mod core {
@@ -176,7 +178,8 @@ pub mod prelude {
     // Renderer
     pub use myth_render::graph::FrameComposer;
     pub use myth_render::settings::{
-        AntiAliasingMode, RenderPath, RendererInitConfig, RendererSettings,
+        AntiAliasingMode, ClusteredShadingMode, RenderPath, RendererInitConfig,
+        RendererSettings,
     };
     #[cfg(feature = "debug_view")]
     pub use myth_scene::{DebugViewMode, DebugViewSettings};
@@ -192,6 +195,7 @@ pub use myth_app::winit::App;
 pub use myth_app::{AppHandler, Window};
 pub use myth_app::{Engine, FrameState};
 pub use myth_macros::main;
+pub use myth_render::ClusteredShadingMode;
 
 // Scene
 pub use myth_core::{NodeHandle, Transform};

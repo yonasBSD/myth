@@ -27,10 +27,13 @@ use myth_scene::background::BackgroundMode;
 use myth_scene::camera::RenderCamera;
 
 use crate::core::{ResourceManager, WgpuContext};
+use crate::graph::extracted::SceneFeatures;
 use crate::graph::{FrameComposer, RenderFrame};
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
-use crate::settings::{RenderPath, RendererInitConfig, RendererSettings};
+use crate::settings::{
+    ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings,
+};
 
 /// The main renderer responsible for GPU rendering operations.
 ///
@@ -353,6 +356,26 @@ impl Renderer {
             state.wgpu_ctx.pipeline_settings_version += 1;
         }
 
+        let active_light_count = state.render_frame.extracted_scene.lights.len() as u32;
+        let clustered_lighting_enabled = self
+            .settings
+            .clustered_shading
+            .is_enabled(active_light_count);
+
+        if clustered_lighting_enabled {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .insert(SceneFeatures::USE_CLUSTERED_SHADING);
+        } else {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .remove(SceneFeatures::USE_CLUSTERED_SHADING);
+        }
+
         // ── Phase 2: Cull + sort + command generation ───────────────────
         crate::graph::culling::cull_and_sort(
             &state.render_frame.extracted_scene,
@@ -413,7 +436,6 @@ impl Renderer {
             // let needs_normal = ssao_enabled || needs_feature_id;
             let needs_skybox = scene.background.needs_skybox_pass();
             let bloom_enabled = scene.bloom.enabled && is_hf;
-
             let mut extract_ctx = ExtractContext {
                 device: &state.wgpu_ctx.device,
                 queue: &state.wgpu_ctx.queue,
@@ -442,7 +464,11 @@ impl Renderer {
             state.shadow_pass.extract_and_prepare(&mut extract_ctx);
             state
                 .clustered_lighting_pass
-                .extract_and_prepare(&mut extract_ctx);
+                .extract_and_prepare(
+                    &mut extract_ctx,
+                    clustered_lighting_enabled,
+                    active_light_count,
+                );
 
             // Procedural atmosphere (LUT + cubemap + PMREM compute)
             let procedural_skybox_resources =
@@ -580,7 +606,10 @@ impl Renderer {
                                 camera.far
                             },
                         };
-                        let is_depth = target == DebugViewTarget::SceneDepth;
+                        let is_depth = matches!(
+                            target,
+                            DebugViewTarget::SceneDepth | DebugViewTarget::ClusterHeatmap
+                        );
                         state.debug_view_pass.extract_and_prepare(
                             &mut extract_ctx,
                             view_format,
@@ -601,6 +630,8 @@ impl Renderer {
 
             extracted_scene: &state.render_frame.extracted_scene,
             render_state: &state.render_frame.render_state,
+            renderer_settings: &self.settings,
+            clustered_lighting_enabled,
 
             global_bind_group_cache: &mut state.global_bind_group_cache,
 
@@ -719,6 +750,23 @@ impl Renderer {
                     self.settings.anisotropy_clamp
                 );
             }
+
+            if old.clustered_shading != self.settings.clustered_shading {
+                state.wgpu_ctx.pipeline_settings_version += 1;
+                log::info!(
+                    "Clustered shading mode changed to {:?}",
+                    self.settings.clustered_shading
+                );
+            }
+        }
+    }
+
+    /// Sets the runtime clustered-lighting routing mode.
+    pub fn set_clustered_shading_mode(&mut self, mode: ClusteredShadingMode) {
+        if self.settings.clustered_shading != mode {
+            let mut new = self.settings.clone();
+            new.clustered_shading = mode;
+            self.update_settings(new);
         }
     }
 

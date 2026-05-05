@@ -15,6 +15,7 @@ use crate::pipeline::{
 use myth_resources::uniforms::{
     ClusterAabb, ClusterRecord, ClusteredLightingParams, clustered_lighting_structs_wgsl,
 };
+use myth_scene::light::LightKind;
 
 /// Default cluster depth slices for forward clustered lighting.
 pub const DEFAULT_CLUSTER_Z_SLICES: u32 = 24;
@@ -22,6 +23,10 @@ pub const DEFAULT_CLUSTER_Z_SLICES: u32 = 24;
 pub const DEFAULT_CLUSTER_TILE_SIZE: u32 = 120;
 /// Hard cap per cluster for the first implementation.
 pub const DEFAULT_MAX_LIGHTS_PER_CLUSTER: u32 = 128;
+/// Fallback finite far depth when using an infinite reverse-Z camera.
+pub const DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK: f32 = 64.0;
+/// Bit flag stored in `ClusteredLightingParams::budget.z`.
+pub const CLUSTERED_LIGHTING_FLAG_ENABLED: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClusteredLightingConfig {
@@ -54,8 +59,8 @@ pub struct ClusteredLightingFeature {
 
 pub struct ClusteredLightingOutputs {
     pub params_buffer: BufferNodeId,
-    pub cluster_records: BufferNodeId,
-    pub light_indices: BufferNodeId,
+    pub cluster_records: Option<BufferNodeId>,
+    pub light_indices: Option<BufferNodeId>,
 }
 
 impl Default for ClusteredLightingFeature {
@@ -243,13 +248,24 @@ impl ClusteredLightingFeature {
         }
     }
 
-    pub fn extract_and_prepare(&mut self, ctx: &mut ExtractContext) {
+    pub fn extract_and_prepare(
+        &mut self,
+        ctx: &mut ExtractContext,
+        enabled: bool,
+        active_light_count: u32,
+    ) {
         let render_uniforms = ctx.render_state.uniforms().read();
         let width = render_uniforms.viewport.x.max(1.0) as u32;
         let height = render_uniforms.viewport.y.max(1.0) as u32;
         let near = render_uniforms.camera_near.max(0.001);
-        let far = render_uniforms.camera_far.max(near + 0.001);
+        let camera_far = render_uniforms.camera_far;
         drop(render_uniforms);
+
+        let far = resolve_cluster_far_depth(
+            near,
+            camera_far,
+            estimate_cluster_scene_max_depth(ctx),
+        );
 
         let cluster_x = width.div_ceil(self.config.tile_size_x.max(1));
         let cluster_y = height.div_ceil(self.config.tile_size_y.max(1));
@@ -290,8 +306,12 @@ impl ClusteredLightingFeature {
             budget: glam::UVec4::new(
                 effective_max_lights,
                 effective_light_indices.max(1) as u32,
-                0,
-                0,
+                if enabled {
+                    CLUSTERED_LIGHTING_FLAG_ENABLED
+                } else {
+                    0
+                },
+                active_light_count,
             ),
             depth_params: glam::Vec4::new(near, far, slice_scale, slice_bias),
         };
@@ -318,11 +338,32 @@ impl ClusteredLightingFeature {
     pub fn add_to_graph<'a>(
         &'a self,
         ctx: &mut GraphBuilderContext<'a, '_>,
+        enabled: bool,
     ) -> ClusteredLightingOutputs {
         let params_buffer = self
             .params_buffer
             .as_ref()
             .expect("Clustered lighting params buffer must exist before graph build");
+        let imported_params = ctx.graph.add_pass("Cluster_Params_Import", |builder| {
+            let params_buffer = builder.read_external_buffer(
+                "Clustered_Params",
+                BufferDesc::new(
+                    std::mem::size_of::<ClusteredLightingParams>() as u64,
+                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                ),
+                params_buffer,
+            );
+            (ClusterParamsImportPassNode, params_buffer)
+        });
+
+        if !enabled {
+            return ClusteredLightingOutputs {
+                params_buffer: imported_params,
+                cluster_records: None,
+                light_indices: None,
+            };
+        }
+
         let build_layout = self
             .build_layout
             .as_ref()
@@ -340,14 +381,7 @@ impl ClusteredLightingFeature {
             .get_compute_pipeline(self.cull_pipeline.expect("Clustered cull pipeline missing"));
 
         let build_outputs = ctx.graph.add_pass("Cluster_Build_Pass", |builder| {
-            let params_buffer = builder.read_external_buffer(
-                "Clustered_Params",
-                BufferDesc::new(
-                    std::mem::size_of::<ClusteredLightingParams>() as u64,
-                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                ),
-                params_buffer,
-            );
+            let params_buffer = builder.read_buffer(imported_params);
             let cluster_aabbs = builder.create_buffer("Cluster_Aabbs", self.cluster_aabb_desc());
 
             let node = ClusterBuildPassNode {
@@ -389,18 +423,78 @@ impl ClusteredLightingFeature {
                 node,
                 ClusteredLightingOutputs {
                     params_buffer,
-                    cluster_records,
-                    light_indices,
+                    cluster_records: Some(cluster_records),
+                    light_indices: Some(light_indices),
                 },
             )
         })
     }
 }
 
+fn estimate_cluster_scene_max_depth(ctx: &ExtractContext) -> Option<f32> {
+    let view_matrix = ctx.render_camera.view_matrix;
+    let mut max_depth = 0.0_f32;
+
+    for item in &ctx.extracted_scene.render_items {
+        let aabb = item.world_aabb;
+        if !aabb.is_finite() {
+            continue;
+        }
+
+        let view_center = view_matrix * aabb.center().extend(1.0);
+        let view_radius = aabb.size().length() * 0.5;
+        let far_depth = -view_center.z + view_radius;
+        if far_depth.is_finite() {
+            max_depth = max_depth.max(far_depth);
+        }
+    }
+
+    for light in &ctx.extracted_scene.lights {
+        let range = match &light.kind {
+            LightKind::Point(point) => point.range,
+            LightKind::Spot(spot) => spot.range,
+            LightKind::Directional(_) => 0.0,
+        };
+
+        if range <= 0.0 {
+            continue;
+        }
+
+        let view_center = view_matrix * light.position.extend(1.0);
+        let far_depth = -view_center.z + range;
+        if far_depth.is_finite() {
+            max_depth = max_depth.max(far_depth);
+        }
+    }
+
+    (max_depth > 0.0).then_some(max_depth)
+}
+
+fn resolve_cluster_far_depth(
+    near: f32,
+    camera_far: f32,
+    estimated_scene_depth: Option<f32>,
+) -> f32 {
+    if camera_far.is_finite() {
+        return camera_far.max(near + 0.001);
+    }
+
+    let fallback_depth = estimated_scene_depth.unwrap_or(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK);
+    (fallback_depth * 1.1).max(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK)
+}
+
 #[derive(Clone, Copy)]
 struct ClusterBuildOutputs {
     params_buffer: BufferNodeId,
     cluster_aabbs: BufferNodeId,
+}
+
+struct ClusterParamsImportPassNode;
+
+impl PassNode<'_> for ClusterParamsImportPassNode {
+    fn prepare(&mut self, _ctx: &mut PrepareContext<'_>) {}
+
+    fn execute(&self, _ctx: &ExecuteContext, _encoder: &mut wgpu::CommandEncoder) {}
 }
 
 struct ClusterBuildPassNode<'a> {
@@ -514,5 +608,25 @@ fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
             min_binding_size: None,
         },
         count: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK, resolve_cluster_far_depth};
+
+    #[test]
+    fn infinite_camera_far_resolves_to_finite_cluster_depth() {
+        let far = resolve_cluster_far_depth(0.1, f32::INFINITY, Some(48.0));
+        assert!(far.is_finite());
+        assert!(far > 48.0);
+    }
+
+    #[test]
+    fn infinite_camera_far_uses_fallback_when_scene_depth_missing() {
+        let near = 0.25;
+        let far = resolve_cluster_far_depth(near, f32::INFINITY, None);
+        assert!(far.is_finite());
+        assert!(far >= near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK);
     }
 }

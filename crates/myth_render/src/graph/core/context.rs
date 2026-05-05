@@ -86,6 +86,16 @@ pub struct ClusteredScreenBindings {
     pub light_indices: Option<BufferNodeId>,
 }
 
+impl ClusteredScreenBindings {
+    #[must_use]
+    pub fn is_complete(self) -> bool {
+        matches!(
+            (self.params, self.records, self.light_indices),
+            (Some(_), Some(_), Some(_))
+        )
+    }
+}
+
 pub struct ViewResolver<'a> {
     pub resources: &'a [ResourceRecord],
     pub pool: &'a mut TransientPool,
@@ -789,6 +799,56 @@ pub fn build_screen_bind_group<'a>(
         })
         .unwrap_or(&sys.depth_cube_array);
 
+    let use_clustered_layout = clustered.is_complete();
+    let layout = if use_clustered_layout {
+        &sys.screen_layout_clustered
+    } else {
+        &sys.screen_layout
+    };
+
+    let base_key = BindGroupKey::new(layout.id())
+        .with_resource(transmission_view.id())
+        .with_resource(sys.screen_sampler.id())
+        .with_resource(ssao_view.id())
+        .with_resource(shadow_view.id())
+        .with_resource(shadow_cube_view.id())
+        .with_resource(sys.shadow_compare_sampler.id());
+
+    if !use_clustered_layout {
+        return cache.get_or_create_bg(base_key, || {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Screen BindGroup (Group 3)"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(transmission_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sys.screen_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(ssao_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(shadow_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(shadow_cube_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Sampler(&sys.shadow_compare_sampler),
+                    },
+                ],
+            })
+        });
+    }
+
     let (cluster_params_id, cluster_params_binding) = match clustered.params {
         Some(id) => (
             views.get_physical_buffer_uid(id),
@@ -820,13 +880,7 @@ pub fn build_screen_bind_group<'a>(
         ),
     };
 
-    let key = BindGroupKey::new(sys.screen_layout.id())
-        .with_resource(transmission_view.id())
-        .with_resource(sys.screen_sampler.id())
-        .with_resource(ssao_view.id())
-        .with_resource(shadow_view.id())
-        .with_resource(shadow_cube_view.id())
-        .with_resource(sys.shadow_compare_sampler.id())
+    let key = base_key
         .with_resource(cluster_params_id)
         .with_resource(cluster_records_id)
         .with_resource(cluster_light_indices_id);
@@ -834,7 +888,7 @@ pub fn build_screen_bind_group<'a>(
     cache.get_or_create_bg(key, || {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Screen BindGroup (Group 3)"),
-            layout: &sys.screen_layout,
+            layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,

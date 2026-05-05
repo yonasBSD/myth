@@ -47,6 +47,22 @@ myth.RenderPath.HIGH_FIDELITY
 
 ---
 
+## ClusteredShadingMode
+
+```python
+myth.ClusteredShadingMode.force_off()
+myth.ClusteredShadingMode.force_on()
+myth.ClusteredShadingMode.auto(threshold=16)
+```
+
+| 模式 | 含义 |
+| --- | --- |
+| `force_off()` | 永远使用普通 forward 光照循环 |
+| `force_on()` | 永远启用 clustered lighting compute passes |
+| `auto(threshold=N)` | 当场景灯光数量达到 `N` 时切换到 clustered 路径 |
+
+---
+
 ## App
 
 App 是最高层入口。
@@ -56,6 +72,7 @@ app = myth.App(
     title="Myth Engine",
     render_path=myth.RenderPath.HIGH_FIDELITY,
     vsync=True,
+    clustered_shading=myth.ClusteredShadingMode.auto(20),
     clear_color=[0.1, 0.1, 0.1, 1.0],
 )
 ```
@@ -66,6 +83,7 @@ app = myth.App(
 | --- | --- | --- |
 | title | str | 窗口标题 |
 | render_path | str | RenderPath | 未显式设置时默认走基础路径 |
+| clustered_shading | str | ClusteredShadingMode | 控制普通 forward 与 clustered 路由 |
 | vsync | bool | 呈现同步开关 |
 | clear_color | ColorInput | 包装层清屏颜色；可见背景通常用 scene.set_background_color(...) 设置 |
 
@@ -95,6 +113,7 @@ Renderer 暴露引擎能力，但不拥有窗口。适合 GLFW、Qt、rendercanv
 renderer = myth.Renderer(
     render_path=myth.RenderPath.HIGH_FIDELITY,
     vsync=True,
+    clustered_shading=myth.ClusteredShadingMode.force_on(),
 )
 ```
 

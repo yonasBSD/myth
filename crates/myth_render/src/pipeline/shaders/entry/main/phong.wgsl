@@ -5,7 +5,9 @@
 
 {{ vertex_input_code }} 
 {{ binding_code }}
+$$ if USE_CLUSTERED_SHADING is defined
 {{ clustered_lighting_structs }}
+$$ endif
 {$ include 'core/vertex_output' $}
 {$ include 'core/fragment_output' $}
 
@@ -20,9 +22,11 @@
 @group(3) @binding(3) var t_shadow_map_2d_array: texture_depth_2d_array;
 @group(3) @binding(4) var t_shadow_map_cube_array: texture_depth_cube_array;
 @group(3) @binding(5) var s_shadow_map_compare: sampler_comparison;
+$$ if USE_CLUSTERED_SHADING is defined
 @group(3) @binding(6) var<uniform> u_clustered_lighting: ClusteredLightingParams;
 @group(3) @binding(7) var<storage, read> st_cluster_records: array<ClusterRecord>;
 @group(3) @binding(8) var<storage, read> st_cluster_light_indices: array<u32>;
+$$ endif
 
 {$ include 'modules/bsdf/phong' $}
 {$ include 'core/alpha_test' $}

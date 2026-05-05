@@ -1,20 +1,18 @@
 //! [gallery]
 //! name = "Clustered Forward Stress"
-//! category = "Performance"
-//! description = "A BasicForward stress scene with hundreds of animated point lights to inspect clustered forward-lighting scalability."
-//! instructions = "Mouse drag orbit camera\nScroll zoom\nWatch FPS with 192 animated point lights"
+//! category = "Lighting"
+//! description = "A stress scene with hundreds of animated point lights to inspect clustered forward-lighting scalability."
 //! order = 365
 //!
 
 use std::f32::consts::TAU;
 
 use myth::prelude::*;
-use myth::render::RenderPath;
 use myth_dev_utils::FpsCounter;
 
-const LIGHT_LAYERS_X: usize = 12;
+const LIGHT_LAYERS_X: usize = 11;
 const LIGHT_LAYERS_Y: usize = 4;
-const LIGHT_LAYERS_Z: usize = 4;
+const LIGHT_LAYERS_Z: usize = 5;
 
 struct StressLight {
     node: NodeHandle,
@@ -28,6 +26,10 @@ struct ClusteredStressDemo {
     fps_counter: FpsCounter,
     lights: Vec<StressLight>,
     time: f32,
+}
+
+fn centered_lattice(index: usize, count: usize, spacing: f32) -> f32 {
+    (index as f32 - (count as f32 - 1.0) * 0.5) * spacing
 }
 
 impl AppHandler for ClusteredStressDemo {
@@ -50,6 +52,9 @@ impl AppHandler for ClusteredStressDemo {
             .set_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
             .set_position(0.0, -0.45, 0.0)
             .set_receive_shadows(false);
+
+        scene.bloom.set_enabled(true);
+        scene.bloom.set_strength(0.04);
 
         for z in -4..=4 {
             for x in -4..=4 {
@@ -96,12 +101,25 @@ impl AppHandler for ClusteredStressDemo {
                     let hue = color_index as f32
                         / (LIGHT_LAYERS_X * LIGHT_LAYERS_Y * LIGHT_LAYERS_Z) as f32;
                     let color = hsv_to_rgb(hue, 0.78, 1.0);
-                    let light = scene.add_light(Light::new_point(color, 1.0, 4.8));
+                    let light = scene.add_light(Light::new_point(color, 1.15, 5.0));
+                    let helper = scene.spawn_sphere(
+                        0.08,
+                        PhysicalMaterial::new((color * 0.22).extend(1.0))
+                            .with_emissive(color, 10.0)
+                            .with_roughness(0.24)
+                            .with_metalness(0.0),
+                        &engine.assets,
+                    );
+                    scene.attach(helper, light);
+                    scene
+                        .node(&helper)
+                        .set_position(0.0, 0.0, 0.0)
+                        .set_shadows(false, false);
 
                     let base = Vec3::new(
-                        -11.0 + ix as f32 * 2.0,
+                        centered_lattice(ix, LIGHT_LAYERS_X, 2.15),
                         1.4 + iy as f32 * 1.25,
-                        -6.0 + iz as f32 * 4.0,
+                        centered_lattice(iz, LIGHT_LAYERS_Z, 3.3),
                     );
                     scene.node(&light).set_position(base.x, base.y, base.z);
                     lights.push(StressLight {
@@ -190,7 +208,6 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Vec3 {
 fn main() -> myth::Result<()> {
     App::new()
         .with_settings(RendererSettings {
-            path: RenderPath::BasicForward,
             vsync: false,
             ..Default::default()
         })

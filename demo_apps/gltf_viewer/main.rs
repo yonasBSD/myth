@@ -1680,6 +1680,7 @@ impl GltfViewer {
                                     path: self.render_path,
                                     vsync: self.vsync,
                                     anisotropy_clamp: self.anisotropy_clamp,
+                                    ..Default::default()
                                 });
                             }
 
@@ -2175,6 +2176,7 @@ impl GltfViewer {
                                             targets.push(DebugViewMode::Depth);
                                             targets.push(DebugViewMode::Normal);
                                             targets.push(DebugViewMode::Velocity);
+                                            targets.push(DebugViewMode::ClusterHeatmap);
 
                                             if scene.ssao.enabled {
                                                 targets.push(DebugViewMode::SSAO);

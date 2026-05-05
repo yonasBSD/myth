@@ -58,6 +58,8 @@ use crate::graph::core::{
     ExecuteContext, FrameArena, GraphBlackboard, HookStage, PrepareContext, RenderGraph,
     TextureDesc, TransientPool, ViewResolver,
 };
+#[cfg(feature = "debug_view")]
+use crate::graph::core::ClusteredScreenBindings;
 use crate::graph::frame::{PreparedSkyboxDraw, RenderLists};
 #[cfg(feature = "3dgs")]
 use crate::graph::passes::GaussianSplattingFeature;
@@ -71,6 +73,7 @@ use crate::graph::passes::{
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
 use crate::renderer::FrameTime;
+use crate::settings::RendererSettings;
 use myth_assets::AssetServer;
 use myth_scene::Scene;
 use myth_scene::camera::RenderCamera;
@@ -83,6 +86,8 @@ pub struct ComposerContext<'a> {
 
     pub extracted_scene: &'a ExtractedScene,
     pub render_state: &'a RenderState,
+    pub renderer_settings: &'a RendererSettings,
+    pub clustered_lighting_enabled: bool,
 
     pub global_bind_group_cache: &'a mut GlobalBindGroupCache,
 
@@ -534,6 +539,10 @@ impl<'a> FrameComposer<'a> {
             let mut dbg_velocity: Option<crate::graph::core::TextureNodeId> = None;
             #[cfg(feature = "debug_view")]
             let mut dbg_ssao: Option<crate::graph::core::TextureNodeId> = None;
+            #[cfg(feature = "debug_view")]
+            let mut dbg_clustered_params: Option<crate::graph::core::BufferNodeId> = None;
+            #[cfg(feature = "debug_view")]
+            let mut dbg_clustered_records: Option<crate::graph::core::BufferNodeId> = None;
 
             let mut current_surface = surface_out;
 
@@ -555,7 +564,31 @@ impl<'a> FrameComposer<'a> {
                 let fxaa_enabled = self.ctx.camera.aa_mode.is_fxaa();
 
                 let (mut active_color, mut scene_depth) = graph_ctx.with_group("Scene", |c| {
-                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(c);
+                    let clustered_out = self
+                        .ctx
+                        .clustered_lighting_pass
+                        .add_to_graph(c, self.ctx.clustered_lighting_enabled);
+                    let scene_clustered_params = if self.ctx.clustered_lighting_enabled {
+                        Some(clustered_out.params_buffer)
+                    } else {
+                        None
+                    };
+                    let scene_clustered_records = if self.ctx.clustered_lighting_enabled {
+                        clustered_out.cluster_records
+                    } else {
+                        None
+                    };
+                    let scene_clustered_light_indices = if self.ctx.clustered_lighting_enabled {
+                        clustered_out.light_indices
+                    } else {
+                        None
+                    };
+
+                    #[cfg(feature = "debug_view")]
+                    {
+                        dbg_clustered_params = Some(clustered_out.params_buffer);
+                        dbg_clustered_records = clustered_out.cluster_records;
+                    }
 
                     // 1. Prepass
                     let prepass_out = self.ctx.prepass.add_to_graph(
@@ -593,9 +626,9 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
-                        Some(clustered_out.params_buffer),
-                        Some(clustered_out.cluster_records),
-                        Some(clustered_out.light_indices),
+                        scene_clustered_params,
+                        scene_clustered_records,
+                        scene_clustered_light_indices,
                     );
 
                     let mut active_color = opaque_out.active_color;
@@ -694,9 +727,9 @@ impl<'a> FrameComposer<'a> {
                         ssao_output,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
-                        Some(clustered_out.params_buffer),
-                        Some(clustered_out.cluster_records),
-                        Some(clustered_out.light_indices),
+                        scene_clustered_params,
+                        scene_clustered_records,
+                        scene_clustered_light_indices,
                     );
 
                     // Capture intermediate IDs for debug view resolution.
@@ -785,17 +818,32 @@ impl<'a> FrameComposer<'a> {
                         DebugViewTarget::Velocity => dbg_velocity,
                         DebugViewTarget::SsaoRaw => dbg_ssao,
                         DebugViewTarget::SceneDepth => Some(scene_depth),
+                        DebugViewTarget::ClusterHeatmap => Some(scene_depth),
                         _ => None,
                     };
 
-                    let is_depth = target == DebugViewTarget::SceneDepth;
+                    let is_depth = matches!(
+                        target,
+                        DebugViewTarget::SceneDepth | DebugViewTarget::ClusterHeatmap
+                    );
 
                     if let Some(src) = source {
+                        let clustered = if target == DebugViewTarget::ClusterHeatmap {
+                            ClusteredScreenBindings {
+                                params: dbg_clustered_params,
+                                records: dbg_clustered_records,
+                                light_indices: None,
+                            }
+                        } else {
+                            ClusteredScreenBindings::default()
+                        };
+
                         current_surface = self.ctx.debug_view_pass.add_to_graph(
                             &mut graph_ctx,
                             src,
                             current_surface,
                             is_depth,
+                            clustered,
                         );
                     }
                 }
@@ -820,7 +868,25 @@ impl<'a> FrameComposer<'a> {
                 };
 
                 graph_ctx.with_group("BasicForward", |c| {
-                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(c);
+                    let clustered_out = self
+                        .ctx
+                        .clustered_lighting_pass
+                        .add_to_graph(c, self.ctx.clustered_lighting_enabled);
+                    let scene_clustered_params = if self.ctx.clustered_lighting_enabled {
+                        Some(clustered_out.params_buffer)
+                    } else {
+                        None
+                    };
+                    let scene_clustered_records = if self.ctx.clustered_lighting_enabled {
+                        clustered_out.cluster_records
+                    } else {
+                        None
+                    };
+                    let scene_clustered_light_indices = if self.ctx.clustered_lighting_enabled {
+                        clustered_out.light_indices
+                    } else {
+                        None
+                    };
                     self.ctx.simple_forward_pass.add_to_graph(
                         c,
                         surface_out,
@@ -830,9 +896,9 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
-                        Some(clustered_out.params_buffer),
-                        Some(clustered_out.cluster_records),
-                        Some(clustered_out.light_indices),
+                        scene_clustered_params,
+                        scene_clustered_records,
+                        scene_clustered_light_indices,
                     );
                 });
             }

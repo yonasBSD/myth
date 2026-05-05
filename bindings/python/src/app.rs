@@ -150,6 +150,7 @@ pub struct PyApp {
     title: String,
     render_path: String,
     vsync: bool,
+    clustered_shading: myth_engine::ClusteredShadingMode,
     clear_color: [f32; 4],
     init_fn: Option<Py<PyAny>>,
     update_fn: Option<Py<PyAny>>,
@@ -162,22 +163,26 @@ impl PyApp {
         title = "Myth Engine",
         render_path = None,
         vsync = true,
+        clustered_shading = None,
         clear_color = [0.1, 0.1, 0.1, 1.0],
     ))]
     fn new(
         title: &str,
         render_path: Option<&Bound<'_, PyAny>>,
         vsync: bool,
+        clustered_shading: Option<&Bound<'_, PyAny>>,
         clear_color: [f32; 4],
     ) -> PyResult<Self> {
         let rp = match render_path {
             Some(obj) => crate::renderer::parse_render_path(obj)?,
             None => "basic".to_string(),
         };
+        let clustered_shading = crate::renderer::parse_clustered_shading(clustered_shading)?;
         Ok(Self {
             title: title.to_string(),
             render_path: rp,
             vsync,
+            clustered_shading,
             clear_color,
             init_fn: None,
             update_fn: None,
@@ -198,7 +203,7 @@ impl PyApp {
 
     /// Run the application (blocking).
     fn run(&self, py: Python<'_>) -> PyResult<()> {
-        let settings = build_settings(&self.render_path, self.vsync);
+        let settings = build_settings(&self.render_path, self.vsync, self.clustered_shading);
 
         // Store callbacks in thread-locals so PythonHandler can access them.
         if let Some(ref f) = self.init_fn {
@@ -245,6 +250,17 @@ impl PyApp {
     }
 
     #[getter]
+    fn get_clustered_shading(&self) -> crate::renderer::PyClusteredShadingMode {
+        crate::renderer::PyClusteredShadingMode::from_mode(self.clustered_shading)
+    }
+
+    #[setter]
+    fn set_clustered_shading(&mut self, val: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.clustered_shading = crate::renderer::parse_clustered_shading_value(val)?;
+        Ok(())
+    }
+
+    #[getter]
     fn get_vsync(&self) -> bool {
         self.vsync
     }
@@ -264,8 +280,11 @@ impl PyApp {
 
     fn __repr__(&self) -> String {
         format!(
-            "App(title='{}', render_path='{}', vsync={})",
-            self.title, self.render_path, self.vsync
+            "App(title='{}', render_path='{}', vsync={}, clustered_shading={})",
+            self.title,
+            self.render_path,
+            self.vsync,
+            crate::renderer::clustered_shading_repr(self.clustered_shading)
         )
     }
 }

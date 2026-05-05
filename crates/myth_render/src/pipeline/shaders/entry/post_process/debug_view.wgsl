@@ -6,6 +6,7 @@
 // single-channel occlusion, and standard colour buffers alike.
 
 {$ include 'core/full_screen_vertex' $}
+{{ clustered_lighting_structs }}
 
 struct DebugUniforms {
     view_mode: u32,
@@ -24,6 +25,22 @@ $$ if IS_DEPTH
 $$ else
 @group(1) @binding(0) var debug_texture: texture_2d<f32>;
 $$ endif
+@group(1) @binding(1) var<uniform> u_clustered_lighting: ClusteredLightingParams;
+@group(1) @binding(2) var<storage, read> st_cluster_records: array<ClusterRecord>;
+
+fn heatmap_color(t: f32) -> vec3<f32> {
+    let value = clamp(t, 0.0, 1.0);
+    if (value < 0.33) {
+        let local = value / 0.33;
+        return mix(vec3<f32>(0.04, 0.08, 0.24), vec3<f32>(0.00, 0.72, 0.96), local);
+    }
+    if (value < 0.66) {
+        let local = (value - 0.33) / 0.33;
+        return mix(vec3<f32>(0.00, 0.72, 0.96), vec3<f32>(0.98, 0.86, 0.18), local);
+    }
+    let local = (value - 0.66) / 0.34;
+    return mix(vec3<f32>(0.98, 0.86, 0.18), vec3<f32>(0.96, 0.18, 0.12), local);
+}
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -69,6 +86,65 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let fract_depth = fract(display_depth * uniforms.custom_scale);
 
             return vec4<f32>(vec3<f32>(display_depth * 0.8 + fract_depth * 0.2), 1.0);
+        }
+        // Mode 5: Clustered lighting heatmap
+        case 5u: {
+            let clustered_enabled = (u_clustered_lighting.budget.z & 1u) != 0u;
+            if (!clustered_enabled) {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+
+            $$ if IS_DEPTH
+            let depth_ndc = textureSampleLevel(debug_texture, debug_sampler, in.uv, 0i);
+            if (depth_ndc <= 0.0) {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+
+            let screen_size = vec2<f32>(
+                max(f32(u_clustered_lighting.screen_dimensions.x), 1.0),
+                max(f32(u_clustered_lighting.screen_dimensions.y), 1.0),
+            );
+            let pixel = clamp(in.uv * screen_size, vec2<f32>(0.0), screen_size - vec2<f32>(1.0));
+            let grid_x = max(u_clustered_lighting.screen_dimensions.z, 1u);
+            let grid_y = max(u_clustered_lighting.screen_dimensions.w, 1u);
+            let grid_z = max(u_clustered_lighting.grid_dimensions.x, 1u);
+            let tile_size_x = max(f32(u_clustered_lighting.grid_dimensions.z), 1.0);
+            let tile_size_y = max(f32(u_clustered_lighting.grid_dimensions.w), 1.0);
+
+            let cluster_x = min(u32(pixel.x / tile_size_x), grid_x - 1u);
+            let cluster_y = min(u32(pixel.y / tile_size_y), grid_y - 1u);
+            let linear_depth = clamp(
+                u_clustered_lighting.depth_params.x / max(depth_ndc, 0.00001),
+                u_clustered_lighting.depth_params.x,
+                u_clustered_lighting.depth_params.y,
+            );
+            let cluster_z = min(
+                u32(max(
+                    floor(log(linear_depth) * u_clustered_lighting.depth_params.z
+                        + u_clustered_lighting.depth_params.w),
+                    0.0,
+                )),
+                grid_z - 1u,
+            );
+
+            let cluster_index = min(
+                cluster_z * (grid_x * grid_y) + cluster_y * grid_x + cluster_x,
+                max(u_clustered_lighting.grid_dimensions.y, 1u) - 1u,
+            );
+            let cluster_count = f32(st_cluster_records[cluster_index].count);
+            let cluster_budget = max(f32(u_clustered_lighting.budget.x), 1.0);
+            let normalized = cluster_count / cluster_budget;
+            var color = heatmap_color(normalized);
+
+            let grid = abs(fract(pixel / vec2<f32>(tile_size_x, tile_size_y)) - 0.5);
+            let grid_line = 1.0
+                - smoothstep(0.46, 0.5, max(grid.x, grid.y));
+            color = mix(color, vec3<f32>(0.0), grid_line * 0.35);
+
+            return vec4<f32>(color, 1.0);
+            $$ else
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            $$ endif
         }
         // Default: colour pass-through
         default: {

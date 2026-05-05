@@ -136,6 +136,48 @@ impl RenderPath {
 }
 
 // ---------------------------------------------------------------------------
+// ClusteredShadingMode
+// ---------------------------------------------------------------------------
+
+/// Controls when clustered forward lighting should be used.
+///
+/// Myth keeps both forward-lighting paths available:
+/// - the classic per-fragment light loop for small light counts
+/// - the clustered light-list path for dense dynamic-light scenes
+///
+/// In [`Auto`](Self::Auto) mode, the renderer switches to clustered shading
+/// once the extracted scene light count reaches `threshold`.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum ClusteredShadingMode {
+    /// Always use the classic forward light loop.
+    ForceOff,
+    /// Switch to clustered shading once `threshold` lights are present.
+    Auto { threshold: u32 },
+    /// Always use clustered shading, even for a single light.
+    ForceOn,
+}
+
+impl ClusteredShadingMode {
+    /// Resolves the effective clustered-lighting state for the current frame.
+    #[inline]
+    #[must_use]
+    pub const fn is_enabled(self, light_count: u32) -> bool {
+        match self {
+            Self::ForceOff => false,
+            Self::ForceOn => true,
+            Self::Auto { threshold } => light_count >= threshold,
+        }
+    }
+}
+
+impl Default for ClusteredShadingMode {
+    #[inline]
+    fn default() -> Self {
+        Self::Auto { threshold: 16 }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RendererSettings
 // ---------------------------------------------------------------------------
 
@@ -253,6 +295,13 @@ pub struct RendererSettings {
     /// Higher values produce sharper textures at oblique angles at a
     /// modest GPU cost. Common values: 1 (disabled), 4, 8, 16.
     pub anisotropy_clamp: u16,
+
+    /// Runtime policy for clustered forward lighting.
+    ///
+    /// This controls whether Myth injects the clustered-lighting compute
+    /// passes for the current frame or falls back to the classic forward
+    /// light loop for small-light-count scenes.
+    pub clustered_shading: ClusteredShadingMode,
 }
 
 impl Default for RendererSettings {
@@ -261,6 +310,34 @@ impl Default for RendererSettings {
             path: RenderPath::default(),
             vsync: true,
             anisotropy_clamp: 1,
+            clustered_shading: ClusteredShadingMode::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClusteredShadingMode, RendererSettings};
+
+    #[test]
+    fn clustered_auto_threshold_switches_at_threshold() {
+        let mode = ClusteredShadingMode::Auto { threshold: 16 };
+        assert!(!mode.is_enabled(15));
+        assert!(mode.is_enabled(16));
+        assert!(mode.is_enabled(64));
+    }
+
+    #[test]
+    fn clustered_force_modes_override_threshold_logic() {
+        assert!(!ClusteredShadingMode::ForceOff.is_enabled(10_000));
+        assert!(ClusteredShadingMode::ForceOn.is_enabled(0));
+    }
+
+    #[test]
+    fn renderer_settings_default_clustered_mode_is_auto() {
+        assert_eq!(
+            RendererSettings::default().clustered_shading,
+            ClusteredShadingMode::Auto { threshold: 16 }
+        );
     }
 }

@@ -80,6 +80,7 @@ bitflags! {
         const USE_SSAO = 1 << 1;
         const USE_SSS = 1 << 2;
         const USE_SSR = 1 << 3;
+        const USE_CLUSTERED_SHADING = 1 << 4;
 
 
         const USE_SCREEN_SPACE_FEATURES = Self::USE_SSS.bits() | Self::USE_SSR.bits();

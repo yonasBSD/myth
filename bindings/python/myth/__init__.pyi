@@ -39,6 +39,26 @@ class RenderPath:
     HIGH_FIDELITY: RenderPath
     """HDR + post-processing (bloom, SSAO, tone mapping, etc.)."""
 
+class ClusteredShadingMode:
+    """Runtime routing policy for clustered forward lighting.
+
+    Construct with one of the factory methods:
+
+    - ``ClusteredShadingMode.force_off()``
+    - ``ClusteredShadingMode.force_on()``
+    - ``ClusteredShadingMode.auto(threshold=16)``
+    """
+
+    kind: str
+    threshold: Optional[int]
+
+    @staticmethod
+    def force_off() -> ClusteredShadingMode: ...
+    @staticmethod
+    def force_on() -> ClusteredShadingMode: ...
+    @staticmethod
+    def auto(threshold: int = 16) -> ClusteredShadingMode: ...
+
 # ============================================================================
 # App
 # ============================================================================
@@ -69,6 +89,8 @@ class App:
     title: str
     render_path: Union[str, RenderPath]
     """Render path: ``RenderPath.BASIC`` (forward LDR+MSAA) or ``RenderPath.HIGH_FIDELITY`` (HDR+post-processing). Also accepts legacy strings."""
+    clustered_shading: Union[str, ClusteredShadingMode]
+    """Clustered shading routing mode. Accepts a ``ClusteredShadingMode`` object or legacy strings such as ``'auto'`` and ``'force_off'``."""
     vsync: bool
     clear_color: ColorInput
     """Clear color as ``[r, g, b, a]``."""
@@ -78,6 +100,7 @@ class App:
         title: str = "Myth Engine",
         render_path: Union[str, RenderPath] = ...,
         vsync: bool = True,
+        clustered_shading: Union[str, ClusteredShadingMode] = ...,
         clear_color: ColorInput = ...,
     ) -> None: ...
     def init(self, func: Callable[[Engine], None]) -> Callable[[Engine], None]:
@@ -125,11 +148,13 @@ class Renderer:
 
     render_path: Union[str, RenderPath]
     vsync: bool
+    clustered_shading: Union[str, ClusteredShadingMode]
 
     def __init__(
         self,
         render_path: Union[str, RenderPath] = ...,
         vsync: bool = True,
+        clustered_shading: Union[str, ClusteredShadingMode] = ...,
     ) -> None: ...
     def init_with_handle(
         self,

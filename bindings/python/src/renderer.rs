@@ -28,7 +28,7 @@ use raw_window_handle::{
     RawWindowHandle, WindowHandle,
 };
 
-use myth_engine::{Engine, RendererInitConfig, RendererSettings, SceneExt};
+use myth_engine::{ClusteredShadingMode, Engine, RendererInitConfig, RendererSettings, SceneExt};
 
 use crate::{clear_engine_ptr, set_engine_ptr};
 
@@ -165,6 +165,74 @@ impl PyRenderPath {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ClusteredShadingMode (Python-facing)
+// ---------------------------------------------------------------------------
+
+/// Runtime routing policy for clustered forward lighting.
+#[pyclass(name = "ClusteredShadingMode", frozen, skip_from_py_object)]
+#[derive(Clone, Copy)]
+pub struct PyClusteredShadingMode {
+    mode: ClusteredShadingMode,
+}
+
+impl PyClusteredShadingMode {
+    #[must_use]
+    pub const fn from_mode(mode: ClusteredShadingMode) -> Self {
+        Self { mode }
+    }
+}
+
+pub(crate) fn clustered_shading_repr(mode: ClusteredShadingMode) -> String {
+    match mode {
+        ClusteredShadingMode::ForceOff => "ClusteredShadingMode.force_off()".to_string(),
+        ClusteredShadingMode::ForceOn => "ClusteredShadingMode.force_on()".to_string(),
+        ClusteredShadingMode::Auto { threshold } => {
+            format!("ClusteredShadingMode.auto(threshold={threshold})")
+        }
+    }
+}
+
+#[pymethods]
+impl PyClusteredShadingMode {
+    #[staticmethod]
+    fn force_off() -> Self {
+        Self::from_mode(ClusteredShadingMode::ForceOff)
+    }
+
+    #[staticmethod]
+    fn force_on() -> Self {
+        Self::from_mode(ClusteredShadingMode::ForceOn)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (threshold = 16))]
+    fn auto(threshold: u32) -> Self {
+        Self::from_mode(ClusteredShadingMode::Auto { threshold })
+    }
+
+    #[getter]
+    fn kind(&self) -> &'static str {
+        match self.mode {
+            ClusteredShadingMode::ForceOff => "force_off",
+            ClusteredShadingMode::ForceOn => "force_on",
+            ClusteredShadingMode::Auto { .. } => "auto",
+        }
+    }
+
+    #[getter]
+    fn threshold(&self) -> Option<u32> {
+        match self.mode {
+            ClusteredShadingMode::Auto { threshold } => Some(threshold),
+            _ => None,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        clustered_shading_repr(self.mode)
+    }
+}
+
 /// Parse a render path from either a `PyRenderPath` enum or a legacy string.
 pub(crate) fn parse_render_path(obj: &Bound<'_, pyo3::PyAny>) -> PyResult<String> {
     // Try enum first
@@ -183,11 +251,48 @@ pub(crate) fn parse_render_path(obj: &Bound<'_, pyo3::PyAny>) -> PyResult<String
     ))
 }
 
+/// Parse clustered shading mode from a `ClusteredShadingMode` object or a legacy string.
+pub(crate) fn parse_clustered_shading_value(
+    obj: &Bound<'_, pyo3::PyAny>,
+) -> PyResult<ClusteredShadingMode> {
+    if let Ok(cfg) = obj.extract::<PyRef<'_, PyClusteredShadingMode>>() {
+        return Ok(cfg.mode);
+    }
+
+    if let Ok(s) = obj.extract::<String>() {
+        return match s.as_str() {
+            "force_off" | "off" | "disabled" => Ok(ClusteredShadingMode::ForceOff),
+            "force_on" | "on" | "enabled" => Ok(ClusteredShadingMode::ForceOn),
+            "auto" => Ok(ClusteredShadingMode::default()),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "clustered_shading must be ClusteredShadingMode.force_off(), force_on(), auto(threshold), or one of: 'force_off', 'force_on', 'auto'",
+            )),
+        };
+    }
+
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "clustered_shading must be a ClusteredShadingMode object or a string",
+    ))
+}
+
+pub(crate) fn parse_clustered_shading(
+    obj: Option<&Bound<'_, pyo3::PyAny>>,
+) -> PyResult<ClusteredShadingMode> {
+    match obj {
+        Some(value) => parse_clustered_shading_value(value),
+        None => Ok(ClusteredShadingMode::default()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // build_settings (shared with app.rs)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn build_settings(render_path: &str, vsync: bool) -> RendererSettings {
+pub(crate) fn build_settings(
+    render_path: &str,
+    vsync: bool,
+    clustered_shading: ClusteredShadingMode,
+) -> RendererSettings {
     let path = match render_path {
         "hdr" | "high" | "high_fidelity" | "HighFidelity" => myth_engine::RenderPath::HighFidelity,
         _ => myth_engine::RenderPath::BasicForward,
@@ -195,6 +300,7 @@ pub(crate) fn build_settings(render_path: &str, vsync: bool) -> RendererSettings
     RendererSettings {
         path,
         vsync,
+        clustered_shading,
         ..Default::default()
     }
 }
@@ -235,6 +341,7 @@ pub struct PyMythRenderer {
     engine: Option<Box<Engine>>,
     render_path: String,
     vsync: bool,
+    clustered_shading: ClusteredShadingMode,
     start_time: std::time::Instant,
     last_frame_time: std::time::Instant,
     /// Internal stream for the simple recording API.
@@ -247,16 +354,23 @@ impl PyMythRenderer {
     #[pyo3(signature = (
         render_path = None,
         vsync = true,
+        clustered_shading = None,
     ))]
-    fn new(render_path: Option<&Bound<'_, PyAny>>, vsync: bool) -> PyResult<Self> {
+    fn new(
+        render_path: Option<&Bound<'_, PyAny>>,
+        vsync: bool,
+        clustered_shading: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let rp = match render_path {
             Some(obj) => parse_render_path(obj)?,
             None => "basic".to_string(),
         };
+        let clustered_shading = parse_clustered_shading(clustered_shading)?;
         Ok(Self {
             engine: None,
             render_path: rp,
             vsync,
+            clustered_shading,
             start_time: std::time::Instant::now(),
             last_frame_time: std::time::Instant::now(),
             active_stream: None,
@@ -280,7 +394,7 @@ impl PyMythRenderer {
         }
 
         let raw_window = build_raw_window(window_handle)?;
-        let settings = build_settings(&self.render_path, self.vsync);
+        let settings = build_settings(&self.render_path, self.vsync, self.clustered_shading);
 
         let mut engine = Engine::new(RendererInitConfig::default(), settings);
         pollster::block_on(engine.init(raw_window, width, height)).map_err(|e| {
@@ -562,7 +676,7 @@ impl PyMythRenderer {
             }
         };
 
-        let settings = build_settings(&self.render_path, self.vsync);
+        let settings = build_settings(&self.render_path, self.vsync, self.clustered_shading);
         let mut engine = Engine::new(RendererInitConfig::default(), settings);
         pollster::block_on(engine.init_headless(width, height, target_format)).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -832,6 +946,21 @@ impl PyMythRenderer {
     }
 
     #[getter]
+    fn get_clustered_shading(&self) -> PyClusteredShadingMode {
+        PyClusteredShadingMode::from_mode(self.clustered_shading)
+    }
+
+    #[setter]
+    fn set_clustered_shading(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mode = parse_clustered_shading_value(value)?;
+        self.clustered_shading = mode;
+        if let Some(engine) = self.engine.as_deref_mut() {
+            engine.renderer.set_clustered_shading_mode(mode);
+        }
+        Ok(())
+    }
+
+    #[getter]
     fn get_vsync(&self) -> bool {
         self.vsync
     }
@@ -843,8 +972,11 @@ impl PyMythRenderer {
             "not initialized"
         };
         format!(
-            "Renderer(render_path='{}', vsync={}, {})",
-            self.render_path, self.vsync, init
+            "Renderer(render_path='{}', vsync={}, clustered_shading={}, {})",
+            self.render_path,
+            self.vsync,
+            clustered_shading_repr(self.clustered_shading),
+            init
         )
     }
 }

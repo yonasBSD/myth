@@ -2,13 +2,13 @@
 //! name = "Clustered Light Rings"
 //! category = "Lighting"
 //! description = "A correctness-focused clustered-lighting scene with animated rings of coloured point lights orbiting a PBR material study."
-//! instructions = "Mouse drag orbit camera\nScroll zoom\nObserve coloured light bins across the scene"
 //! order = 360
 //!
 
 use std::f32::consts::TAU;
 
 use myth::prelude::*;
+use myth::render::ClusteredShadingMode;
 use myth_dev_utils::FpsCounter;
 
 const LIGHTS_PER_RING: usize = 16;
@@ -134,6 +134,19 @@ impl AppHandler for ClusteredLightingDemo {
                 let phase = (i as f32 / LIGHTS_PER_RING as f32) * TAU + ring as f32 * 0.45;
                 let color = Self::light_color(idx, LIGHTS_PER_RING * RING_COUNT);
                 let light = scene.add_light(Light::new_point(color, 1.0, 5.2));
+                let helper = scene.spawn_sphere(
+                    0.08,
+                    PhysicalMaterial::new((color * 0.22).extend(1.0))
+                        .with_emissive(color, 3.4)
+                        .with_roughness(0.24)
+                        .with_metalness(0.0),
+                    &engine.assets,
+                );
+                scene.attach(helper, light);
+                scene
+                    .node(&helper)
+                    .set_position(0.0, 0.0, 0.0)
+                    .set_shadows(false, false);
 
                 let x = phase.cos() * radius;
                 let z = phase.sin() * radius;
@@ -223,6 +236,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Vec3 {
 fn main() -> myth::Result<()> {
     App::new()
         .with_settings(RendererSettings {
+            clustered_shading: ClusteredShadingMode::ForceOn,
             vsync: false,
             ..Default::default()
         })

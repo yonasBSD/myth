@@ -110,7 +110,7 @@ fn evaluate_punctual_lights(
     reflected_light: ptr<function, ReflectedLight>,
     frag_coord: vec4<f32>
 ) {
-
+    $$ if USE_CLUSTERED_SHADING is defined
     let grid_x = max(u_clustered_lighting.screen_dimensions.z, 1u);
     let grid_y = max(u_clustered_lighting.screen_dimensions.w, 1u);
     let grid_z = max(u_clustered_lighting.grid_dimensions.x, 1u);
@@ -144,5 +144,12 @@ fn evaluate_punctual_lights(
             RE_Direct( punctual_light, geometry, material, reflected_light );
         }
     }
-
+    $$ else
+    for (var i = 0u; i < u_environment.num_lights; i ++ ) {
+        let punctual_light = evaluate_light_visibility(i, geometry);
+        if (punctual_light.visible) {
+            RE_Direct( punctual_light, geometry, material, reflected_light );
+        }
+    }
+    $$ endif
 }

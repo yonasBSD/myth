@@ -174,6 +174,13 @@ fn setup_headless(w: u32, h: u32) -> (Engine, usize) {
     (engine, expected_bytes)
 }
 
+fn setup_headless_with_settings(w: u32, h: u32, settings: RendererSettings) -> (Engine, usize) {
+    let mut engine = Engine::new(RendererInitConfig::default(), settings);
+    pollster::block_on(engine.init_headless(w, h, None)).expect("headless init failed");
+    let expected_bytes = (w * h * 4) as usize;
+    (engine, expected_bytes)
+}
+
 /// Remove the currently active scene so a fresh one can be created.
 fn reset_active_scene(engine: &mut Engine) {
     if let Some(h) = engine.scene_manager.active_handle() {
@@ -470,6 +477,62 @@ fn clustered_dense_point_lights() {
     let pixels = render_and_capture(&mut engine, 2);
     assert_eq!(pixels.len(), expected);
     assert_not_black(&pixels, "clustered_dense_point_lights");
+}
+
+fn populate_dense_point_light_scene(scene: &mut Scene, assets: &AssetServer) {
+    let mat = PhysicalMaterial::new(Vec4::new(0.72, 0.74, 0.78, 1.0))
+        .with_roughness(0.42)
+        .with_metalness(0.08);
+    scene.spawn_sphere(1.0, mat, assets);
+
+    for ring in 0..4 {
+        let radius = 1.8 + ring as f32 * 0.7;
+        let height = 0.4 + ring as f32 * 0.55;
+        for i in 0..16 {
+            let angle = (i as f32 / 16.0) * std::f32::consts::TAU;
+            let color = Vec3::new(
+                0.25 + (i as f32 / 16.0) * 0.75,
+                0.35 + ring as f32 * 0.12,
+                1.0 - (i as f32 / 16.0) * 0.55,
+            );
+            let light = scene.add_light(Light::new_point(color, 7.5, 4.2));
+            scene.node(&light).set_position(
+                angle.cos() * radius,
+                height,
+                angle.sin() * radius,
+            );
+        }
+    }
+
+    let cam = scene.add_camera(Camera::new_perspective(45.0, 1.0, 0.1));
+    scene
+        .node(&cam)
+        .set_position(0.0, 2.6, 5.2)
+        .look_at(Vec3::ZERO);
+    scene.active_camera = Some(cam);
+}
+
+#[test]
+fn clustered_force_modes_dense_point_lights() {
+    for (label, mode) in [
+        ("clustered_force_off", ClusteredShadingMode::ForceOff),
+        ("clustered_force_on", ClusteredShadingMode::ForceOn),
+    ] {
+        let (mut engine, expected) = setup_headless_with_settings(
+            160,
+            160,
+            RendererSettings {
+                clustered_shading: mode,
+                ..Default::default()
+            },
+        );
+        let scene = engine.scene_manager.create_active();
+        populate_dense_point_light_scene(scene, &engine.assets);
+
+        let pixels = render_and_capture(&mut engine, 2);
+        assert_eq!(pixels.len(), expected);
+        assert_not_black(&pixels, label);
+    }
 }
 
 // ── Alpha Mode Tests ─────────────────────────────────────────────────────

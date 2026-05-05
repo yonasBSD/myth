@@ -229,6 +229,7 @@ fn myth_binding(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Enums
     m.add_class::<renderer::PyRenderPath>()?;
+    m.add_class::<renderer::PyClusteredShadingMode>()?;
 
     // Readback
     m.add_class::<readback::PyReadbackStream>()?;
