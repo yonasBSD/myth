@@ -2,7 +2,7 @@
 //! name = "Cluster Heatmap"
 //! category = "Lighting"
 //! description = "A standalone clustered-lighting heatmap scene that visualises per-cluster light density across a deep multi-light corridor."
-//! instructions = "Press H to toggle heatmap/final image\nInspect near/far cluster density bands"
+//! instructions = "504 Point Lights\nPress H to toggle heatmap/final image\nInspect near/far cluster density bands"
 //! features = ["debug_view"]
 //! order = 364
 //!
@@ -65,6 +65,9 @@ mod app {
                 Vec4::new(0.02, 0.025, 0.04, 1.0),
                 Vec4::new(0.003, 0.004, 0.008, 1.0),
             ));
+
+            scene.bloom.set_enabled(true);
+            scene.bloom.set_strength(0.045);
 
             let floor_material = engine.assets.materials.add(
                 PhysicalMaterial::new(Vec4::new(0.06, 0.07, 0.08, 1.0))
@@ -133,13 +136,13 @@ mod app {
                         let color = hsv_to_rgb(hue, 0.76, 1.0);
                         let light = scene.add_light(Light::new_point(
                             color,
-                            1.3 + iy as f32 * 0.22,
+                            0.3 + iy as f32 * 0.22,
                             7.2 + ix as f32 * 0.22,
                         ));
                         let helper = scene.spawn_sphere(
-                            0.08,
+                            0.04,
                             PhysicalMaterial::new((color * 0.22).extend(1.0))
-                                .with_emissive(color, 3.6)
+                                .with_emissive(color, 10.0)
                                 .with_roughness(0.22)
                                 .with_metalness(0.0),
                             &engine.assets,

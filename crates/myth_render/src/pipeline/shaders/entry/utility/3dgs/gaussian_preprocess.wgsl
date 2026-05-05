@@ -27,25 +27,19 @@ const SH_C3 = array<f32, 7>(
     -0.5900435899266435
 );
 
-struct GaussianCore {
+struct GaussianSplat {
     x: f32,
     y: f32,
     z: f32,
     opacity: u32,
     sh_idx: u32,
-};
-
-struct GaussianCovariance {
     cov: array<u32, 3>,
 };
 
-struct SplatGeometry {
+struct Splat2D {
     pos: vec2<f32>,
     v_0: u32,
     v_1: u32,
-};
-
-struct SplatAppearance {
     depth: f32,
     color_0: u32,
     color_1: u32,
@@ -75,15 +69,11 @@ struct RenderSettings {
 };
 
 @group(1) @binding(0)
-var<storage, read> gaussians: array<GaussianCore>;
+var<storage, read> gaussians: array<GaussianSplat>;
 @group(1) @binding(1)
-var<storage, read> gaussian_covariances: array<GaussianCovariance>;
-@group(1) @binding(2)
 var<storage, read> sh_coefs: array<array<u32, 24>>;
-@group(1) @binding(3)
-var<storage, read_write> points_geom: array<SplatGeometry>;
-@group(1) @binding(4)
-var<storage, read_write> points_attr: array<SplatAppearance>;
+@group(1) @binding(2)
+var<storage, read_write> points: array<Splat2D>;
 
 @group(2) @binding(0)
 var<storage, read_write> sort_infos: SortInfos;
@@ -142,9 +132,9 @@ fn evaluate_sh(dir: vec3<f32>, sh_idx: u32, sh_deg: u32) -> vec3<f32> {
 }
 
 fn cov_coefs(v_idx: u32) -> array<f32, 6> {
-    let a = unpack2x16float(gaussian_covariances[v_idx].cov[0]);
-    let b = unpack2x16float(gaussian_covariances[v_idx].cov[1]);
-    let c = unpack2x16float(gaussian_covariances[v_idx].cov[2]);
+    let a = unpack2x16float(gaussians[v_idx].cov[0]);
+    let b = unpack2x16float(gaussians[v_idx].cov[1]);
+    let c = unpack2x16float(gaussians[v_idx].cov[2]);
     return array<f32, 6>(a.x, a.y, b.x, b.y, c.x, c.y);
 }
 
@@ -265,12 +255,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let store_idx = atomicAdd(&sort_infos.keys_size, 1u);
     let v = vec4<f32>(v1 / viewport, v2 / viewport);
-    points_geom[store_idx] = SplatGeometry(
+    points[store_idx] = Splat2D(
         center_ndc,
         pack2x16float(v.xy),
         pack2x16float(v.zw),
-    );
-    points_attr[store_idx] = SplatAppearance(
         center_depth,
         pack2x16float(color.rg),
         pack2x16float(color.ba),

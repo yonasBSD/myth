@@ -74,6 +74,9 @@ impl WgpuContext {
         adapter: &wgpu::Adapter,
     ) -> wgpu::Limits {
         let mut required_limits = init_config.required_limits.clone();
+        required_limits.max_storage_buffers_per_shader_stage = adapter
+            .limits()
+            .max_storage_buffers_per_shader_stage;
         required_limits.max_compute_workgroup_storage_size =
             adapter.limits().max_compute_workgroup_storage_size;
         required_limits
