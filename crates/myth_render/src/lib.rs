@@ -17,9 +17,7 @@ pub mod renderer;
 pub mod settings;
 
 pub use renderer::Renderer;
-pub use settings::{
-	ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings,
-};
+pub use settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
 
 /// HDR texture format used for high dynamic range render targets.
 pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;

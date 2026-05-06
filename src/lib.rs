@@ -178,8 +178,7 @@ pub mod prelude {
     // Renderer
     pub use myth_render::graph::FrameComposer;
     pub use myth_render::settings::{
-        AntiAliasingMode, ClusteredShadingMode, RenderPath, RendererInitConfig,
-        RendererSettings,
+        AntiAliasingMode, ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings,
     };
     #[cfg(feature = "debug_view")]
     pub use myth_scene::{DebugViewMode, DebugViewSettings};

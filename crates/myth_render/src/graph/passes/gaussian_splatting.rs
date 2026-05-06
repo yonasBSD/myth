@@ -27,7 +27,9 @@ use crate::graph::core::{
 };
 use crate::pipeline::{ShaderCompilationOptions, ShaderSource};
 use myth_resources::GaussianCloudHandle;
-use myth_resources::gaussian_splat::{GaussianCloud, GaussianSHCoefficients, GaussianSplat, Splat2D};
+use myth_resources::gaussian_splat::{
+    GaussianCloud, GaussianSHCoefficients, GaussianSplat, Splat2D,
+};
 use myth_resources::image::ColorSpace;
 
 const PREPROCESS_WG_SIZE: u32 = 256;
@@ -512,10 +514,7 @@ impl GaussianSplattingFeature {
         self.render_layout = Some(Tracked::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("GS Render"),
-                entries: &[
-                    storage_ro_entry(0, vs),
-                    storage_ro_entry(1, vs),
-                ],
+                entries: &[storage_ro_entry(0, vs), storage_ro_entry(1, vs)],
             },
         )));
 

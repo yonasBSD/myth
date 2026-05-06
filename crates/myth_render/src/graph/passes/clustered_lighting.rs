@@ -127,8 +127,7 @@ impl ClusteredLightingFeature {
     #[must_use]
     pub fn light_view_positions_desc(&self) -> BufferDesc {
         BufferDesc::new(
-            u64::from(self.frame_params.budget.w.max(1))
-                * std::mem::size_of::<[f32; 4]>() as u64,
+            u64::from(self.frame_params.budget.w.max(1)) * std::mem::size_of::<[f32; 4]>() as u64,
             wgpu::BufferUsages::STORAGE,
         )
     }
@@ -227,7 +226,7 @@ impl ClusteredLightingFeature {
             options.inject_code("binding_code", &gpu_world.binding_wgsl);
             options.inject_code(
                 "clustered_lighting_structs",
-                &clustered_lighting_structs_wgsl(),
+                clustered_lighting_structs_wgsl(),
             );
             let (module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
@@ -270,11 +269,8 @@ impl ClusteredLightingFeature {
         let camera_far = render_uniforms.camera_far;
         drop(render_uniforms);
 
-        let far = resolve_cluster_far_depth(
-            near,
-            camera_far,
-            estimate_cluster_scene_max_depth(ctx),
-        );
+        let far =
+            resolve_cluster_far_depth(near, camera_far, estimate_cluster_scene_max_depth(ctx));
 
         let cluster_x = width.div_ceil(self.config.tile_size_x.max(1));
         let cluster_y = height.div_ceil(self.config.tile_size_y.max(1));
@@ -283,7 +279,7 @@ impl ClusteredLightingFeature {
             .saturating_mul(cluster_y)
             .saturating_mul(cluster_z)
             .max(1);
-        let max_storage_bytes = ctx.device.limits().max_storage_buffer_binding_size as u64;
+        let max_storage_bytes = ctx.device.limits().max_storage_buffer_binding_size;
         let max_indices_by_limit =
             (max_storage_bytes / std::mem::size_of::<u32>() as u64).max(u64::from(total_clusters));
         let requested_light_indices =
@@ -441,7 +437,6 @@ impl ClusteredLightingFeature {
             )
         })
     }
-
 }
 
 fn estimate_cluster_scene_max_depth(ctx: &ExtractContext) -> Option<f32> {
@@ -528,9 +523,14 @@ impl<'a> PassNode<'a> for ClusterLightViewPassNode<'a> {
         });
         pass.set_pipeline(self.light_view_pipeline);
         pass.set_bind_group(0, ctx.baked_lists.global_bind_group, &[]);
-        pass.set_bind_group(1, self.bind_group.expect("Cluster light view BG missing"), &[]);
+        pass.set_bind_group(
+            1,
+            self.bind_group.expect("Cluster light view BG missing"),
+            &[],
+        );
         pass.dispatch_workgroups(
-            self.total_lights.div_ceil(CLUSTER_LIGHT_VIEW_TRANSFORM_WG_SIZE),
+            self.total_lights
+                .div_ceil(CLUSTER_LIGHT_VIEW_TRANSFORM_WG_SIZE),
             1,
             1,
         );

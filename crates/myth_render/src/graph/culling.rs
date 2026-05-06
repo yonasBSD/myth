@@ -304,7 +304,10 @@ fn prepare_main_camera_commands(
                         gpu_material.layout_id,
                         object_bind_group.layout_id,
                         if use_clustered_shading {
-                            resource_manager.system_textures.screen_layout_clustered.id()
+                            resource_manager
+                                .system_textures
+                                .screen_layout_clustered
+                                .id()
                         } else {
                             resource_manager.system_textures.screen_layout.id()
                         },

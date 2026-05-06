@@ -391,8 +391,6 @@ pub struct ClusteredLightingParams {
 pub struct ClusterRecord {
     pub offset: u32,
     pub count: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
 }
 
 /// Morph target animation uniforms.

@@ -778,26 +778,19 @@ pub fn build_screen_bind_group<'a>(
         views.get_or_create_sub_view(id, &cube_key);
     }
 
-    let transmission_view = transmission_input
-        .map(|id| views.get_texture_view(id))
-        .unwrap_or(&sys.black_hdr);
-    let ssao_view = ssao_input
-        .map(|id| views.get_texture_view(id))
-        .unwrap_or(&sys.white_r8);
-    let shadow_view = shadow_input
-        .map(|id| {
-            views
-                .get_sub_view(id, &d2array_key)
-                .expect("Group 3 D2Array shadow view must exist")
-        })
-        .unwrap_or(&sys.depth_d2array);
-    let shadow_cube_view = shadow_cube_input
-        .map(|id| {
-            views
-                .get_sub_view(id, &cube_key)
-                .expect("Group 3 cube-array shadow view must exist")
-        })
-        .unwrap_or(&sys.depth_cube_array);
+    let transmission_view =
+        transmission_input.map_or(&sys.black_hdr, |id| views.get_texture_view(id));
+    let ssao_view = ssao_input.map_or(&sys.white_r8, |id| views.get_texture_view(id));
+    let shadow_view = shadow_input.map_or(&sys.depth_d2array, |id| {
+        views
+            .get_sub_view(id, &d2array_key)
+            .expect("Group 3 D2Array shadow view must exist")
+    });
+    let shadow_cube_view = shadow_cube_input.map_or(&sys.depth_cube_array, |id| {
+        views
+            .get_sub_view(id, &cube_key)
+            .expect("Group 3 cube-array shadow view must exist")
+    });
 
     let use_clustered_layout = clustered.is_complete();
     let layout = if use_clustered_layout {

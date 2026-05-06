@@ -260,14 +260,16 @@ fn create_screen_bind_group_layout(
         });
     }
 
-    Tracked::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(if clustered {
-            "Screen/Transient Clustered Layout (Group 3)"
-        } else {
-            "Screen/Transient Layout (Group 3)"
+    Tracked::new(
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(if clustered {
+                "Screen/Transient Clustered Layout (Group 3)"
+            } else {
+                "Screen/Transient Layout (Group 3)"
+            }),
+            entries: &entries,
         }),
-        entries: &entries,
-    }))
+    )
 }
 
 fn create_1x1_rgba8(

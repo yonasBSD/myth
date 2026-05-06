@@ -213,7 +213,7 @@ fn main(
 
         wg_reserved_offset = clamped_offset;
         wg_reserved_count = reserved_count;
-        st_cluster_records[wg_cluster_index] = ClusterRecord(clamped_offset, reserved_count, 0u, 0u);
+        st_cluster_records[wg_cluster_index] = ClusterRecord(clamped_offset, reserved_count);
     }
 
     workgroupBarrier();

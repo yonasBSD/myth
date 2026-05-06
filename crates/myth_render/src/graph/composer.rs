@@ -52,14 +52,14 @@ use crate::core::gpu::{CubeSourceType, Tracked};
 use crate::core::{ResourceManager, WgpuContext};
 use crate::graph::ExtractedScene;
 use crate::graph::RenderState;
+#[cfg(feature = "debug_view")]
+use crate::graph::core::ClusteredScreenBindings;
 use crate::graph::core::GraphStorage;
 use crate::graph::core::graph::FrameConfig;
 use crate::graph::core::{
     ExecuteContext, FrameArena, GraphBlackboard, HookStage, PrepareContext, RenderGraph,
     TextureDesc, TransientPool, ViewResolver,
 };
-#[cfg(feature = "debug_view")]
-use crate::graph::core::ClusteredScreenBindings;
 use crate::graph::frame::{PreparedSkyboxDraw, RenderLists};
 #[cfg(feature = "3dgs")]
 use crate::graph::passes::GaussianSplattingFeature;

@@ -496,11 +496,9 @@ fn populate_dense_point_light_scene(scene: &mut Scene, assets: &AssetServer) {
                 1.0 - (i as f32 / 16.0) * 0.55,
             );
             let light = scene.add_light(Light::new_point(color, 7.5, 4.2));
-            scene.node(&light).set_position(
-                angle.cos() * radius,
-                height,
-                angle.sin() * radius,
-            );
+            scene
+                .node(&light)
+                .set_position(angle.cos() * radius, height, angle.sin() * radius);
         }
     }
 

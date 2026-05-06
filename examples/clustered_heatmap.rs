@@ -129,8 +129,7 @@ mod app {
             for ix in 0..LIGHT_GRID_X {
                 for iy in 0..LIGHT_GRID_Y {
                     for iz in 0..LIGHT_GRID_Z {
-                        let light_index =
-                            ix * LIGHT_GRID_Y * LIGHT_GRID_Z + iy * LIGHT_GRID_Z + iz;
+                        let light_index = ix * LIGHT_GRID_Y * LIGHT_GRID_Z + iy * LIGHT_GRID_Z + iz;
                         let hue = light_index as f32
                             / (LIGHT_GRID_X * LIGHT_GRID_Y * LIGHT_GRID_Z) as f32;
                         let color = hsv_to_rgb(hue, 0.76, 1.0);

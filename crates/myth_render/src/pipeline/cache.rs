@@ -287,7 +287,7 @@ impl PipelineCache {
         opts.inject_code("binding_code", binding_code);
         opts.inject_code(
             "clustered_lighting_structs",
-            &clustered_lighting_structs_wgsl(),
+            clustered_lighting_structs_wgsl(),
         );
 
         let (shader_module, _code_hash) =
