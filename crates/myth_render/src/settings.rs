@@ -173,7 +173,7 @@ impl ClusteredShadingMode {
 impl Default for ClusteredShadingMode {
     #[inline]
     fn default() -> Self {
-        Self::Auto { threshold: 16 }
+        Self::Auto { threshold: 32 }
     }
 }
 

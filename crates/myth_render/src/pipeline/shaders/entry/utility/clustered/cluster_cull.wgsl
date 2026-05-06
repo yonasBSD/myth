@@ -57,34 +57,65 @@ fn oriented_plane_normal(edge_a: vec3<f32>, edge_b: vec3<f32>, inside_dir: vec3<
     return normal;
 }
 
-fn sphere_intersects_cluster(
+// fn sphere_intersects_cluster(
+//     center: vec3<f32>,
+//     radius: f32,
+//     slice_near: f32,
+//     slice_far: f32,
+// ) -> bool {
+//     let light_depth = -center.z;
+//     if light_depth + radius < slice_near || light_depth - radius > slice_far {
+//         return false;
+//     }
+
+//     for (var plane_index = 0u; plane_index < 4u; plane_index += 1u) {
+//         let plane_normal = wg_plane_normals[plane_index].xyz;
+//         if dot(plane_normal, center) < -radius {
+//             return false;
+//         }
+//     }
+
+//     return true;
+// }
+
+// fn light_intersects_cluster(light_index: u32) -> bool {
+//     let light_view = st_light_view_positions[light_index];
+//     if light_view.w < 0.0 {
+//         return true;
+//     }
+
+//     return sphere_intersects_cluster(light_view.xyz, light_view.w, wg_slice_near, wg_slice_far);
+// }
+
+fn sphere_intersects_cluster_cached(
     center: vec3<f32>,
     radius: f32,
     slice_near: f32,
     slice_far: f32,
+    plane_0: vec3<f32>,
+    plane_1: vec3<f32>,
+    plane_2: vec3<f32>,
+    plane_3: vec3<f32>,
 ) -> bool {
     let light_depth = -center.z;
     if light_depth + radius < slice_near || light_depth - radius > slice_far {
         return false;
     }
 
-    for (var plane_index = 0u; plane_index < 4u; plane_index += 1u) {
-        let plane_normal = wg_plane_normals[plane_index].xyz;
-        if dot(plane_normal, center) < -radius {
-            return false;
-        }
+    if dot(plane_0, center) < -radius {
+        return false;
+    }
+    if dot(plane_1, center) < -radius {
+        return false;
+    }
+    if dot(plane_2, center) < -radius {
+        return false;
+    }
+    if dot(plane_3, center) < -radius {
+        return false;
     }
 
     return true;
-}
-
-fn light_intersects_cluster(light_index: u32) -> bool {
-    let light_view = st_light_view_positions[light_index];
-    if light_view.w < 0.0 {
-        return true;
-    }
-
-    return sphere_intersects_cluster(light_view.xyz, light_view.w, wg_slice_near, wg_slice_far);
 }
 
 @compute @workgroup_size(CLUSTER_CULL_WG_SIZE)
@@ -135,8 +166,26 @@ fn main(
 
     workgroupBarrier();
 
+    // Cache shared cluster bounds into thread-local registers before the hot loops.
+    let local_slice_near = wg_slice_near;
+    let local_slice_far = wg_slice_far;
+    let local_plane_0 = wg_plane_normals[0].xyz;
+    let local_plane_1 = wg_plane_normals[1].xyz;
+    let local_plane_2 = wg_plane_normals[2].xyz;
+    let local_plane_3 = wg_plane_normals[3].xyz;
+
     for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
-        if light_intersects_cluster(light_index) {
+        let light_view = st_light_view_positions[light_index];
+        if light_view.w < 0.0 || sphere_intersects_cluster_cached(
+            light_view.xyz,
+            light_view.w,
+            local_slice_near,
+            local_slice_far,
+            local_plane_0,
+            local_plane_1,
+            local_plane_2,
+            local_plane_3,
+        ) {
             let local_match_index = atomicAdd(&wg_local_match_count, 1u);
             if local_match_index < MAX_LOCAL_LIGHTS {
                 wg_local_light_indices[local_match_index] = light_index;
@@ -181,7 +230,21 @@ fn main(
     }
 
     for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
-        if light_intersects_cluster(light_index) {
+        if atomicLoad(&wg_local_write_count) >= wg_reserved_count {
+            break;
+        }
+
+        let light_view = st_light_view_positions[light_index];
+        if light_view.w < 0.0 || sphere_intersects_cluster_cached(
+            light_view.xyz,
+            light_view.w,
+            local_slice_near,
+            local_slice_far,
+            local_plane_0,
+            local_plane_1,
+            local_plane_2,
+            local_plane_3,
+        ) {
             let write_index = atomicAdd(&wg_local_write_count, 1u);
             if write_index < wg_reserved_count {
                 st_cluster_light_indices[wg_reserved_offset + write_index] = light_index;

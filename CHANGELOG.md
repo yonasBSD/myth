@@ -11,12 +11,15 @@ Also migrated major compute-heavy paths such as 3D Gaussian Splatting, atmospher
 
 - Introduced a unified cached bind-group assembly API across `PrepareContext` and `ExtractContext`, centered around a fluent builder plus `myth_bind_group!`.This removes large amounts of repetitive WGPU boilerplate, unifies static and transient bind-group construction, and guarantees that RDG buffer bindings clamp pooled physical allocations back to their logical resource sizes.
 
+- Introduced **Clustered Shading (Forward+)** to support rendering massive numbers of dynamic lights. Built on a production-oriented, fully GPU-driven compute pipeline:
+  - **Precise Light Culling:** High-accuracy view-space frustum vs. sphere intersection testing for reliable light assignment across the logarithmic depth grid.
+  - **Dynamic VRAM Allocation:** Utilizes a global atomic allocator to support extreme light densities dynamically, maximizing memory efficiency without artificial per-cluster limits.
+  - **High-Performance Compute:** Aggressively leverages shared memory (`var<workgroup>`) and parallel workgroup execution to drastically reduce ALU and bandwidth overhead.
+  - **Visual Profiling:** Added a `ClusterHeatmap` debug view to inspect light density and grid allocation in real-time.
+
 - Introduced 3D Gaussian Splatting (3DGS) as a first-class rendering primitive behind the `3dgs` feature flag.
-
   - High-Performance Sorting: Fast GPU radix sort for depth sorting millions of splats per frame, ensuring correct transparency and blending without CPU overhead.
-
   - Scene Graph & Post-Processing Integration: Full integration with the render state and scene graph. Compatible with post-processing passes.
-
   - Asset Support: Load point clouds from compressed `.npz` (via `gaussian-npz`) and standard `.ply` formats via the async asset server.
 
 ### Refactored / Changed
