@@ -7,19 +7,16 @@ use myth_core::{NodeHandle, SkeletonKey, Transform};
 use myth_resources::GaussianCloudHandle;
 use myth_resources::Input;
 use myth_resources::bloom::BloomSettings;
-use myth_resources::buffer::CpuBuffer;
 use myth_resources::mesh::Mesh;
 use myth_resources::screen_space::ScreenSpaceSettings;
 use myth_resources::shader_defines::ShaderDefines;
 use myth_resources::ssao::SsaoSettings;
 use myth_resources::tone_mapping::ToneMappingSettings;
-use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage};
 
 use crate::background::{BackgroundMode, BackgroundSettings};
 use crate::camera::Camera;
 use crate::environment::Environment;
 use crate::light::Light;
-use crate::light::LightKind;
 use crate::node::Node;
 use crate::skeleton::{BindMode, Skeleton, SkinBinding};
 use crate::transform_system;
@@ -151,13 +148,6 @@ pub struct Scene {
     /// Currently active camera for rendering
     pub active_camera: Option<NodeHandle>,
 
-    // === GPU Resource Descriptors ===
-    #[doc(hidden)]
-    pub light_storage_buffer: CpuBuffer<Vec<GpuLightStorage>>,
-    #[doc(hidden)]
-    pub uniforms_buffer: CpuBuffer<EnvironmentUniforms>,
-    light_data_cache: Vec<GpuLightStorage>,
-
     shader_defines: ShaderDefines,
 
     last_env_version: u64,
@@ -207,19 +197,6 @@ impl Scene {
             background: BackgroundSettings::default(),
 
             active_camera: None,
-
-            light_storage_buffer: CpuBuffer::new(
-                [GpuLightStorage::default(); 16].to_vec(),
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                Some("SceneLightStorageBuffer"),
-            ),
-            uniforms_buffer: CpuBuffer::new(
-                EnvironmentUniforms::default(),
-                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                Some("SceneEnvironmentUniforms"),
-            ),
-
-            light_data_cache: Vec::with_capacity(16),
 
             shader_defines: ShaderDefines::default(),
             last_env_version: 0,
@@ -738,102 +715,6 @@ impl Scene {
         self.update_skeletons();
         self.sync_morph_weights();
         self.sync_shader_defines();
-        self.sync_gpu_buffers();
-    }
-
-    /// Syncs GPU Buffer data
-    pub fn sync_gpu_buffers(&mut self) {
-        self.sync_light_buffer();
-        self.sync_environment_buffer();
-    }
-
-    /// Syncs light data to GPU Buffer
-    fn sync_light_buffer(&mut self) {
-        let mut cache = std::mem::take(&mut self.light_data_cache);
-
-        cache.clear();
-
-        for (light, world_matrix) in self.iter_active_lights() {
-            let pos = world_matrix.translation.to_vec3();
-            let dir = world_matrix.transform_vector3(-Vec3::Z).normalize();
-
-            let mut gpu_light = GpuLightStorage {
-                color: light.color,
-                intensity: light.intensity,
-                position: pos,
-                direction: dir,
-                shadow_layer_index: -1,
-                ..Default::default()
-            };
-
-            match &light.kind {
-                LightKind::Point(point) => {
-                    gpu_light.light_type = 1;
-                    gpu_light.range = point.range;
-                }
-                LightKind::Spot(spot) => {
-                    gpu_light.light_type = 2;
-                    gpu_light.range = spot.range;
-                    gpu_light.inner_cone_cos = spot.inner_cone.cos();
-                    gpu_light.outer_cone_cos = spot.outer_cone.cos();
-                }
-                LightKind::Directional(_) => {
-                    gpu_light.light_type = 0;
-                }
-            }
-
-            cache.push(gpu_light);
-        }
-
-        if cache.is_empty() {
-            cache.push(GpuLightStorage::default());
-        }
-
-        self.light_data_cache = cache;
-
-        let needs_update =
-            self.light_storage_buffer.read().as_slice() != self.light_data_cache.as_slice();
-
-        if needs_update {
-            self.light_storage_buffer
-                .write()
-                .clone_from(&self.light_data_cache);
-        }
-    }
-
-    /// Syncs environment data to GPU Buffer
-    fn sync_environment_buffer(&mut self) {
-        let env = &self.environment;
-        let light_count = self.iter_active_lights().count();
-
-        let new_uniforms = EnvironmentUniforms {
-            ambient_light: env.ambient,
-            num_lights: light_count as u32,
-            env_map_intensity: env.intensity,
-            env_map_rotation: env.rotation,
-            // env_map_max_mip_level is set by ResourceManager::resolve_gpu_environment
-            // during the prepare phase, so we preserve the existing value here.
-            env_map_max_mip_level: self.uniforms_buffer.read().env_map_max_mip_level,
-            ..Default::default()
-        };
-
-        let needs_update = *self.uniforms_buffer.read() != new_uniforms;
-
-        if needs_update {
-            *self.uniforms_buffer.write() = new_uniforms;
-        }
-    }
-
-    // ========================================================================
-    // GPU Resource Access Interface
-    // ========================================================================
-
-    pub fn light_storage(&self) -> &CpuBuffer<Vec<GpuLightStorage>> {
-        &self.light_storage_buffer
-    }
-
-    pub fn environment_uniforms(&self) -> &CpuBuffer<EnvironmentUniforms> {
-        &self.uniforms_buffer
     }
 
     pub fn update_skeletons(&mut self) {

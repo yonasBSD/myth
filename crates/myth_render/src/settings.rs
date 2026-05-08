@@ -337,7 +337,7 @@ mod tests {
     fn renderer_settings_default_clustered_mode_is_auto() {
         assert_eq!(
             RendererSettings::default().clustered_shading,
-            ClusteredShadingMode::Auto { threshold: 16 }
+            ClusteredShadingMode::Auto { threshold: 32 }
         );
     }
 }

@@ -22,6 +22,7 @@ use crate::graph::passes::{
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
+use myth_resources::uniforms::GpuLightStorage;
 use myth_scene::Scene;
 use myth_scene::background::BackgroundMode;
 use myth_scene::camera::RenderCamera;
@@ -120,6 +121,13 @@ pub struct FrameTime {
     pub time: f32,
     pub delta_time: f32,
     pub frame_count: u64,
+}
+
+fn max_extracted_light_count(device: &wgpu::Device) -> usize {
+    let max_storage_binding_size = device.limits().max_storage_buffer_binding_size as usize;
+    let max_gpu_light_count = max_storage_binding_size / std::mem::size_of::<GpuLightStorage>();
+    let max_view_position_count = max_storage_binding_size / std::mem::size_of::<[f32; 4]>();
+    max_gpu_light_count.min(max_view_position_count)
 }
 
 impl Renderer {
@@ -338,6 +346,7 @@ impl Renderer {
         // ── Phase 1: Extract scene, build shadow views, prepare global ──
 
         let surface_size = state.wgpu_ctx.size();
+        let max_extracted_lights = max_extracted_light_count(&state.wgpu_ctx.device);
         state.render_frame.extract_and_prepare(
             &mut state.resource_manager,
             scene,
@@ -346,7 +355,7 @@ impl Renderer {
             frame_time,
             &mut state.render_lists,
             surface_size,
-            state.clustered_lighting_pass.config.max_lights_per_cluster as usize,
+            max_extracted_lights,
         );
 
         let requested_msaa = camera.aa_mode.msaa_sample_count();

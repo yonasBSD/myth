@@ -19,12 +19,17 @@ use bitflags::{Flags, bitflags};
 use crate::core::{BindGroupContext, ResourceManager};
 use myth_assets::{AssetServer, GeometryHandle, MaterialHandle};
 use myth_resources::BoundingBox;
+use myth_resources::buffer::CpuBuffer;
 use myth_resources::shader_defines::ShaderDefines;
+use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage};
 use myth_scene::background::BackgroundMode;
 use myth_scene::camera::RenderCamera;
 use myth_scene::environment::Environment;
-use myth_scene::light::{LightKind, ShadowConfig};
+use myth_scene::light::{LightKind, ShadowConfig, SpotLight};
 use myth_scene::{NodeHandle, Scene, SkeletonKey};
+
+const SPOT_TIGHT_SPHERE_COS_THRESHOLD: f32 = std::f32::consts::FRAC_1_SQRT_2; // ~ 0.70710678, corresponds to a 90-degree outer cone angle
+const LIGHT_SCORE_DISTANCE_FLOOR: f32 = 1.0;
 
 /// Minimal render item, containing only data needed by GPU
 ///
@@ -60,6 +65,7 @@ pub struct ExtractedRenderItem {
 #[derive(Clone)]
 pub struct ExtractedLight {
     pub id: u64,
+    pub color: Vec3,
     pub intensity: f32,
     pub cast_shadows: bool,
     pub kind: LightKind,
@@ -129,9 +135,14 @@ pub struct ExtractedScene {
     pub envvironment: Environment,
     pub has_transmission: bool,
     pub lights: Vec<ExtractedLight>,
+    /// GPU-visible punctual/directional light payload for the current frame.
+    pub light_storage_buffer: CpuBuffer<Vec<GpuLightStorage>>,
+    /// GPU-visible environment uniforms for the current frame.
+    pub environment_uniforms_buffer: CpuBuffer<EnvironmentUniforms>,
 
     collected_meshes: Vec<CollectedMesh>,
     collected_skeleton_keys: HashSet<SkeletonKey>,
+    light_upload_cache: Vec<GpuLightStorage>,
 }
 
 struct CollectedMesh {
@@ -159,9 +170,20 @@ impl ExtractedScene {
             envvironment: Environment::default(),
             has_transmission: false,
             lights: Vec::new(),
+            light_storage_buffer: CpuBuffer::new(
+                vec![GpuLightStorage::default()],
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneLightStorageBuffer"),
+            ),
+            environment_uniforms_buffer: CpuBuffer::new(
+                EnvironmentUniforms::default(),
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneEnvironmentUniforms"),
+            ),
 
             collected_meshes: Vec::new(),
             collected_skeleton_keys: HashSet::default(),
+            light_upload_cache: Vec::with_capacity(16),
         }
     }
 
@@ -177,9 +199,20 @@ impl ExtractedScene {
             envvironment: Environment::default(),
             has_transmission: false,
             lights: Vec::with_capacity(16),
+            light_storage_buffer: CpuBuffer::new(
+                vec![GpuLightStorage::default(); 16],
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneLightStorageBuffer"),
+            ),
+            environment_uniforms_buffer: CpuBuffer::new(
+                EnvironmentUniforms::default(),
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneEnvironmentUniforms"),
+            ),
 
             collected_meshes: Vec::with_capacity(item_capacity),
             collected_skeleton_keys: HashSet::default(),
+            light_upload_cache: Vec::with_capacity(16),
         }
     }
 
@@ -213,9 +246,10 @@ impl ExtractedScene {
         camera: &RenderCamera,
         assets: &AssetServer,
         resource_manager: &mut ResourceManager,
+        max_light_count: usize,
     ) {
         self.clear();
-        self.extract_lights(scene);
+        self.extract_lights(scene, camera, max_light_count);
         self.extract_render_items(scene, camera, assets, resource_manager);
         self.extract_environment(scene);
 
@@ -257,8 +291,15 @@ impl ExtractedScene {
         }
     }
 
-    fn extract_lights(&mut self, scene: &Scene) {
+    /// Refresh the extracted scene's GPU-facing light and environment buffers.
+    pub fn prepare_gpu_scene_inputs(&mut self, env_map_max_mip_level: f32) {
+        self.sync_light_storage_buffer();
+        self.sync_environment_uniforms(env_map_max_mip_level);
+    }
+
+    fn extract_lights(&mut self, scene: &Scene, camera: &RenderCamera, max_light_count: usize) {
         self.lights.reserve(scene.lights.len());
+        let mut visible_lights = Vec::with_capacity(scene.lights.len());
 
         for (light, world_matrix) in scene.iter_active_lights() {
             let position = world_matrix.translation.to_vec3();
@@ -266,15 +307,74 @@ impl ExtractedScene {
                 .transform_vector3(-glam::Vec3::Z)
                 .normalize_or_zero();
 
-            self.lights.push(ExtractedLight {
+            let extracted_light = ExtractedLight {
                 id: light.id(),
+                color: light.color,
                 intensity: light.intensity,
                 cast_shadows: light.cast_shadows,
                 kind: light.kind.clone(),
                 position,
                 direction,
                 shadow: light.shadow.clone(),
-            });
+            };
+
+            if !light_is_visible_for_camera(&extracted_light, camera) {
+                continue;
+            }
+
+            visible_lights.push(extracted_light);
+        }
+
+        let visible_light_count = visible_lights.len();
+        let camera_position = camera.position.to_array().into();
+        let (ordered_lights, truncated_count) =
+            partition_sort_and_truncate_lights(visible_lights, camera_position, max_light_count);
+        if truncated_count > 0 {
+            log::warn!(
+                "Extracted light list truncated from {} to {} entries to satisfy GPU storage buffer limits",
+                visible_light_count,
+                ordered_lights.len(),
+            );
+        }
+
+        self.lights = ordered_lights;
+    }
+
+    fn sync_light_storage_buffer(&mut self) {
+        let mut upload_cache = std::mem::take(&mut self.light_upload_cache);
+        upload_cache.clear();
+        upload_cache.reserve(self.lights.len().max(1));
+
+        for light in &self.lights {
+            upload_cache.push(extracted_light_to_gpu(light));
+        }
+
+        if upload_cache.is_empty() {
+            upload_cache.push(GpuLightStorage::default());
+        }
+
+        let needs_update = self.light_storage_buffer.read().as_slice() != upload_cache.as_slice();
+        if needs_update {
+            self.light_storage_buffer.write().clone_from(&upload_cache);
+        }
+
+        self.light_upload_cache = upload_cache;
+    }
+
+    fn sync_environment_uniforms(&mut self, env_map_max_mip_level: f32) {
+        let env = &self.envvironment;
+        let new_uniforms = EnvironmentUniforms {
+            ambient_light: env.ambient,
+            num_lights: self.lights.len() as u32,
+            env_map_intensity: env.intensity,
+            env_map_rotation: env.rotation,
+            env_map_max_mip_level,
+            ..Default::default()
+        };
+
+        let needs_update = *self.environment_uniforms_buffer.read() != new_uniforms;
+        if needs_update {
+            *self.environment_uniforms_buffer.write() = new_uniforms;
         }
     }
 
@@ -444,5 +544,230 @@ impl ExtractedScene {
 impl Default for ExtractedScene {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn light_is_visible_for_camera(light: &ExtractedLight, camera: &RenderCamera) -> bool {
+    match &light.kind {
+        LightKind::Directional(_) => true,
+        LightKind::Point(point) => {
+            point.range > 0.0
+                && camera
+                    .frustum
+                    .intersects_sphere(light.position, point.range)
+        }
+        LightKind::Spot(spot) => {
+            if spot.range <= 0.0 {
+                return false;
+            }
+
+            let (sphere_center, sphere_radius) =
+                spot_bounding_sphere(light.position, light.direction, spot);
+            camera
+                .frustum
+                .intersects_sphere(sphere_center, sphere_radius)
+        }
+    }
+}
+
+fn extracted_light_to_gpu(light: &ExtractedLight) -> GpuLightStorage {
+    let mut gpu_light = GpuLightStorage {
+        color: light.color,
+        intensity: light.intensity,
+        position: light.position,
+        direction: light.direction,
+        shadow_layer_index: -1,
+        ..Default::default()
+    };
+
+    match &light.kind {
+        LightKind::Directional(_) => {
+            gpu_light.light_type = 0;
+        }
+        LightKind::Point(point) => {
+            gpu_light.light_type = 1;
+            gpu_light.range = point.range;
+        }
+        LightKind::Spot(spot) => {
+            gpu_light.light_type = 2;
+            gpu_light.range = spot.range;
+            gpu_light.inner_cone_cos = spot.inner_cone.cos();
+            gpu_light.outer_cone_cos = spot.outer_cone.cos();
+        }
+    }
+
+    gpu_light
+}
+
+fn extracted_light_score(light: &ExtractedLight, camera_position: Vec3) -> f32 {
+    let radius = extracted_light_radius(light);
+    if radius <= 0.0 || light.intensity <= 0.0 {
+        return 0.0;
+    }
+
+    let distance = (light.position - camera_position)
+        .length()
+        .max(LIGHT_SCORE_DISTANCE_FLOOR);
+    let score = light.intensity * (radius / distance);
+    if score.is_finite() { score } else { 0.0 }
+}
+
+fn partition_sort_and_truncate_lights(
+    lights: Vec<ExtractedLight>,
+    camera_position: Vec3,
+    max_light_count: usize,
+) -> (Vec<ExtractedLight>, usize) {
+    let mut local_lights = Vec::with_capacity(lights.len());
+    let mut directional_lights = Vec::new();
+    for light in lights {
+        if light.is_directional() {
+            directional_lights.push(light);
+        } else {
+            local_lights.push(light);
+        }
+    }
+
+    local_lights.sort_unstable_by(|lhs, rhs| {
+        let lhs_score = extracted_light_score(lhs, camera_position);
+        let rhs_score = extracted_light_score(rhs, camera_position);
+        rhs_score
+            .total_cmp(&lhs_score)
+            .then_with(|| lhs.id.cmp(&rhs.id))
+    });
+    directional_lights.sort_unstable_by_key(|light| light.id);
+
+    let visible_light_count = local_lights.len() + directional_lights.len();
+    if visible_light_count > max_light_count {
+        if directional_lights.len() >= max_light_count {
+            local_lights.clear();
+            directional_lights.truncate(max_light_count);
+        } else {
+            local_lights.truncate(max_light_count.saturating_sub(directional_lights.len()));
+        }
+    }
+
+    local_lights.extend(directional_lights);
+    let truncated_count = visible_light_count.saturating_sub(local_lights.len());
+    (local_lights, truncated_count)
+}
+
+fn extracted_light_radius(light: &ExtractedLight) -> f32 {
+    match &light.kind {
+        LightKind::Directional(_) => 0.0,
+        LightKind::Point(point) => point.range,
+        LightKind::Spot(spot) => spot_bounding_sphere(light.position, light.direction, spot).1,
+    }
+}
+
+fn spot_bounding_sphere(position: Vec3, direction: Vec3, spot: &SpotLight) -> (Vec3, f32) {
+    let outer_cone_cos = spot.outer_cone.cos();
+    if outer_cone_cos < SPOT_TIGHT_SPHERE_COS_THRESHOLD {
+        return (position, spot.range);
+    }
+
+    let cos_sq = (outer_cone_cos * outer_cone_cos).max(1e-4);
+    let radius = 0.5 * spot.range / cos_sq;
+    (position + direction * radius, radius)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{partition_sort_and_truncate_lights, spot_bounding_sphere};
+    use glam::Vec3;
+    use myth_scene::light::{DirectionalLight, LightKind, PointLight, SpotLight};
+
+    use crate::graph::extracted::ExtractedLight;
+
+    fn directional_light(id: u64) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            color: Vec3::ONE,
+            intensity: 1.0,
+            cast_shadows: false,
+            kind: LightKind::Directional(DirectionalLight {}),
+            position: Vec3::ZERO,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    fn point_light(id: u64, position: Vec3, intensity: f32, range: f32) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            color: Vec3::ONE,
+            intensity,
+            cast_shadows: false,
+            kind: LightKind::Point(PointLight { range }),
+            position,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    fn spot_light(id: u64, position: Vec3, intensity: f32, range: f32) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            color: Vec3::ONE,
+            intensity,
+            cast_shadows: false,
+            kind: LightKind::Spot(SpotLight {
+                range,
+                inner_cone: 0.25,
+                outer_cone: 0.5,
+            }),
+            position,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    #[test]
+    fn partition_sort_and_truncate_keeps_directional_lights_in_tail_segment() {
+        let lights = vec![
+            point_light(1, Vec3::new(0.0, 0.0, -4.0), 4.0, 6.0),
+            directional_light(2),
+            spot_light(3, Vec3::new(0.0, 0.0, -2.0), 2.0, 5.0),
+        ];
+
+        let (ordered, truncated_count) =
+            partition_sort_and_truncate_lights(lights, Vec3::ZERO, usize::MAX);
+
+        assert_eq!(truncated_count, 0);
+        assert_eq!(
+            ordered.iter().map(|light| light.id).collect::<Vec<_>>(),
+            vec![1, 3, 2]
+        );
+    }
+
+    #[test]
+    fn partition_sort_and_truncate_preserves_directional_lights_when_capping_locals() {
+        let lights = vec![
+            point_light(1, Vec3::new(0.0, 0.0, -12.0), 2.0, 3.0),
+            point_light(2, Vec3::new(0.0, 0.0, -3.0), 4.0, 10.0),
+            spot_light(3, Vec3::new(0.0, 0.0, -5.0), 3.0, 9.0),
+            directional_light(4),
+        ];
+
+        let (ordered, truncated_count) = partition_sort_and_truncate_lights(lights, Vec3::ZERO, 2);
+
+        assert_eq!(truncated_count, 2);
+        assert_eq!(
+            ordered.iter().map(|light| light.id).collect::<Vec<_>>(),
+            vec![2, 4]
+        );
+    }
+
+    #[test]
+    fn narrow_spot_uses_tighter_bounding_sphere() {
+        let spot = SpotLight {
+            range: 12.0,
+            inner_cone: 0.1,
+            outer_cone: 0.3,
+        };
+
+        let (center, radius) = spot_bounding_sphere(Vec3::ZERO, -Vec3::Z, &spot);
+
+        assert!(radius > spot.range * 0.5);
+        assert!(center.z < 0.0);
     }
 }

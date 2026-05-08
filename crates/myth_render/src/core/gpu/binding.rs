@@ -12,11 +12,11 @@ use myth_resources::geometry::Geometry;
 use myth_resources::texture::TextureSource;
 use myth_resources::uniforms::DynamicModelUniforms;
 use myth_resources::uniforms::WgslStruct;
-use myth_scene::Scene;
 use myth_scene::skeleton::Skeleton;
 
 use crate::core::binding::Bindings;
 use crate::graph::RenderState;
+use crate::graph::extracted::ExtractedScene;
 use myth_resources::builder::{Binding, BindingDesc};
 use myth_resources::{BindingResource, ResourceBuilder, WgslStructName};
 
@@ -437,25 +437,25 @@ impl ResourceManager {
     pub fn prepare_global(
         &mut self,
         assets: &AssetServer,
-        scene: &Scene,
+        extracted_scene: &ExtractedScene,
         render_state: &RenderState,
     ) -> u32 {
         let has_active_environment = matches!(
-            scene.background.mode,
+            extracted_scene.background,
             myth_scene::background::BackgroundMode::Procedural(_)
-        ) || scene.environment.has_env_map();
+        ) || extracted_scene.envvironment.has_env_map();
 
         // === Ensure: upload all buffers, obtain physical resource IDs ===
         let (_, camera_result) = self.ensure_buffer(render_state.uniforms());
-        // let (_, env_result) = self.ensure_buffer(&scene.uniforms_buffer);
-        let (_, light_result) = self.ensure_buffer(&scene.light_storage_buffer);
-        let (_, scene_uniform_result) = self.ensure_buffer(&scene.uniforms_buffer);
+        let (_, light_result) = self.ensure_buffer(&extracted_scene.light_storage_buffer);
+        let (_, scene_uniform_result) =
+            self.ensure_buffer(&extracted_scene.environment_uniforms_buffer);
 
         // Resolve environment texture IDs from GpuEnvironment cache.
         // resolve_gpu_environment runs before prepare_global and always creates
         // cache entries, so a miss here should not happen in normal operation.
         let (processed_env_map_id, pmrem_map_id) = if has_active_environment {
-            self.gpu_environment(scene.id()).map_or(
+            self.gpu_environment(extracted_scene.scene_id).map_or(
                 (
                     self.system_textures.black_cube.id(),
                     self.system_textures.black_cube.id(),
@@ -483,7 +483,7 @@ impl ResourceManager {
         current_ids.push(pmrem_map_id);
         current_ids.push(brdf_lut_id);
 
-        let state_id = Self::compute_global_state_key(render_state.id, scene.id());
+        let state_id = Self::compute_global_state_key(render_state.id, extracted_scene.scene_id);
 
         // === Check: fast fingerprint comparison ===
         if let Some(gpu_state) = self.global_states.get_mut(&state_id)
@@ -494,7 +494,7 @@ impl ResourceManager {
         }
 
         // === Rebind: fingerprint mismatch, rebuild BindGroup ===
-        self.create_global_state(assets, state_id, render_state, scene, current_ids)
+        self.create_global_state(assets, state_id, render_state, extracted_scene, current_ids)
     }
 
     #[inline]
@@ -507,14 +507,14 @@ impl ResourceManager {
         assets: &AssetServer,
         state_id: u64,
         render_state: &RenderState,
-        scene: &Scene,
+        extracted_scene: &ExtractedScene,
         resource_ids: super::ResourceIdSet,
     ) -> u32 {
         let mut builder = ResourceBuilder::new();
         render_state.define_bindings(&mut builder);
 
         // Build scene bindings (environment uniforms, lights, env textures)
-        self.define_global_scene_bindings(&mut builder, scene);
+        self.define_global_scene_bindings(&mut builder, extracted_scene);
 
         self.prepare_binding_resources(assets, &builder.bindings);
         let layout_entries = builder.generate_layout_entries();
@@ -549,7 +549,7 @@ impl ResourceManager {
     fn define_global_scene_bindings<'a>(
         &self,
         builder: &mut ResourceBuilder<'a>,
-        scene: &'a Scene,
+        extracted_scene: &'a ExtractedScene,
     ) {
         use myth_resources::WgslStructName;
         use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage};
@@ -557,7 +557,7 @@ impl ResourceManager {
         // Environment Uniforms
         builder.add_uniform_buffer(
             "environment",
-            &scene.uniforms_buffer.handle(),
+            &extracted_scene.environment_uniforms_buffer.handle(),
             None,
             wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
             false,
@@ -570,7 +570,7 @@ impl ResourceManager {
         // Light Storage Buffer
         builder.add_storage_buffer(
             "lights",
-            &scene.light_storage_buffer.handle(),
+            &extracted_scene.light_storage_buffer.handle(),
             None,
             true,
             wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
@@ -579,11 +579,11 @@ impl ResourceManager {
 
         // Resolve env_map from GpuEnvironment cache
         let env_map_source = if matches!(
-            scene.background.mode,
+            extracted_scene.background,
             myth_scene::background::BackgroundMode::Procedural(_)
-        ) || scene.environment.has_env_map()
+        ) || extracted_scene.envvironment.has_env_map()
         {
-            self.gpu_environment(scene.id()).map_or_else(
+            self.gpu_environment(extracted_scene.scene_id).map_or_else(
                 || TextureHandle::dummy_env_map().into(),
                 |gpu_env| {
                     TextureSource::Attachment(
@@ -606,13 +606,17 @@ impl ResourceManager {
 
         // Resolve pmrem_map from GpuEnvironment cache
         let pmrem_source = if matches!(
-            scene.background.mode,
+            extracted_scene.background,
             myth_scene::background::BackgroundMode::Procedural(_)
-        ) || scene.environment.has_env_map()
+        ) || extracted_scene.envvironment.has_env_map()
         {
-            self.gpu_environment(scene.id()).map(|gpu_env| {
-                TextureSource::Attachment(gpu_env.pmrem_view.id(), wgpu::TextureViewDimension::Cube)
-            })
+            self.gpu_environment(extracted_scene.scene_id)
+                .map(|gpu_env| {
+                    TextureSource::Attachment(
+                        gpu_env.pmrem_view.id(),
+                        wgpu::TextureViewDimension::Cube,
+                    )
+                })
         } else {
             None
         };
