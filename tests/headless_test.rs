@@ -217,6 +217,21 @@ fn assert_images_differ(a: &[u8], b: &[u8], label: &str) {
     assert!(differs, "{label}: images are identical but should differ");
 }
 
+fn mean_rgb_abs_delta(a: &[u8], b: &[u8]) -> f32 {
+    assert_eq!(a.len(), b.len());
+
+    let mut total_delta = 0u64;
+    let mut channel_count = 0u64;
+    for (lhs, rhs) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        total_delta += u64::from(lhs[0].abs_diff(rhs[0]));
+        total_delta += u64::from(lhs[1].abs_diff(rhs[1]));
+        total_delta += u64::from(lhs[2].abs_diff(rhs[2]));
+        channel_count += 3;
+    }
+
+    total_delta as f32 / channel_count as f32
+}
+
 // ── Physical Material Tests ──────────────────────────────────────────────
 
 /// A PhysicalMaterial sphere is rendered with a directional light.
@@ -510,6 +525,117 @@ fn populate_dense_point_light_scene(scene: &mut Scene, assets: &AssetServer) {
     scene.active_camera = Some(cam);
 }
 
+fn populate_clustered_corridor_scene(scene: &mut Scene, assets: &AssetServer) {
+    use std::f32::consts::FRAC_PI_2;
+
+    const LIGHT_GRID_X: usize = 8;
+    const LIGHT_GRID_Y: usize = 3;
+    const LIGHT_GRID_Z: usize = 10;
+
+    fn centered_lattice(index: usize, count: usize, spacing: f32) -> f32 {
+        (index as f32 - (count as f32 - 1.0) * 0.5) * spacing
+    }
+
+    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Vec3 {
+        let h6 = (h.fract() * 6.0).clamp(0.0, 6.0 - f32::EPSILON);
+        let i = h6.floor() as i32;
+        let f = h6 - i as f32;
+        let p = v * (1.0 - s);
+        let q = v * (1.0 - f * s);
+        let t = v * (1.0 - (1.0 - f) * s);
+
+        match i {
+            0 => Vec3::new(v, t, p),
+            1 => Vec3::new(q, v, p),
+            2 => Vec3::new(p, v, t),
+            3 => Vec3::new(p, q, v),
+            4 => Vec3::new(t, p, v),
+            _ => Vec3::new(v, p, q),
+        }
+    }
+
+    scene.environment.set_ambient_light(Vec3::splat(0.003));
+
+    let floor_material = PhysicalMaterial::new(Vec4::new(0.06, 0.07, 0.08, 1.0))
+        .with_roughness(0.86)
+        .with_metalness(0.12);
+    let wall_material = PhysicalMaterial::new(Vec4::new(0.10, 0.11, 0.14, 1.0))
+        .with_roughness(0.74)
+        .with_metalness(0.14);
+    let block_material = PhysicalMaterial::new(Vec4::new(0.78, 0.80, 0.85, 1.0))
+        .with_roughness(0.22)
+        .with_metalness(0.65);
+
+    let floor = scene.spawn_plane(18.0, 56.0, floor_material, assets);
+    scene
+        .node(&floor)
+        .set_rotation(Quat::from_rotation_x(-FRAC_PI_2))
+        .set_position(0.0, -0.3, 0.0)
+        .set_receive_shadows(false);
+
+    for &(x, y, z, sx, sy, sz) in &[
+        (-7.5, 2.6, 0.0, 0.45, 5.8, 48.0),
+        (7.5, 2.6, 0.0, 0.45, 5.8, 48.0),
+        (0.0, 5.2, 0.0, 15.4, 0.22, 48.0),
+    ] {
+        let wall = scene.spawn_box(sx, sy, sz, wall_material.clone(), assets);
+        scene
+            .node(&wall)
+            .set_position(x, y, z)
+            .set_shadows(false, true);
+    }
+
+    for row in 0..8 {
+        let z = centered_lattice(row, 8, 5.2);
+        for col in -2..=2 {
+            let x = col as f32 * 2.45;
+            let y = if (row + (col + 2) as usize) % 2 == 0 {
+                0.7
+            } else {
+                1.65
+            };
+            let block = if (row + (col + 2) as usize) % 3 == 0 {
+                scene.spawn_sphere(0.76, block_material.clone(), assets)
+            } else {
+                scene.spawn_box(1.3, 1.3, 1.3, block_material.clone(), assets)
+            };
+            scene
+                .node(&block)
+                .set_position(x, y, z)
+                .set_shadows(false, true);
+        }
+    }
+
+    for ix in 0..LIGHT_GRID_X {
+        for iy in 0..LIGHT_GRID_Y {
+            for iz in 0..LIGHT_GRID_Z {
+                let light_index = ix * LIGHT_GRID_Y * LIGHT_GRID_Z + iy * LIGHT_GRID_Z + iz;
+                let hue = light_index as f32 / (LIGHT_GRID_X * LIGHT_GRID_Y * LIGHT_GRID_Z) as f32;
+                let color = hsv_to_rgb(hue, 0.76, 1.0);
+                let light = scene.add_light(Light::new_point(
+                    color,
+                    0.55 + iy as f32 * 0.28,
+                    3.4 + ix as f32 * 0.12,
+                ));
+
+                let base = Vec3::new(
+                    centered_lattice(ix, LIGHT_GRID_X, 1.35),
+                    0.9 + iy as f32 * 0.7,
+                    centered_lattice(iz, LIGHT_GRID_Z, 4.1),
+                );
+                scene.node(&light).set_position(base.x, base.y, base.z);
+            }
+        }
+    }
+
+    let cam = scene.add_camera(Camera::new_perspective(46.0, 1.0, 0.1));
+    scene
+        .node(&cam)
+        .set_position(0.0, 4.2, 20.0)
+        .look_at(Vec3::new(0.0, 1.8, 0.0));
+    scene.active_camera = Some(cam);
+}
+
 #[test]
 fn clustered_force_modes_dense_point_lights() {
     for (label, mode) in [
@@ -531,6 +657,85 @@ fn clustered_force_modes_dense_point_lights() {
         assert_eq!(pixels.len(), expected);
         assert_not_black(&pixels, label);
     }
+}
+
+#[test]
+fn clustered_directional_plus_dense_local_lights() {
+    let (mut engine, expected) = setup_headless_with_settings(
+        160,
+        160,
+        RendererSettings {
+            clustered_shading: ClusteredShadingMode::ForceOn,
+            ..Default::default()
+        },
+    );
+
+    {
+        let scene = engine.scene_manager.create_active();
+        populate_dense_point_light_scene(scene, &engine.assets);
+    }
+    let local_only = render_and_capture(&mut engine, 2);
+    assert_eq!(local_only.len(), expected);
+    assert_not_black(&local_only, "clustered_local_only");
+
+    reset_active_scene(&mut engine);
+    {
+        let scene = engine.scene_manager.create_active();
+        populate_dense_point_light_scene(scene, &engine.assets);
+        scene.add_light(Light::new_directional(Vec3::splat(0.85), 1.8));
+    }
+    let with_directional = render_and_capture(&mut engine, 2);
+    assert_eq!(with_directional.len(), expected);
+    assert_not_black(
+        &with_directional,
+        "clustered_directional_plus_dense_local_lights",
+    );
+
+    assert_images_differ(
+        &local_only,
+        &with_directional,
+        "clustered_directional_plus_dense_local_lights",
+    );
+}
+
+#[test]
+fn clustered_corridor_matches_force_off_reference() {
+    let (mut clustered_engine, expected) = setup_headless_with_settings(
+        160,
+        160,
+        RendererSettings {
+            clustered_shading: ClusteredShadingMode::ForceOn,
+            ..Default::default()
+        },
+    );
+    {
+        let scene = clustered_engine.scene_manager.create_active();
+        populate_clustered_corridor_scene(scene, &clustered_engine.assets);
+    }
+    let clustered = render_and_capture(&mut clustered_engine, 2);
+    assert_eq!(clustered.len(), expected);
+    assert_not_black(&clustered, "clustered_corridor_force_on");
+
+    let (mut reference_engine, _) = setup_headless_with_settings(
+        160,
+        160,
+        RendererSettings {
+            clustered_shading: ClusteredShadingMode::ForceOff,
+            ..Default::default()
+        },
+    );
+    {
+        let scene = reference_engine.scene_manager.create_active();
+        populate_clustered_corridor_scene(scene, &reference_engine.assets);
+    }
+    let reference = render_and_capture(&mut reference_engine, 2);
+    assert_not_black(&reference, "clustered_corridor_force_off");
+
+    let mean_delta = mean_rgb_abs_delta(&clustered, &reference);
+    assert!(
+        mean_delta <= 3.0,
+        "clustered corridor diverged too far from force-off reference: mean RGB abs delta = {mean_delta:.3}"
+    );
 }
 
 // ── Alpha Mode Tests ─────────────────────────────────────────────────────

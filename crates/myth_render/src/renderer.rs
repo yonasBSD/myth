@@ -346,6 +346,7 @@ impl Renderer {
             frame_time,
             &mut state.render_lists,
             surface_size,
+            state.clustered_lighting_pass.config.max_lights_per_cluster as usize,
         );
 
         let requested_msaa = camera.aa_mode.msaa_sample_count();
@@ -354,11 +355,13 @@ impl Renderer {
             state.wgpu_ctx.pipeline_settings_version += 1;
         }
 
-        let active_light_count = state.render_frame.extracted_scene.lights.len() as u32;
+        let active_local_light_count =
+            state.render_frame.extracted_scene.local_light_count() as u32;
         let clustered_lighting_enabled = self
             .settings
             .clustered_shading
-            .is_enabled(active_light_count);
+            .is_enabled(active_local_light_count)
+            && active_local_light_count > 0;
 
         if clustered_lighting_enabled {
             state
@@ -463,7 +466,7 @@ impl Renderer {
             state.clustered_lighting_pass.extract_and_prepare(
                 &mut extract_ctx,
                 clustered_lighting_enabled,
-                active_light_count,
+                active_local_light_count,
             );
 
             // Procedural atmosphere (LUT + cubemap + PMREM compute)

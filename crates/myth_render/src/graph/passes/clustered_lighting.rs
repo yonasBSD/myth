@@ -260,7 +260,7 @@ impl ClusteredLightingFeature {
         &mut self,
         ctx: &mut ExtractContext,
         enabled: bool,
-        active_light_count: u32,
+        active_local_light_count: u32,
     ) {
         let render_uniforms = ctx.render_state.uniforms().read();
         let width = render_uniforms.viewport.x.max(1.0) as u32;
@@ -316,7 +316,7 @@ impl ClusteredLightingFeature {
                 } else {
                     0
                 },
-                active_light_count,
+                active_local_light_count,
             ),
             depth_params: glam::Vec4::new(near, far, slice_scale, slice_bias),
         };

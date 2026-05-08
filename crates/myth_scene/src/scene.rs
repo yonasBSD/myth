@@ -804,7 +804,7 @@ impl Scene {
     /// Syncs environment data to GPU Buffer
     fn sync_environment_buffer(&mut self) {
         let env = &self.environment;
-        let light_count = self.lights.len();
+        let light_count = self.iter_active_lights().count();
 
         let new_uniforms = EnvironmentUniforms {
             ambient_light: env.ambient,

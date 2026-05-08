@@ -380,7 +380,7 @@ pub struct ClusteredLightingParams {
     pub screen_dimensions: UVec4,
     /// (cluster_count_z, total_clusters, tile_size_x, tile_size_y)
     pub grid_dimensions: UVec4,
-    /// (soft_cluster_budget, max_light_indices, flags, active_light_count)
+    /// (soft_cluster_budget, max_light_indices, flags, active_local_light_count)
     pub budget: UVec4,
     /// (camera_near, camera_far, slice_scale, slice_bias)
     pub depth_params: Vec4,

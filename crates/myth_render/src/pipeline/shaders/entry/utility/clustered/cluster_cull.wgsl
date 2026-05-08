@@ -14,10 +14,13 @@ const CLUSTER_CULL_WG_SIZE: u32 = 64u;
 const MAX_LOCAL_LIGHTS: u32 = 512u;
 const ALLOCATOR_OFFSET_SLOT: u32 = 0u;
 const ALLOCATOR_OVERFLOW_SLOT: u32 = 1u;
+const ATTENUATION_QUICK_REJECT_THRESHOLD: f32 = 0.005;
 
 var<workgroup> wg_plane_normals: array<vec4<f32>, 4>;
 var<workgroup> wg_slice_near: f32;
 var<workgroup> wg_slice_far: f32;
+var<workgroup> wg_cluster_center: vec3<f32>;
+var<workgroup> wg_cluster_radius: f32;
 var<workgroup> wg_cluster_index: u32;
 var<workgroup> wg_reserved_offset: u32;
 var<workgroup> wg_reserved_count: u32;
@@ -57,35 +60,40 @@ fn oriented_plane_normal(edge_a: vec3<f32>, edge_b: vec3<f32>, inside_dir: vec3<
     return normal;
 }
 
-// fn sphere_intersects_cluster(
-//     center: vec3<f32>,
-//     radius: f32,
-//     slice_near: f32,
-//     slice_far: f32,
-// ) -> bool {
-//     let light_depth = -center.z;
-//     if light_depth + radius < slice_near || light_depth - radius > slice_far {
-//         return false;
-//     }
+fn ray_at_depth(ray: vec3<f32>, view_depth: f32) -> vec3<f32> {
+    let depth_scale = view_depth / max(-ray.z, 1e-4);
+    return ray * depth_scale;
+}
 
-//     for (var plane_index = 0u; plane_index < 4u; plane_index += 1u) {
-//         let plane_normal = wg_plane_normals[plane_index].xyz;
-//         if dot(plane_normal, center) < -radius {
-//             return false;
-//         }
-//     }
+fn pow2(x: f32) -> f32 {
+    return x * x;
+}
 
-//     return true;
-// }
+fn pow4(x: f32) -> f32 {
+    let x2 = x * x;
+    return x2 * x2;
+}
 
-// fn light_intersects_cluster(light_index: u32) -> bool {
-//     let light_view = st_light_view_positions[light_index];
-//     if light_view.w < 0.0 {
-//         return true;
-//     }
+fn cluster_distance_attenuation(light_distance: f32, cutoff_distance: f32, decay_exponent: f32) -> f32 {
+    var distance_falloff = 1.0 / max(pow(light_distance, decay_exponent), 0.01);
+    if (cutoff_distance > 0.0) {
+        distance_falloff *= pow2(saturate(1.0 - pow4(light_distance / cutoff_distance)));
+    }
+    return distance_falloff;
+}
 
-//     return sphere_intersects_cluster(light_view.xyz, light_view.w, wg_slice_near, wg_slice_far);
-// }
+fn passes_quick_reject(
+    light: Struct_lights,
+    light_sphere_center: vec3<f32>,
+    cluster_center: vec3<f32>,
+    cluster_radius: f32,
+) -> bool {
+    // Evaluate against the nearest possible point on the cluster volume instead
+    // of its center to avoid hard light discontinuities at cluster borders.
+    let shortest_distance = max(0.0, distance(light_sphere_center, cluster_center) - cluster_radius);
+    let attenuation = cluster_distance_attenuation(shortest_distance, light.range, light.decay);
+    return attenuation >= ATTENUATION_QUICK_REJECT_THRESHOLD;
+}
 
 fn sphere_intersects_cluster_cached(
     center: vec3<f32>,
@@ -149,6 +157,8 @@ fn main(
         let bottom_left = view_ray(vec2<f32>(min_pixel.x, max_pixel.y));
         let bottom_right = view_ray(max_pixel);
         let center_dir = normalize(top_left + top_right + bottom_left + bottom_right);
+        let center_pixel = (min_pixel + max_pixel) * 0.5;
+        let center_ray = view_ray(center_pixel);
 
         wg_plane_normals[0] = vec4<f32>(oriented_plane_normal(bottom_left, top_left, center_dir), 0.0);
         wg_plane_normals[1] = vec4<f32>(oriented_plane_normal(top_right, bottom_right, center_dir), 0.0);
@@ -156,6 +166,28 @@ fn main(
         wg_plane_normals[3] = vec4<f32>(oriented_plane_normal(bottom_right, bottom_left, center_dir), 0.0);
         wg_slice_near = slice_depth(workgroup_id.z);
         wg_slice_far = slice_depth(workgroup_id.z + 1u);
+        let cluster_depth = (wg_slice_near + wg_slice_far) * 0.5;
+        let cluster_center = ray_at_depth(center_ray, cluster_depth);
+        let top_left_near = ray_at_depth(top_left, wg_slice_near);
+        let top_right_near = ray_at_depth(top_right, wg_slice_near);
+        let bottom_left_near = ray_at_depth(bottom_left, wg_slice_near);
+        let bottom_right_near = ray_at_depth(bottom_right, wg_slice_near);
+        let top_left_far = ray_at_depth(top_left, wg_slice_far);
+        let top_right_far = ray_at_depth(top_right, wg_slice_far);
+        let bottom_left_far = ray_at_depth(bottom_left, wg_slice_far);
+        let bottom_right_far = ray_at_depth(bottom_right, wg_slice_far);
+
+        var cluster_radius = distance(cluster_center, top_left_near);
+        cluster_radius = max(cluster_radius, distance(cluster_center, top_right_near));
+        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_left_near));
+        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_right_near));
+        cluster_radius = max(cluster_radius, distance(cluster_center, top_left_far));
+        cluster_radius = max(cluster_radius, distance(cluster_center, top_right_far));
+        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_left_far));
+        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_right_far));
+
+        wg_cluster_center = cluster_center;
+        wg_cluster_radius = cluster_radius;
         wg_cluster_index = cluster_index;
         wg_reserved_offset = 0u;
         wg_reserved_count = 0u;
@@ -173,10 +205,22 @@ fn main(
     let local_plane_1 = wg_plane_normals[1].xyz;
     let local_plane_2 = wg_plane_normals[2].xyz;
     let local_plane_3 = wg_plane_normals[3].xyz;
+    let local_cluster_center = wg_cluster_center;
+    let local_cluster_radius = wg_cluster_radius;
+    let local_light_count = min(u_clustered_lighting.budget.w, u_environment.num_lights);
 
-    for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
+    for (var light_index = local_id.x; light_index < local_light_count; light_index += CLUSTER_CULL_WG_SIZE) {
         let light_view = st_light_view_positions[light_index];
-        if light_view.w < 0.0 || sphere_intersects_cluster_cached(
+        if (light_view.w < 0.0) {
+            continue;
+        }
+
+        let light = st_lights[light_index];
+        if (light.light_type == 0u || light.range <= 0.0) {
+            continue;
+        }
+
+        if (!sphere_intersects_cluster_cached(
             light_view.xyz,
             light_view.w,
             local_slice_near,
@@ -185,11 +229,22 @@ fn main(
             local_plane_1,
             local_plane_2,
             local_plane_3,
-        ) {
-            let local_match_index = atomicAdd(&wg_local_match_count, 1u);
-            if local_match_index < MAX_LOCAL_LIGHTS {
-                wg_local_light_indices[local_match_index] = light_index;
-            }
+        )) {
+            continue;
+        }
+
+        if (!passes_quick_reject(
+            light,
+            light_view.xyz,
+            local_cluster_center,
+            local_cluster_radius,
+        )) {
+            continue;
+        }
+
+        let local_match_index = atomicAdd(&wg_local_match_count, 1u);
+        if local_match_index < MAX_LOCAL_LIGHTS {
+            wg_local_light_indices[local_match_index] = light_index;
         }
     }
 
@@ -229,13 +284,22 @@ fn main(
         return;
     }
 
-    for (var light_index = local_id.x; light_index < u_environment.num_lights; light_index += CLUSTER_CULL_WG_SIZE) {
+    for (var light_index = local_id.x; light_index < local_light_count; light_index += CLUSTER_CULL_WG_SIZE) {
         if atomicLoad(&wg_local_write_count) >= wg_reserved_count {
             break;
         }
 
         let light_view = st_light_view_positions[light_index];
-        if light_view.w < 0.0 || sphere_intersects_cluster_cached(
+        if (light_view.w < 0.0) {
+            continue;
+        }
+
+        let light = st_lights[light_index];
+        if (light.light_type == 0u || light.range <= 0.0) {
+            continue;
+        }
+
+        if (!sphere_intersects_cluster_cached(
             light_view.xyz,
             light_view.w,
             local_slice_near,
@@ -244,11 +308,22 @@ fn main(
             local_plane_1,
             local_plane_2,
             local_plane_3,
-        ) {
-            let write_index = atomicAdd(&wg_local_write_count, 1u);
-            if write_index < wg_reserved_count {
-                st_cluster_light_indices[wg_reserved_offset + write_index] = light_index;
-            }
+        )) {
+            continue;
+        }
+
+        if (!passes_quick_reject(
+            light,
+            light_view.xyz,
+            local_cluster_center,
+            local_cluster_radius,
+        )) {
+            continue;
+        }
+
+        let write_index = atomicAdd(&wg_local_write_count, 1u);
+        if write_index < wg_reserved_count {
+            st_cluster_light_indices[wg_reserved_offset + write_index] = light_index;
         }
     }
 }

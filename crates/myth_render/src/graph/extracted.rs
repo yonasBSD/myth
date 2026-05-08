@@ -60,11 +60,30 @@ pub struct ExtractedRenderItem {
 #[derive(Clone)]
 pub struct ExtractedLight {
     pub id: u64,
+    pub intensity: f32,
     pub cast_shadows: bool,
     pub kind: LightKind,
     pub position: Vec3,
     pub direction: Vec3,
     pub shadow: Option<ShadowConfig>,
+}
+
+impl ExtractedLight {
+    #[inline]
+    #[must_use]
+    pub fn is_directional(&self) -> bool {
+        matches!(self.kind, LightKind::Directional(_))
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn local_range(&self) -> f32 {
+        match &self.kind {
+            LightKind::Point(point) => point.range,
+            LightKind::Spot(spot) => spot.range,
+            LightKind::Directional(_) => 0.0,
+        }
+    }
 }
 
 /// Extracted skeleton data
@@ -175,6 +194,14 @@ impl ExtractedScene {
         self.collected_skeleton_keys.clear();
     }
 
+    #[must_use]
+    pub fn local_light_count(&self) -> usize {
+        self.lights
+            .iter()
+            .filter(|light| !light.is_directional())
+            .count()
+    }
+
     /// Reuse current instance memory, extract data from Scene.
     ///
     /// Extracts ALL active meshes into `render_items` without frustum culling.
@@ -241,6 +268,7 @@ impl ExtractedScene {
 
             self.lights.push(ExtractedLight {
                 id: light.id(),
+                intensity: light.intensity,
                 cast_shadows: light.cast_shadows,
                 kind: light.kind.clone(),
                 position,

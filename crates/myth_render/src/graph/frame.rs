@@ -13,7 +13,9 @@
 //! 3. **Execute**: `FrameComposer::render()` — acquire the surface and submit GPU commands
 //!
 
-use glam::Mat4;
+use std::cmp::Ordering;
+
+use glam::{Mat4, Vec3};
 use rustc_hash::FxHashMap;
 
 use crate::core::{BindGroupContext, RenderView, ResourceManager};
@@ -21,12 +23,15 @@ use crate::graph::core::TextureNodeId;
 use crate::pipeline::RenderPipelineId;
 use crate::renderer::FrameTime;
 use myth_assets::{AssetServer, GeometryHandle, MaterialHandle};
+use myth_resources::uniforms::GpuLightStorage;
 use myth_scene::Scene;
 use myth_scene::camera::RenderCamera;
 
-use super::extracted::ExtractedScene;
+use super::extracted::{ExtractedLight, ExtractedScene};
 use super::render_state::RenderState;
 use super::shadow_utils;
+
+const CLUSTERED_LIGHT_SORT_DISTANCE_FLOOR: f32 = 1.0;
 
 // ============================================================================
 // RenderCommand & RenderLists
@@ -418,12 +423,15 @@ impl RenderFrame {
     ///
     /// 1. **Extract** — Pull rendering data from the [`Scene`] into
     ///    [`ExtractedScene`].
-    /// 2. **Shadow View Generation** — Build [`RenderView`]s for all
+    /// 2. **Light Ordering** — Keep local lights packed at the front of the
+    ///    GPU light buffer and pre-sort dense local-light sets by camera-
+    ///    weighted importance.
+    /// 3. **Shadow View Generation** — Build [`RenderView`]s for all
     ///    shadow-casting lights (pure math, no GPU work).
-    /// 3. **Shadow Metadata** — Write per-light shadow layer indices,
+    /// 4. **Shadow Metadata** — Write per-light shadow layer indices,
     ///    cascade matrices and split distances into the light storage
     ///    buffer so the global bind group already contains correct data.
-    /// 4. **Global Prepare** — Upload camera / scene / light uniforms and
+    /// 5. **Global Prepare** — Upload camera / scene / light uniforms and
     ///    create the global bind group (Group 0).
     ///
     /// # Note
@@ -439,6 +447,7 @@ impl RenderFrame {
         frame_time: FrameTime,
         render_lists: &mut RenderLists,
         surface_size: (u32, u32),
+        clustered_local_sort_threshold: usize,
     ) {
         use crate::core::view::RenderView;
 
@@ -447,6 +456,13 @@ impl RenderFrame {
         // ── 1. Extract ─────────────────────────────────────────────────
         self.extracted_scene
             .extract_into(scene, camera, assets, resource_manager);
+
+        reorder_lights_for_clustered_shading(
+            &mut self.extracted_scene,
+            scene,
+            camera,
+            clustered_local_sort_threshold,
+        );
 
         // ── 2. Resolve GPU environment + BRDF LUT ─────────────────────
         let env_max_mip = resource_manager.resolve_gpu_environment(
@@ -730,5 +746,200 @@ impl RenderFrame {
         if resource_manager.frame_index().is_multiple_of(600) {
             resource_manager.prune(6000);
         }
+    }
+}
+
+fn reorder_lights_for_clustered_shading(
+    extracted_scene: &mut ExtractedScene,
+    scene: &mut Scene,
+    camera: &RenderCamera,
+    local_sort_threshold: usize,
+) {
+    let camera_position: Vec3 = camera.position.to_array().into();
+    let Some(order) = build_clustered_light_order(
+        &extracted_scene.lights,
+        camera_position,
+        local_sort_threshold,
+    ) else {
+        return;
+    };
+
+    let mut light_storage = scene.light_storage_buffer.write();
+    debug_assert_eq!(light_storage.len(), extracted_scene.lights.len());
+    if light_storage.len() != extracted_scene.lights.len() {
+        log::warn!(
+            "Skipped clustered light pre-sort because extracted lights ({}) and GPU light storage ({}) diverged",
+            extracted_scene.lights.len(),
+            light_storage.len(),
+        );
+        return;
+    }
+
+    let reordered_lights = order
+        .iter()
+        .map(|&index| extracted_scene.lights[index].clone())
+        .collect();
+    let reordered_storage = order
+        .iter()
+        .map(|&index| light_storage[index])
+        .collect::<Vec<GpuLightStorage>>();
+
+    extracted_scene.lights = reordered_lights;
+    *light_storage = reordered_storage;
+}
+
+fn build_clustered_light_order(
+    lights: &[ExtractedLight],
+    camera_position: Vec3,
+    local_sort_threshold: usize,
+) -> Option<Vec<usize>> {
+    if lights.len() <= 1 {
+        return None;
+    }
+
+    let local_light_count = lights
+        .iter()
+        .filter(|light| !light.is_directional())
+        .count();
+    let has_directional_lights = local_light_count != lights.len();
+    let should_sort_locals = local_light_count > local_sort_threshold;
+
+    if !has_directional_lights && !should_sort_locals {
+        return None;
+    }
+
+    let mut order: Vec<usize> = (0..lights.len()).collect();
+    order.sort_unstable_by(|&lhs, &rhs| {
+        compare_clustered_light_order(
+            &lights[lhs],
+            lhs,
+            &lights[rhs],
+            rhs,
+            camera_position,
+            should_sort_locals,
+        )
+    });
+
+    order
+        .iter()
+        .enumerate()
+        .any(|(dst, &src)| dst != src)
+        .then_some(order)
+}
+
+fn compare_clustered_light_order(
+    lhs: &ExtractedLight,
+    lhs_index: usize,
+    rhs: &ExtractedLight,
+    rhs_index: usize,
+    camera_position: Vec3,
+    should_sort_locals: bool,
+) -> Ordering {
+    let lhs_class = u8::from(lhs.is_directional());
+    let rhs_class = u8::from(rhs.is_directional());
+    let class_order = lhs_class.cmp(&rhs_class);
+    if class_order != Ordering::Equal {
+        return class_order;
+    }
+
+    if lhs_class == 0 && should_sort_locals {
+        let lhs_score = clustered_light_score(lhs, camera_position);
+        let rhs_score = clustered_light_score(rhs, camera_position);
+        let score_order = rhs_score.total_cmp(&lhs_score);
+        if score_order != Ordering::Equal {
+            return score_order;
+        }
+    }
+
+    lhs_index.cmp(&rhs_index)
+}
+
+fn clustered_light_score(light: &ExtractedLight, camera_position: Vec3) -> f32 {
+    let range = light.local_range();
+    if range <= 0.0 || light.intensity <= 0.0 {
+        return 0.0;
+    }
+
+    let distance = (light.position - camera_position)
+        .length()
+        .max(CLUSTERED_LIGHT_SORT_DISTANCE_FLOOR);
+    let score = light.intensity * (range / distance);
+    if score.is_finite() { score } else { 0.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_clustered_light_order;
+    use glam::Vec3;
+    use myth_scene::light::{DirectionalLight, LightKind, PointLight, SpotLight};
+
+    use crate::graph::extracted::ExtractedLight;
+
+    fn directional_light(id: u64, position: Vec3) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            intensity: 1.0,
+            cast_shadows: false,
+            kind: LightKind::Directional(DirectionalLight {}),
+            position,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    fn point_light(id: u64, position: Vec3, intensity: f32, range: f32) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            intensity,
+            cast_shadows: false,
+            kind: LightKind::Point(PointLight { range }),
+            position,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    fn spot_light(id: u64, position: Vec3, intensity: f32, range: f32) -> ExtractedLight {
+        ExtractedLight {
+            id,
+            intensity,
+            cast_shadows: false,
+            kind: LightKind::Spot(SpotLight {
+                range,
+                inner_cone: 0.25,
+                outer_cone: 0.5,
+            }),
+            position,
+            direction: -Vec3::Z,
+            shadow: None,
+        }
+    }
+
+    #[test]
+    fn clustered_light_order_packs_directional_lights_after_local_lights() {
+        let lights = vec![
+            point_light(1, Vec3::new(0.0, 0.0, -4.0), 4.0, 6.0),
+            directional_light(2, Vec3::ZERO),
+            spot_light(3, Vec3::new(0.0, 0.0, -2.0), 2.0, 5.0),
+        ];
+
+        let order = build_clustered_light_order(&lights, Vec3::ZERO, usize::MAX)
+            .expect("directional lights should be moved behind local lights");
+
+        assert_eq!(order, vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn clustered_light_order_sorts_dense_local_lights_by_visual_score() {
+        let lights = vec![
+            point_light(1, Vec3::new(0.0, 0.0, -10.0), 10.0, 2.0),
+            point_light(2, Vec3::new(0.0, 0.0, -2.0), 3.0, 10.0),
+            spot_light(3, Vec3::new(0.0, 0.0, -4.0), 5.0, 8.0),
+        ];
+
+        let order = build_clustered_light_order(&lights, Vec3::ZERO, 2)
+            .expect("dense local lights should be pre-sorted by score");
+
+        assert_eq!(order, vec![1, 2, 0]);
     }
 }

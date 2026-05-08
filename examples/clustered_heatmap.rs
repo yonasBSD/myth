@@ -2,7 +2,7 @@
 //! name = "Cluster Heatmap"
 //! category = "Lighting"
 //! description = "A standalone clustered-lighting heatmap scene that visualises per-cluster light density across a deep multi-light corridor."
-//! instructions = "504 Point Lights\nPress H to toggle heatmap/final image\nInspect near/far cluster density bands"
+//! instructions = "1008 Point Lights\nPress H to toggle heatmap/final image\nInspect near/far cluster density bands"
 //! features = ["debug_view"]
 //! order = 364
 //!
@@ -17,7 +17,7 @@ mod app {
     use myth_dev_utils::FpsCounter;
 
     const LIGHT_GRID_X: usize = 7;
-    const LIGHT_GRID_Y: usize = 4;
+    const LIGHT_GRID_Y: usize = 8;
     const LIGHT_GRID_Z: usize = 18;
 
     struct HeatmapLight {
@@ -136,7 +136,7 @@ mod app {
                         let light = scene.add_light(Light::new_point(
                             color,
                             0.3 + iy as f32 * 0.22,
-                            5.2 + ix as f32 * 0.22,
+                            3.2 + ix as f32 * 0.22,
                         ));
                         let helper = scene.spawn_sphere(
                             0.04,
@@ -153,7 +153,7 @@ mod app {
                             .set_shadows(false, false);
                         let base = Vec3::new(
                             centered_lattice(ix, LIGHT_GRID_X, 2.45),
-                            0.85 + iy as f32 * 1.1,
+                            0.85 + iy as f32 * 0.5,
                             centered_lattice(iz, LIGHT_GRID_Z, 3.25),
                         );
                         scene.node(&light).set_position(base.x, base.y, base.z);

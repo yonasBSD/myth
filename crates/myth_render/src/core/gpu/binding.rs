@@ -447,7 +447,7 @@ impl ResourceManager {
 
         // === Ensure: upload all buffers, obtain physical resource IDs ===
         let (_, camera_result) = self.ensure_buffer(render_state.uniforms());
-        let (_, env_result) = self.ensure_buffer(&scene.uniforms_buffer);
+        // let (_, env_result) = self.ensure_buffer(&scene.uniforms_buffer);
         let (_, light_result) = self.ensure_buffer(&scene.light_storage_buffer);
         let (_, scene_uniform_result) = self.ensure_buffer(&scene.uniforms_buffer);
 
@@ -476,7 +476,7 @@ impl ResourceManager {
         // === Collect: gather all resource IDs ===
         let mut current_ids = super::ResourceIdSet::with_capacity(8);
         current_ids.push(camera_result.resource_id);
-        current_ids.push(env_result.resource_id);
+        // current_ids.push(env_result.resource_id);
         current_ids.push(light_result.resource_id);
         current_ids.push(scene_uniform_result.resource_id);
         current_ids.push(processed_env_map_id);
