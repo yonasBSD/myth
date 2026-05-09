@@ -5,6 +5,7 @@
 //! feature extract stage, while mip-specific bind groups are rebuilt in the
 //! RDG prepare phase so they participate in the shared transient binding path.
 
+use crate::core::gpu::EnvironmentComputeState;
 use rustc_hash::FxHashMap;
 
 use crate::core::gpu::{CommonSampler, Tracked};
@@ -19,6 +20,10 @@ use crate::pipeline::{
 const SCENE_CACHE_TTL: u64 = 120;
 const STATIC_PMREM_SAMPLE_COUNT: u32 = 4096;
 const DYNAMIC_PMREM_SAMPLE_COUNT: u32 = 64;
+
+pub struct IblGraphOutput {
+    pub updated_pmrem: Option<TextureNodeId>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum IblPipelineVariant {
@@ -251,7 +256,15 @@ impl IblComputeFeature {
         scene_id: u32,
         base_cube: TextureNodeId,
         pmrem: TextureNodeId,
-    ) {
+        source_type: crate::core::gpu::CubeSourceType,
+        environment_compute: Option<&'a EnvironmentComputeState>,
+    ) -> IblGraphOutput {
+        if !environment_compute.is_some_and(EnvironmentComputeState::needs_compute) {
+            return IblGraphOutput {
+                updated_pmrem: None,
+            };
+        }
+
         let state = self
             .scene_states
             .get(&scene_id)
@@ -293,9 +306,15 @@ impl IblComputeFeature {
                 source_layout,
                 dest_layout,
                 mips: mip_states,
+                environment_compute,
+                source_type,
             };
             (node, ())
         });
+
+        IblGraphOutput {
+            updated_pmrem: Some(pmrem),
+        }
     }
 }
 
@@ -314,6 +333,8 @@ struct IblComputePassNode<'a> {
     source_layout: &'a Tracked<wgpu::BindGroupLayout>,
     dest_layout: &'a Tracked<wgpu::BindGroupLayout>,
     mips: &'a mut [IblMipState<'a>],
+    environment_compute: Option<&'a EnvironmentComputeState>,
+    source_type: crate::core::gpu::CubeSourceType,
 }
 
 impl<'a> PassNode<'a> for IblComputePassNode<'a> {
@@ -353,6 +374,10 @@ impl<'a> PassNode<'a> for IblComputePassNode<'a> {
             cpass.set_bind_group(1, self.mips[mip].dest_bg.expect("IBL dest BG missing"), &[]);
             let group_count = mip_size.div_ceil(8);
             cpass.dispatch_workgroups(group_count, group_count, 6);
+        }
+
+        if let Some(environment_compute) = self.environment_compute {
+            environment_compute.finish_bake(self.source_type);
         }
     }
 }

@@ -8,7 +8,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::core::ResourceManager;
-use crate::core::gpu::{CubeSourceType, Tracked};
+use crate::core::gpu::{CubeSourceType, EnvironmentComputeState, Tracked};
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::TextureNodeId;
 use crate::graph::core::context::{ExecuteContext, ExtractContext};
@@ -310,7 +310,12 @@ impl EquirectToCubeFeature {
         scene_id: u32,
         source_type: CubeSourceType,
         base_cube: TextureNodeId,
-    ) {
+        environment_compute: Option<&'a EnvironmentComputeState>,
+    ) -> Option<TextureNodeId> {
+        if !environment_compute.is_some_and(EnvironmentComputeState::needs_compute) {
+            return None;
+        }
+
         let pipeline = match source_type {
             CubeSourceType::Equirectangular => self
                 .equirect_pipeline_id
@@ -335,6 +340,8 @@ impl EquirectToCubeFeature {
             };
             (node, ())
         });
+
+        Some(base_cube)
     }
 }
 

@@ -42,6 +42,7 @@ use myth_assets::{GeometryHandle, ImageHandle, MaterialHandle, TextureHandle};
 
 pub(crate) use crate::core::gpu::buffer::GpuBuffer;
 pub use crate::core::gpu::buffer::GpuBufferHandle;
+pub(crate) use crate::core::gpu::environment::EnvironmentComputeState;
 pub(crate) use crate::core::gpu::environment::GpuEnvironment;
 pub(crate) use crate::core::gpu::environment::{BRDF_LUT_SIZE, CubeSourceType};
 pub(crate) use crate::core::gpu::geometry::GpuGeometry;

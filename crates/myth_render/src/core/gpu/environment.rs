@@ -1,4 +1,6 @@
 use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::Vec3;
 use wgpu::TextureViewDimension;
@@ -30,6 +32,79 @@ pub enum CubeSourceType {
 ///
 /// The texture objects and tracked views stay stable across source changes so
 /// downstream bind-group caches can keep hitting without rebuilds.
+#[derive(Debug, Default)]
+struct ProceduralBakeState {
+    last_baked_sun_direction: Option<Vec3>,
+    pending_bake_sun_direction: Option<Vec3>,
+}
+
+/// Deferred environment bake completion state.
+///
+/// Graph construction only needs a lock-free dirty bit, while bake
+/// completion also has to promote the procedural sun direction that was
+/// actually rendered. Both updates happen through shared references.
+#[derive(Debug, Default)]
+pub struct EnvironmentComputeState {
+    needs_compute: AtomicBool,
+    procedural_bake: Mutex<ProceduralBakeState>,
+}
+
+impl EnvironmentComputeState {
+    #[inline]
+    #[must_use]
+    pub fn new(needs_compute: bool) -> Self {
+        Self {
+            needs_compute: AtomicBool::new(needs_compute),
+            procedural_bake: Mutex::new(ProceduralBakeState::default()),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn needs_compute(&self) -> bool {
+        self.needs_compute.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn set_needs_compute(&self, needs_compute: bool) {
+        self.needs_compute.store(needs_compute, Ordering::Relaxed);
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn last_baked_sun_direction(&self) -> Option<Vec3> {
+        self.procedural_bake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last_baked_sun_direction
+    }
+
+    #[inline]
+    pub fn set_pending_bake_sun_direction(&self, sun_direction: Option<Vec3>) {
+        self.procedural_bake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pending_bake_sun_direction = sun_direction;
+    }
+
+    #[inline]
+    pub fn finish_bake(&self, source_type: CubeSourceType) {
+        let mut procedural_bake = self
+            .procedural_bake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        if source_type == CubeSourceType::Procedural {
+            procedural_bake.last_baked_sun_direction =
+                procedural_bake.pending_bake_sun_direction.take();
+        } else {
+            procedural_bake.pending_bake_sun_direction = None;
+        }
+
+        self.needs_compute.store(false, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug)]
 pub struct GpuEnvironment {
     pub base_cube_texture: wgpu::Texture,
@@ -39,12 +114,10 @@ pub struct GpuEnvironment {
     pub pmrem_view: Tracked<wgpu::TextureView>,
     pub pmrem_storage_views: Vec<Tracked<wgpu::TextureView>>,
     pub source_version: u64,
-    pub needs_compute: bool,
+    pub compute_state: EnvironmentComputeState,
     pub source_type: CubeSourceType,
     pub source_key: Option<TextureSource>,
     pub source_ready: bool,
-    pub last_baked_sun_direction: Option<Vec3>,
-    pending_bake_sun_direction: Option<Vec3>,
     procedural_physics_hash: u64,
     procedural_bake_hash: u64,
     pub last_used_frame: u64,
@@ -55,6 +128,12 @@ impl GpuEnvironment {
     #[must_use]
     pub fn env_map_max_mip_level(&self) -> f32 {
         (self.pmrem_texture.mip_level_count() - 1) as f32
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn needs_compute(&self) -> bool {
+        self.compute_state.needs_compute()
     }
 
     #[inline]
@@ -215,11 +294,11 @@ impl ResourceManager {
             let physics_changed = gpu_env.procedural_physics_hash != physics_hash;
             let bake_changed = gpu_env.procedural_bake_hash != bake_hash;
             let sun_changed = sun_direction_requires_rebake(
-                gpu_env.last_baked_sun_direction,
+                gpu_env.compute_state.last_baked_sun_direction(),
                 params.sun_direction,
             );
 
-            let needs_rebake = gpu_env.needs_compute
+            let needs_rebake = gpu_env.needs_compute()
                 || source_kind_changed
                 || physics_changed
                 || bake_changed
@@ -234,10 +313,12 @@ impl ResourceManager {
             if needs_rebake {
                 gpu_env.source_version =
                     procedural_source_version(physics_hash, bake_hash, params.sun_direction);
-                gpu_env.pending_bake_sun_direction = Some(params.sun_direction);
-                gpu_env.needs_compute = true;
+                gpu_env
+                    .compute_state
+                    .set_pending_bake_sun_direction(Some(params.sun_direction));
+                gpu_env.compute_state.set_needs_compute(true);
             } else {
-                gpu_env.pending_bake_sun_direction = None;
+                gpu_env.compute_state.set_pending_bake_sun_direction(None);
             }
 
             return gpu_env.env_map_max_mip_level();
@@ -248,10 +329,10 @@ impl ResourceManager {
         } else {
             let Some(source) = environment.source_env_map().copied() else {
                 if let Some(gpu_env) = self.scene_gpu_environments.get_mut(&scene_id) {
-                    gpu_env.needs_compute = false;
+                    gpu_env.compute_state.set_needs_compute(false);
                     gpu_env.source_key = None;
                     gpu_env.source_ready = false;
-                    gpu_env.pending_bake_sun_direction = None;
+                    gpu_env.compute_state.set_pending_bake_sun_direction(None);
                     gpu_env.last_used_frame = self.frame_index;
                 }
                 return 0.0;
@@ -316,11 +397,13 @@ impl ResourceManager {
             gpu_env.source_type = resolved.source_type;
             gpu_env.source_key = resolved.key;
             gpu_env.source_ready = resolved.source_ready;
-            gpu_env.pending_bake_sun_direction = None;
-            gpu_env.needs_compute = resolved.source_ready;
+            gpu_env.compute_state.set_pending_bake_sun_direction(None);
+            gpu_env
+                .compute_state
+                .set_needs_compute(resolved.source_ready);
         } else if !resolved.source_ready {
-            gpu_env.needs_compute = false;
-            gpu_env.pending_bake_sun_direction = None;
+            gpu_env.compute_state.set_needs_compute(false);
+            gpu_env.compute_state.set_pending_bake_sun_direction(None);
         }
 
         gpu_env.env_map_max_mip_level()
@@ -422,12 +505,10 @@ impl ResourceManager {
                 pmrem_view,
                 pmrem_storage_views,
                 source_version: u64::MAX,
-                needs_compute: true,
+                compute_state: EnvironmentComputeState::new(true),
                 source_type: CubeSourceType::Equirectangular,
                 source_key: None,
                 source_ready: false,
-                last_baked_sun_direction: None,
-                pending_bake_sun_direction: None,
                 procedural_physics_hash: u64::MAX,
                 procedural_bake_hash: u64::MAX,
                 last_used_frame: self.frame_index,
@@ -452,7 +533,7 @@ impl ResourceManager {
     pub fn scene_environment_ready(&self, scene_id: u32) -> bool {
         self.scene_gpu_environments
             .get(&scene_id)
-            .is_some_and(|gpu_env| !gpu_env.needs_compute)
+            .is_some_and(|gpu_env| !gpu_env.needs_compute())
     }
 
     #[inline]
@@ -464,16 +545,6 @@ impl ResourceManager {
                 CubeSourceType::Procedural => true,
                 _ => gpu_env.source_ready,
             })
-    }
-
-    #[inline]
-    pub fn mark_scene_environment_clean(&mut self, scene_id: u32) {
-        if let Some(gpu_env) = self.scene_gpu_environments.get_mut(&scene_id) {
-            if gpu_env.source_type == CubeSourceType::Procedural {
-                gpu_env.last_baked_sun_direction = gpu_env.pending_bake_sun_direction.take();
-            }
-            gpu_env.needs_compute = false;
-        }
     }
 
     #[inline]

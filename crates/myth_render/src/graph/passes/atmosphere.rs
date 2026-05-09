@@ -11,11 +11,11 @@
 //! layouts, pipelines, and samplers live on the long-lived feature.
 
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use rustc_hash::FxHashMap;
 
-use crate::core::gpu::{CommonSampler, ResourceState, Tracked};
+use crate::core::gpu::{CommonSampler, EnvironmentComputeState, ResourceState, Tracked};
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
     BufferDesc, BufferNodeId, ExecuteContext, ExtractContext, PassNode, PrepareContext,
@@ -187,7 +187,7 @@ struct AtmosphereSceneState {
     _sky_view_texture: wgpu::Texture,
     sky_view_view: Tracked<wgpu::TextureView>,
     physics_hash: u64,
-    physics_dirty: bool,
+    physics_dirty: AtomicBool,
     uploaded_version: AtomicU64,
     last_used_frame: u64,
     starbox: Option<ResolvedAtmosphereStarbox>,
@@ -204,6 +204,7 @@ pub(crate) struct ProceduralSkyboxResources<'a> {
 pub(crate) struct AtmosphereGraphOutput {
     pub sky_view: TextureNodeId,
     pub transmittance: TextureNodeId,
+    pub baked_base_cube: Option<TextureNodeId>,
 }
 
 impl AtmosphereGraphOutput {
@@ -331,20 +332,17 @@ impl AtmosphereFeature {
         params: &ProceduralSkyParams,
         base_cube: TextureNodeId,
         base_cube_storage_view: &'a Tracked<wgpu::TextureView>,
-        bake_environment: bool,
+        environment_compute: Option<&'a EnvironmentComputeState>,
     ) -> AtmosphereGraphOutput {
-        let rebuild_physics = self
+        let bake_environment =
+            environment_compute.is_some_and(EnvironmentComputeState::needs_compute);
+
+        let state = self
             .scene_states
             .get(&scene_id)
-            .expect("scene atmosphere state must be prepared before graph build")
-            .physics_dirty;
+            .expect("scene atmosphere state must be prepared before graph build");
 
-        if rebuild_physics {
-            self.scene_states
-                .get_mut(&scene_id)
-                .expect("scene atmosphere state must exist")
-                .physics_dirty = false;
-        }
+        let rebuild_physics = state.physics_dirty.load(Ordering::Relaxed);
 
         let state = self
             .scene_states
@@ -547,6 +545,7 @@ impl AtmosphereFeature {
             AtmosphereGraphOutput {
                 sky_view,
                 transmittance,
+                baked_base_cube: bake_environment.then_some(base_cube),
             }
         })
     }
@@ -637,7 +636,7 @@ impl AtmosphereFeature {
                 _sky_view_texture: sky_view_texture,
                 sky_view_view,
                 physics_hash: u64::MAX,
-                physics_dirty: true,
+                physics_dirty: AtomicBool::new(true),
                 uploaded_version: AtomicU64::new(u64::MAX),
                 last_used_frame: frame_index,
                 starbox: None,
@@ -650,7 +649,7 @@ impl AtmosphereFeature {
         let next_physics_hash = physics_hash(params);
         if state.physics_hash != next_physics_hash {
             state.physics_hash = next_physics_hash;
-            state.physics_dirty = true;
+            state.physics_dirty.store(true, Ordering::Relaxed);
         }
     }
 
@@ -1228,6 +1227,8 @@ impl<'a> PassNode<'a> for AtmosphereMultiScatterNode<'a> {
             MULTI_SCATTER_SIZE.div_ceil(8),
             1,
         );
+
+        self.state.physics_dirty.store(false, Ordering::Relaxed);
     }
 }
 

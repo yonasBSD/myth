@@ -169,12 +169,11 @@ impl GraphBuilderContext<'_, '_> {
     }
 }
 
-struct SceneEnvironmentGraphResources {
+struct SceneEnvironmentGraphResources<'a> {
     base_cube: crate::graph::core::TextureNodeId,
     pmrem: crate::graph::core::TextureNodeId,
     source_type: CubeSourceType,
-    source_ready: bool,
-    needs_compute: bool,
+    compute_state: Option<&'a crate::core::gpu::EnvironmentComputeState>,
 }
 
 fn base_cube_desc(texture: &wgpu::Texture) -> TextureDesc {
@@ -353,8 +352,6 @@ impl<'a> FrameComposer<'a> {
             return;
         }
 
-        let resource_manager_ptr = self.ctx.resource_manager as *mut ResourceManager;
-
         // ━━━ 2. Build Unified RDG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         let mut graph = RenderGraph::new(self.ctx.graph_storage, self.ctx.frame_arena);
@@ -420,7 +417,7 @@ impl<'a> FrameComposer<'a> {
         // let fxaa_enabled = self.ctx.wgpu_ctx.fxaa_enabled && is_high_fidelity;
         // let taa_enabled = self.ctx.wgpu_ctx.taa_enabled && is_high_fidelity;
 
-        let scene_environment_updated = {
+        {
             let scene_id = self.ctx.scene.id();
             let scene_gpu_environment = if has_active_environment {
                 self.ctx.resource_manager.gpu_environment(scene_id)
@@ -441,14 +438,12 @@ impl<'a> FrameComposer<'a> {
                         &gpu_env.pmrem_view,
                     ),
                     source_type: gpu_env.source_type,
-                    source_ready: gpu_env.source_ready,
-                    needs_compute: gpu_env.needs_compute,
+                    compute_state: gpu_env.source_ready.then_some(&gpu_env.compute_state),
                 });
 
             let mut env_dependency_base = None;
             let mut env_dependency_pmrem = None;
             let mut procedural_skybox_dependencies = [None, None];
-            let mut scene_environment_updated = false;
 
             // ── 2c. Wire Compute + Shadow Passes ───────────────────────────
             graph_ctx.with_group("Compute", |c| {
@@ -464,49 +459,51 @@ impl<'a> FrameComposer<'a> {
                             if let myth_scene::background::BackgroundMode::Procedural(params) =
                                 &self.ctx.scene.background.mode
                             {
-                                let bake_environment = env.needs_compute && env.source_ready;
                                 let atmosphere_output = self.ctx.atmosphere_pass.add_to_graph(
                                     c,
                                     scene_id,
                                     params,
                                     env.base_cube,
                                     &gpu_env.base_cube_storage_view,
-                                    bake_environment,
+                                    env.compute_state,
                                 );
                                 procedural_skybox_dependencies =
                                     atmosphere_output.skybox_dependencies();
-
-                                if bake_environment {
-                                    self.ctx.ibl_pass.add_to_graph(
+                                env_dependency_base = atmosphere_output.baked_base_cube;
+                                env_dependency_pmrem = self
+                                    .ctx
+                                    .ibl_pass
+                                    .add_to_graph(
                                         c,
                                         scene_id,
                                         env.base_cube,
                                         env.pmrem,
-                                    );
-                                    env_dependency_base = Some(env.base_cube);
-                                    env_dependency_pmrem = Some(env.pmrem);
-                                    scene_environment_updated = true;
-                                }
+                                        env.source_type,
+                                        env.compute_state,
+                                    )
+                                    .updated_pmrem;
                             }
                         }
                         CubeSourceType::Equirectangular | CubeSourceType::Cubemap => {
-                            if env.needs_compute && env.source_ready {
-                                self.ctx.equirect_to_cube_pass.add_to_graph(
-                                    c,
-                                    scene_id,
-                                    env.source_type,
-                                    env.base_cube,
-                                );
-                                self.ctx.ibl_pass.add_to_graph(
+                            env_dependency_base = self.ctx.equirect_to_cube_pass.add_to_graph(
+                                c,
+                                scene_id,
+                                env.source_type,
+                                env.base_cube,
+                                env.compute_state,
+                            );
+                            env_dependency_pmrem = self
+                                .ctx
+                                .ibl_pass
+                                .add_to_graph(
                                     c,
                                     scene_id,
                                     env.base_cube,
                                     env.pmrem,
-                                );
-                                env_dependency_base = Some(env.base_cube);
-                                env_dependency_pmrem = Some(env.pmrem);
-                                scene_environment_updated = true;
-                            }
+                                    env.source_type,
+                                    env.compute_state,
+                                )
+                                .updated_pmrem;
                         }
                     }
                 }
@@ -1007,17 +1004,7 @@ impl<'a> FrameComposer<'a> {
             // ━━━ 4. Submit & Present ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
             self.ctx.wgpu_ctx.queue.submit(Some(encoder.finish()));
-            scene_environment_updated
         };
-
-        if scene_environment_updated {
-            let scene_id = self.ctx.scene.id();
-            // SAFETY: all graph-scoped immutable borrows of ResourceManager
-            // environment textures ended with the render block above.
-            unsafe {
-                (*resource_manager_ptr).mark_scene_environment_clean(scene_id);
-            }
-        }
 
         if let Some(output) = surface_output {
             output.present();
