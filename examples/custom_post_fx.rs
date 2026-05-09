@@ -6,8 +6,6 @@
 //! order = 181
 //!
 
-use std::borrow::Cow;
-
 use myth::prelude::*;
 use myth::renderer::HDR_TEXTURE_FORMAT;
 use myth::renderer::core::gpu::{CommonSampler, Tracked};
@@ -15,10 +13,13 @@ use myth::renderer::graph::core::{
     ExecuteContext, GraphBlackboard, HookStage, PassNode, PrepareContext, RenderTargetOps,
     TextureDesc, TextureNodeId,
 };
+use myth::renderer::pipeline::{RenderPipelineId, ShaderCompilationOptions, ShaderSource};
 use myth::resources::Key;
 use myth_dev_utils::FpsCounter;
 
-const CUSTOM_POST_SHADER: &str = r#"
+const CUSTOM_POST_SHADER_NAME: &str = "examples/custom_post_fx/custom_post_fx";
+
+const CUSTOM_POST_SHADER_TEMPLATE: &str = r#"
 struct VsOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -79,16 +80,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 struct ChromaticPostNode<'a> {
     input_tex: TextureNodeId,
     output_tex: TextureNodeId,
-    pipeline: &'a wgpu::RenderPipeline,
-    layout: &'a Tracked<wgpu::BindGroupLayout>,
+    pipeline_id: RenderPipelineId,
     transient_bg: Option<&'a wgpu::BindGroup>,
 }
 
 impl<'a> PassNode<'a> for ChromaticPostNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
+        let layout = ctx.pipeline_cache.get_tracked_layout(self.pipeline_id, 0);
         self.transient_bg = Some(myth_render::myth_bind_group!(
             ctx,
-            self.layout,
+            layout,
             Some("CustomPostFX BindGroup"),
             [0 => self.input_tex, 1 => CommonSampler::LinearClamp]
         ));
@@ -108,7 +109,7 @@ impl<'a> PassNode<'a> for ChromaticPostNode<'a> {
             multiview_mask: None,
         });
 
-        pass.set_pipeline(self.pipeline);
+        pass.set_pipeline(ctx.pipeline_cache.get_render_pipeline(self.pipeline_id));
         pass.set_bind_group(0, bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
@@ -125,78 +126,60 @@ struct CustomPostFxDemo {
     fps_counter: FpsCounter,
     orbs: Vec<PostFxOrb>,
     ring_light: NodeHandle,
-    post_layout: Tracked<wgpu::BindGroupLayout>,
-    post_pipeline: wgpu::RenderPipeline,
+    post_pipeline: RenderPipelineId,
     effect_enabled: bool,
     time: f32,
 }
 
 impl AppHandler for CustomPostFxDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        let wgpu_ctx = engine
-            .renderer
-            .wgpu_ctx()
-            .expect("renderer should be initialized before example setup");
-        let device = &wgpu_ctx.device;
-
-        let post_layout = Tracked::new(device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                label: Some("CustomPostFX Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
+        let post_layout = {
+            let wgpu_ctx = engine
+                .renderer
+                .wgpu_ctx()
+                .expect("renderer should be initialized before example setup");
+            Tracked::new(wgpu_ctx.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("CustomPostFX Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            },
-        ));
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Custom Post FX Shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(CUSTOM_POST_SHADER)),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Custom Post FX Pipeline Layout"),
-            bind_group_layouts: &[Some(&*post_layout)],
-            immediate_size: 0,
-        });
-        let post_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Custom Post FX Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR_TEXTURE_FORMAT,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                },
+            ))
+        };
+        engine.renderer.register_shader_template(
+            CUSTOM_POST_SHADER_NAME,
+            CUSTOM_POST_SHADER_TEMPLATE,
+        );
+        let post_shader_options = ShaderCompilationOptions::default();
+        let post_pipeline = engine.renderer.get_or_create_fullscreen_pipeline(
+            ShaderSource::File(CUSTOM_POST_SHADER_NAME),
+            &post_shader_options,
+            &[&post_layout],
+            &[wgpu::ColorTargetState {
+                format: HDR_TEXTURE_FORMAT,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            }],
+            None,
+            wgpu::MultisampleState::default(),
+            "Custom Post FX Pipeline",
+        );
 
         let sphere_geo = engine.assets.geometries.add(Geometry::new_sphere(1.0));
         let box_geo = engine
@@ -279,7 +262,6 @@ impl AppHandler for CustomPostFxDemo {
             fps_counter: FpsCounter::new(),
             orbs,
             ring_light,
-            post_layout,
             post_pipeline,
             effect_enabled: true,
             time: 0.0,
@@ -349,8 +331,7 @@ impl AppHandler for CustomPostFxDemo {
         };
 
         let enabled = self.effect_enabled;
-        let pipeline = &self.post_pipeline;
-        let layout = &self.post_layout;
+        let pipeline_id = self.post_pipeline;
         let post_output_desc = post_output_desc;
 
         composer
@@ -370,8 +351,7 @@ impl AppHandler for CustomPostFxDemo {
                         ChromaticPostNode {
                             input_tex: scene_color,
                             output_tex: out,
-                            pipeline,
-                            layout,
+                            pipeline_id,
                             transient_bg: None,
                         },
                         out,

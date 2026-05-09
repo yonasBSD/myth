@@ -1070,6 +1070,7 @@ impl<'a> FrameComposer<'a> {
                 },
                 device: &self.ctx.wgpu_ctx.device,
                 queue: &self.ctx.wgpu_ctx.queue,
+                pipeline_cache: self.ctx.pipeline_cache,
                 sampler_registry: &self.ctx.resource_manager.sampler_registry,
                 global_bind_group_cache: self.ctx.global_bind_group_cache,
                 system_textures: &self.ctx.resource_manager.system_textures,

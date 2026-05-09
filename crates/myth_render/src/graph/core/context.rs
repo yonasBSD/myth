@@ -60,8 +60,8 @@ pub struct ExtractContext<'a> {
 /// `wgpu::BindGroup`s that reference RDG-managed textures and buffers.
 ///
 /// This context is deliberately kept **pure**: it provides only the GPU
-/// device, transient view resolver, sampler registry, and the global bind
-/// group cache.  Passes then build bind groups through
+/// device, transient view resolver, pipeline cache, sampler registry, and the
+/// global bind group cache. Passes then build bind groups through
 /// [`PrepareContext::build_bind_group`], which centralizes cache-key
 /// construction and safe logical-size truncation for RDG buffers.
 pub struct PrepareContext<'a> {
@@ -71,6 +71,8 @@ pub struct PrepareContext<'a> {
     pub device: &'a wgpu::Device,
     /// GPU queue for immediate buffer uploads (rare in prepare).
     pub queue: &'a wgpu::Queue,
+    /// Cached pipelines and their tracked bind-group layouts.
+    pub pipeline_cache: &'a PipelineCache,
     /// Shared sampler registry (persistent, immutable during prepare).
     pub sampler_registry: &'a SamplerRegistry,
     /// Mutable cache for transient bind groups with TTL eviction.

@@ -3,8 +3,10 @@
 //! The main [`Renderer`] struct orchestrating GPU rendering operations.
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use smallvec::SmallVec;
 
 use crate::core::binding::GlobalBindGroupCache;
+use crate::core::gpu::Tracked;
 use crate::graph::composer::ComposerContext;
 use crate::graph::core::allocator::TransientPool;
 use crate::graph::core::arena::FrameArena;
@@ -31,10 +33,39 @@ use crate::core::{ResourceManager, WgpuContext};
 use crate::graph::extracted::SceneFeatures;
 use crate::graph::{FrameComposer, RenderFrame};
 use crate::pipeline::{
-    ComputePipelineId, ComputePipelineKey, PipelineCache, ShaderCompilationOptions, ShaderManager,
-    ShaderSource,
+    ColorTargetKey, ComputePipelineId, ComputePipelineKey, DepthStencilKey,
+    FullscreenPipelineKey, MultisampleKey, PipelineCache, RenderPipelineId,
+    ShaderCompilationOptions, ShaderManager, ShaderSource,
 };
 use crate::settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
+
+fn build_pipeline_layout(
+    device: &wgpu::Device,
+    bind_group_layouts: &[&Tracked<wgpu::BindGroupLayout>],
+    label: &str,
+) -> (
+    wgpu::PipelineLayout,
+    SmallVec<[Tracked<wgpu::BindGroupLayout>; 4]>,
+) {
+    let raw_layouts = bind_group_layouts
+        .iter()
+        .map(|layout| {
+            let raw_layout: &wgpu::BindGroupLayout = layout;
+            Some(raw_layout)
+        })
+        .collect::<Vec<_>>();
+    let tracked_layouts = bind_group_layouts
+        .iter()
+        .map(|layout| (*layout).clone())
+        .collect::<SmallVec<[Tracked<wgpu::BindGroupLayout>; 4]>>();
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &raw_layouts,
+        immediate_size: 0,
+    });
+
+    (pipeline_layout, tracked_layouts)
+}
 
 /// The main renderer responsible for GPU rendering operations.
 ///
@@ -892,12 +923,14 @@ impl Renderer {
     /// Use [`register_shader_template`](Self::register_shader_template) first
     /// when `source` is [`ShaderSource::File`] backed by a custom template.
     /// This keeps standalone examples on the same shader compilation and cache
-    /// path as engine-owned passes.
+    /// path as engine-owned passes. The provided tracked bind-group layouts are
+    /// also registered into [`PipelineCache`] so later RDG code can look them
+    /// up by pipeline ID instead of carrying layouts through user state.
     pub fn get_or_create_compute_pipeline(
         &mut self,
         source: ShaderSource<'_>,
         shader_options: &ShaderCompilationOptions,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        bind_group_layouts: &[&Tracked<wgpu::BindGroupLayout>],
         label: &str,
     ) -> ComputePipelineId {
         let state = self
@@ -906,32 +939,86 @@ impl Renderer {
             .expect("Renderer must be initialized before creating compute pipelines");
 
         let compilation_options = wgpu::PipelineCompilationOptions::default();
+        let layout_label = format!("{label} Layout");
         let (module, shader_hash) =
             state
                 .shader_manager
                 .get_or_compile(&state.wgpu_ctx.device, source, shader_options);
-        let bind_group_layouts = bind_group_layouts
-            .iter()
-            .map(|layout| Some(*layout))
-            .collect::<Vec<_>>();
-        let pipeline_layout =
-            state
-                .wgpu_ctx
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("{label} Layout")),
-                    bind_group_layouts: &bind_group_layouts,
-                    immediate_size: 0,
-                });
+        let (pipeline_layout, tracked_layouts) = build_pipeline_layout(
+            &state.wgpu_ctx.device,
+            bind_group_layouts,
+            &layout_label,
+        );
 
-        state.pipeline_cache.get_or_create_compute(
+        let pipeline_id = state.pipeline_cache.get_or_create_compute(
             &state.wgpu_ctx.device,
             module,
             &pipeline_layout,
             &ComputePipelineKey::new(shader_hash).with_compilation_options(&compilation_options),
             &compilation_options,
             label,
-        )
+        );
+        state
+            .pipeline_cache
+            .register_compute_layouts(pipeline_id, tracked_layouts);
+        pipeline_id
+    }
+
+    /// Compiles or retrieves a cached fullscreen render pipeline from the
+    /// renderer's standard shader template system.
+    ///
+    /// This helper is intended for post-processing and fullscreen user passes.
+    /// It hides shader compilation, pipeline-layout creation, and pipeline-key
+    /// construction behind the same template system used by engine-owned
+    /// passes, while also registering tracked bind-group layouts in
+    /// [`PipelineCache`] for later lookup by pipeline ID.
+    pub fn get_or_create_fullscreen_pipeline(
+        &mut self,
+        source: ShaderSource<'_>,
+        shader_options: &ShaderCompilationOptions,
+        bind_group_layouts: &[&Tracked<wgpu::BindGroupLayout>],
+        color_targets: &[wgpu::ColorTargetState],
+        depth_stencil: Option<wgpu::DepthStencilState>,
+        multisample: wgpu::MultisampleState,
+        label: &str,
+    ) -> RenderPipelineId {
+        let state = self
+            .context
+            .as_mut()
+            .expect("Renderer must be initialized before creating render pipelines");
+
+        let layout_label = format!("{label} Layout");
+        let (module, shader_hash) =
+            state
+                .shader_manager
+                .get_or_compile(&state.wgpu_ctx.device, source, shader_options);
+        let (pipeline_layout, tracked_layouts) = build_pipeline_layout(
+            &state.wgpu_ctx.device,
+            bind_group_layouts,
+            &layout_label,
+        );
+        let key = FullscreenPipelineKey {
+            shader_hash,
+            color_targets: color_targets
+                .iter()
+                .cloned()
+                .map(ColorTargetKey::from)
+                .collect(),
+            depth_stencil: depth_stencil.map(DepthStencilKey::from),
+            multisample: MultisampleKey::from(multisample),
+        };
+
+        let pipeline_id = state.pipeline_cache.get_or_create_fullscreen(
+            &state.wgpu_ctx.device,
+            module,
+            &pipeline_layout,
+            &key,
+            label,
+        );
+        state
+            .pipeline_cache
+            .register_render_layouts(pipeline_id, tracked_layouts);
+        pipeline_id
     }
 
     /// Returns `true` if the renderer is in headless (offscreen) mode.

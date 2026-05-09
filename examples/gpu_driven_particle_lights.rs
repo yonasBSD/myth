@@ -187,15 +187,17 @@ struct GpuParticleLightNode<'a> {
     light_storage: BufferNodeId,
     indirect_count_buffer: BufferNodeId,
     params_buffer: &'a Tracked<wgpu::Buffer>,
-    layout: &'a Tracked<wgpu::BindGroupLayout>,
-    pipeline: &'a wgpu::ComputePipeline,
+    pipeline_id: ComputePipelineId,
     bind_group: Option<&'a wgpu::BindGroup>,
 }
 
 impl<'a> PassNode<'a> for GpuParticleLightNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
+        let layout = ctx
+            .pipeline_cache
+            .get_tracked_compute_layout(self.pipeline_id, 0);
         self.bind_group = Some(
-            ctx.build_bind_group(self.layout, Some("GPU Particle Light BG"))
+            ctx.build_bind_group(layout, Some("GPU Particle Light BG"))
                 .bind_tracked_buffer(0, self.params_buffer)
                 .bind_buffer(1, self.light_metadata)
                 .bind_buffer(2, self.light_storage)
@@ -204,12 +206,12 @@ impl<'a> PassNode<'a> for GpuParticleLightNode<'a> {
         );
     }
 
-    fn execute(&self, _ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
+    fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("GPU Particle Light Pass"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(self.pipeline);
+        pass.set_pipeline(ctx.pipeline_cache.get_compute_pipeline(self.pipeline_id));
         pass.set_bind_group(
             0,
             self.bind_group.expect("GPU particle light BG missing"),
@@ -223,7 +225,6 @@ struct GpuDrivenParticleLightsDemo {
     controls: OrbitControls,
     fps_counter: FpsCounter,
     centerpiece: NodeHandle,
-    swarm_layout: Tracked<wgpu::BindGroupLayout>,
     swarm_pipeline: ComputePipelineId,
     swarm_params: Tracked<wgpu::Buffer>,
     swarm_enabled: bool,
@@ -476,7 +477,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
         let swarm_pipeline = engine.renderer.get_or_create_compute_pipeline(
             ShaderSource::File(GPU_PARTICLE_LIGHT_SHADER_NAME),
             &swarm_shader_options,
-            &[&*swarm_layout],
+            &[&swarm_layout],
             "GPU Particle Light Pipeline",
         );
         let swarm_params = {
@@ -496,7 +497,6 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             controls: OrbitControls::new(Vec3::new(0.0, 4.8, 17.5), Vec3::new(0.0, 1.8, 0.0)),
             fps_counter: FpsCounter::new(),
             centerpiece,
-            swarm_layout,
             swarm_pipeline,
             swarm_params,
             swarm_enabled: true,
@@ -564,7 +564,6 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             return;
         };
 
-        let layout = &self.swarm_layout;
         let pipeline_id = self.swarm_pipeline;
         let params_buffer = &self.swarm_params;
         let swarm_enabled = self.swarm_enabled;
@@ -576,7 +575,6 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
                 }
 
                 Some(ctx.with_group("GPU_Particle_Lights", |ctx| {
-                    let pipeline = ctx.pipeline_cache.get_compute_pipeline(pipeline_id);
                     ctx.graph
                         .add_pass("GPU_Particle_Light_Generate", |builder| {
                             let light_metadata = builder.create_buffer(
@@ -605,8 +603,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
                                     light_storage,
                                     indirect_count_buffer,
                                     params_buffer,
-                                    layout,
-                                    pipeline,
+                                    pipeline_id,
                                     bind_group: None,
                                 },
                                 GpuLightBuffers {
