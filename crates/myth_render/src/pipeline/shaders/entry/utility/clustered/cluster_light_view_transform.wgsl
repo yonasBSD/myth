@@ -12,7 +12,6 @@
 
 const LIGHT_VIEW_TRANSFORM_WG_SIZE: u32 = 64u;
 const LIGHT_INTENSITY_CULL_THRESHOLD: f32 = 0.005;
-const LIGHT_EFFECTIVE_RADIUS_SEARCH_STEPS: u32 = 10u;
 const SPOT_TIGHT_SPHERE_COS_THRESHOLD: f32 = 0.70710678;
 
 fn pow2(x: f32) -> f32 {
@@ -32,8 +31,9 @@ fn light_distance_attenuation(light_distance: f32, cutoff_distance: f32, decay_e
     return distance_falloff;
 }
 
-// Uses a fixed-iteration bounded search so the transform pass stays cheap and
-// produces a conservative radius aligned with the runtime attenuation curve.
+// Uses the analytical inverse of the unwindowed distance attenuation curve.
+// Ignoring the edge-smoothing window yields a conservative radius, which is
+// exactly what clustered culling wants.
 fn solve_effective_light_distance(light: Struct_lights) -> f32 {
     if (light.range <= 0.0 || light.intensity <= 0.0) {
         return -1.0;
@@ -45,20 +45,11 @@ fn solve_effective_light_distance(light: Struct_lights) -> f32 {
         return -1.0;
     }
 
-    var low = 0.0;
-    var high = light.range;
-    for (var step = 0u; step < LIGHT_EFFECTIVE_RADIUS_SEARCH_STEPS; step += 1u) {
-        let mid = 0.5 * (low + high);
-        let contribution = light.intensity
-            * light_distance_attenuation(mid, light.range, light.decay);
-        if (contribution >= LIGHT_INTENSITY_CULL_THRESHOLD) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-
-    return low;
+    let safe_distance = pow(
+        light.intensity / LIGHT_INTENSITY_CULL_THRESHOLD,
+        1.0 / max(light.decay, 0.01),
+    );
+    return min(safe_distance, light.range);
 }
 
 fn build_spot_bounding_sphere(light: Struct_lights, effective_range: f32) -> vec4<f32> {
@@ -67,8 +58,8 @@ fn build_spot_bounding_sphere(light: Struct_lights, effective_range: f32) -> vec
         return vec4<f32>(view_pos, effective_range);
     }
 
-    let cos_sq = max(light.outer_cone_cos * light.outer_cone_cos, 1e-4);
-    let radius = 0.5 * effective_range / cos_sq;
+    let cos_val = max(light.outer_cone_cos, 1e-4);
+    let radius = 0.5 * effective_range / cos_val;
     let sphere_center = light.position + light.direction * radius;
     let sphere_center_view = (u_render_state.view_matrix * vec4<f32>(sphere_center, 1.0)).xyz;
     return vec4<f32>(sphere_center_view, radius);

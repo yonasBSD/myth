@@ -2,11 +2,11 @@
 //! name = "GPU-Driven Particle Lights"
 //! category = "Lighting"
 //! description = "A dual-track lighting demo: CPU directional + CPU accent lights + a GPU swarm merged inside the RDG local-light track."
-//! instructions = "4096 GPU point lights + CPU accent lights\nPress Space to toggle GPU merge / CPU-only short-circuit\nDrag to orbit"
+//! instructions = "4096 GPU point lights + CPU accent lights\nPress Space to toggle GPU local-light injection\nDrag to orbit"
 //! order = 366
 //!
 
-use std::{borrow::Cow, f32::consts::FRAC_PI_2};
+use std::f32::consts::FRAC_PI_2;
 
 use bytemuck::{Pod, Zeroable};
 use myth::prelude::*;
@@ -17,11 +17,12 @@ use myth::renderer::{
         composer::GpuLightBuffers,
         core::{BufferDesc, BufferNodeId, ExecuteContext, PassNode, PrepareContext},
     },
+    pipeline::{ComputePipelineId, ShaderCompilationOptions, ShaderSource},
 };
 use myth::resources::{
     image::ColorSpace,
     input::Key,
-    uniforms::{GpuLightStorage, LightBufferMetadata, WgslStruct},
+    uniforms::{GpuLightStorage, LightBufferMetadata, scene_lighting_structs_wgsl},
 };
 use myth_dev_utils::FpsCounter;
 
@@ -32,11 +33,11 @@ const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
 
 const GPU_LIGHT_COUNT: u32 = 4096;
 const PARTICLE_LIGHT_WG_SIZE: u32 = 64;
+const GPU_PARTICLE_LIGHT_SHADER_NAME: &str =
+    "examples/gpu_driven_particle_lights/gpu_particle_light";
 
 const GPU_PARTICLE_LIGHT_SHADER_TEMPLATE: &str = r#"
-__LIGHT_STRUCTS__
-
-__METADATA_STRUCT__
+{{ scene_lighting_structs }}
 
 struct SwarmLightParams {
     time: f32,
@@ -55,7 +56,7 @@ struct SwarmLightParams {
 
 @group(0) @binding(0) var<uniform> u_params: SwarmLightParams;
 @group(0) @binding(1) var<storage, read_write> st_light_metadata: LightBufferMetadata;
-@group(0) @binding(2) var<storage, read_write> st_lights: array<SceneLight>;
+@group(0) @binding(2) var<storage, read_write> st_lights: array<Struct_lights>;
 @group(0) @binding(3) var<storage, read_write> st_indirect_count: array<u32>;
 
 fn hash11(value: f32) -> f32 {
@@ -101,7 +102,7 @@ fn zero_matrix() -> mat4x4<f32> {
     );
 }
 
-@compute @workgroup_size(__WORKGROUP_SIZE__)
+@compute @workgroup_size({{ particle_light_workgroup_size }})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let index = gid.x;
     if (index >= u_params.count) {
@@ -138,7 +139,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pulse = 0.5 + 0.5 * sin(u_params.time * 2.1 + f32(index) * 0.071);
     let flicker = 0.82 + hash11(f32(index) * 1.37) * 0.36;
 
-    var light: SceneLight;
+    var light: Struct_lights;
     light.color = color;
     light.intensity = u_params.base_intensity * (0.75 + pulse * 0.9) * flicker;
     light.position = position;
@@ -209,7 +210,11 @@ impl<'a> PassNode<'a> for GpuParticleLightNode<'a> {
             timestamp_writes: None,
         });
         pass.set_pipeline(self.pipeline);
-        pass.set_bind_group(0, self.bind_group.expect("GPU particle light BG missing"), &[]);
+        pass.set_bind_group(
+            0,
+            self.bind_group.expect("GPU particle light BG missing"),
+            &[],
+        );
         pass.dispatch_workgroups(GPU_LIGHT_COUNT.div_ceil(PARTICLE_LIGHT_WG_SIZE), 1, 1);
     }
 }
@@ -219,7 +224,7 @@ struct GpuDrivenParticleLightsDemo {
     fps_counter: FpsCounter,
     centerpiece: NodeHandle,
     swarm_layout: Tracked<wgpu::BindGroupLayout>,
-    swarm_pipeline: wgpu::ComputePipeline,
+    swarm_pipeline: ComputePipelineId,
     swarm_params: Tracked<wgpu::Buffer>,
     swarm_enabled: bool,
     time: f32,
@@ -227,19 +232,6 @@ struct GpuDrivenParticleLightsDemo {
 
 fn centered_lattice(index: usize, count: usize, spacing: f32) -> f32 {
     (index as f32 - (count as f32 - 1.0) * 0.5) * spacing
-}
-
-fn gpu_particle_light_shader() -> String {
-    GPU_PARTICLE_LIGHT_SHADER_TEMPLATE
-        .replace(
-            "__LIGHT_STRUCTS__",
-            &GpuLightStorage::wgsl_struct_def("SceneLight"),
-        )
-        .replace(
-            "__METADATA_STRUCT__",
-            &LightBufferMetadata::wgsl_struct_def("LightBufferMetadata"),
-        )
-        .replace("__WORKGROUP_SIZE__", &PARTICLE_LIGHT_WG_SIZE.to_string())
 }
 
 impl AppHandler for GpuDrivenParticleLightsDemo {
@@ -291,8 +283,28 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
         }
 
         for &(color, intensity, range, x, y, z, target_x, target_y, target_z) in &[
-            (Vec3::new(1.0, 0.72, 0.34), 3.0, 3.0, -6.4, 3.6, -2.0, 0.0, 1.1, -6.0),
-            (Vec3::new(0.36, 0.82, 1.0), 3.0, 3.0, 6.4, 3.6, 2.0, 0.0, 1.1, 6.0),
+            (
+                Vec3::new(1.0, 0.72, 0.34),
+                3.0,
+                3.0,
+                -6.4,
+                3.6,
+                -2.0,
+                0.0,
+                1.1,
+                -6.0,
+            ),
+            (
+                Vec3::new(0.36, 0.82, 1.0),
+                3.0,
+                3.0,
+                6.4,
+                3.6,
+                2.0,
+                0.0,
+                1.1,
+                6.0,
+            ),
         ] {
             let local = scene.add_light(Light::new_spot(color, intensity, range, 0.24, 0.52));
             scene
@@ -396,89 +408,89 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             .look_at(Vec3::new(0.0, 1.8, 0.0));
         scene.active_camera = Some(camera);
 
-        let wgpu_ctx = engine
-            .renderer
-            .wgpu_ctx()
-            .expect("renderer must be initialized before example setup");
-        let shader_source = gpu_particle_light_shader();
-        let shader = wgpu_ctx
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("GPU Particle Light Shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_source)),
-            });
+        engine.renderer.register_shader_template(
+            GPU_PARTICLE_LIGHT_SHADER_NAME,
+            GPU_PARTICLE_LIGHT_SHADER_TEMPLATE,
+        );
 
-        let swarm_layout = Tracked::new(wgpu_ctx.device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                label: Some("GPU Particle Light Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+        let swarm_layout = {
+            let wgpu_ctx = engine
+                .renderer
+                .wgpu_ctx()
+                .expect("renderer must be initialized before example setup");
+            Tracked::new(wgpu_ctx.device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GPU Particle Light Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
-            },
-        ));
+                    ],
+                },
+            ))
+        };
 
-        let pipeline_layout = wgpu_ctx
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GPU Particle Light Pipeline Layout"),
-                bind_group_layouts: &[Some(&*swarm_layout)],
-                immediate_size: 0,
-            });
-        let swarm_pipeline = wgpu_ctx
-            .device
-            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("GPU Particle Light Pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
-        let swarm_params = Tracked::new(wgpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("GPU Particle Light Params"),
-            size: std::mem::size_of::<SwarmLightParams>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let mut swarm_shader_options = ShaderCompilationOptions::default();
+        swarm_shader_options.inject_code("scene_lighting_structs", scene_lighting_structs_wgsl());
+        swarm_shader_options.inject_code(
+            "particle_light_workgroup_size",
+            format!("{}u", PARTICLE_LIGHT_WG_SIZE),
+        );
+        let swarm_pipeline = engine.renderer.get_or_create_compute_pipeline(
+            ShaderSource::File(GPU_PARTICLE_LIGHT_SHADER_NAME),
+            &swarm_shader_options,
+            &[&*swarm_layout],
+            "GPU Particle Light Pipeline",
+        );
+        let swarm_params = {
+            let wgpu_ctx = engine
+                .renderer
+                .wgpu_ctx()
+                .expect("renderer must be initialized before example setup");
+            Tracked::new(wgpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("GPU Particle Light Params"),
+                size: std::mem::size_of::<SwarmLightParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
+        };
 
         Self {
             controls: OrbitControls::new(Vec3::new(0.0, 4.8, 17.5), Vec3::new(0.0, 1.8, 0.0)),
@@ -519,7 +531,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
                 if self.swarm_enabled {
                     "Merged"
                 } else {
-                    "CPU Only"
+                    "Injection Off"
                 },
                 fps
             ));
@@ -553,7 +565,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
         };
 
         let layout = &self.swarm_layout;
-        let pipeline = &self.swarm_pipeline;
+        let pipeline_id = self.swarm_pipeline;
         let params_buffer = &self.swarm_params;
         let swarm_enabled = self.swarm_enabled;
 
@@ -564,44 +576,46 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
                 }
 
                 Some(ctx.with_group("GPU_Particle_Lights", |ctx| {
-                    ctx.graph.add_pass("GPU_Particle_Light_Generate", |builder| {
-                        let light_metadata = builder.create_buffer(
-                            "GPU_Particle_Light_Metadata",
-                            BufferDesc::new(
-                                std::mem::size_of::<LightBufferMetadata>() as u64,
-                                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
-                            ),
-                        );
-                        let light_storage = builder.create_buffer(
-                            "GPU_Particle_Light_Storage",
-                            BufferDesc::new(
-                                GPU_LIGHT_COUNT as u64
-                                    * std::mem::size_of::<GpuLightStorage>() as u64,
-                                wgpu::BufferUsages::STORAGE,
-                            ),
-                        );
-                        let indirect_count_buffer = builder.create_buffer(
-                            "GPU_Particle_Light_Count",
-                            BufferDesc::new(4, wgpu::BufferUsages::STORAGE),
-                        );
+                    let pipeline = ctx.pipeline_cache.get_compute_pipeline(pipeline_id);
+                    ctx.graph
+                        .add_pass("GPU_Particle_Light_Generate", |builder| {
+                            let light_metadata = builder.create_buffer(
+                                "GPU_Particle_Light_Metadata",
+                                BufferDesc::new(
+                                    std::mem::size_of::<LightBufferMetadata>() as u64,
+                                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
+                                ),
+                            );
+                            let light_storage = builder.create_buffer(
+                                "GPU_Particle_Light_Storage",
+                                BufferDesc::new(
+                                    GPU_LIGHT_COUNT as u64
+                                        * std::mem::size_of::<GpuLightStorage>() as u64,
+                                    wgpu::BufferUsages::STORAGE,
+                                ),
+                            );
+                            let indirect_count_buffer = builder.create_buffer(
+                                "GPU_Particle_Light_Count",
+                                BufferDesc::new(4, wgpu::BufferUsages::STORAGE),
+                            );
 
-                        (
-                            GpuParticleLightNode {
-                                light_metadata,
-                                light_storage,
-                                indirect_count_buffer,
-                                params_buffer,
-                                layout,
-                                pipeline,
-                                bind_group: None,
-                            },
-                            GpuLightBuffers {
-                                light_metadata,
-                                light_storage,
-                                indirect_count_buffer: Some(indirect_count_buffer),
-                            },
-                        )
-                    })
+                            (
+                                GpuParticleLightNode {
+                                    light_metadata,
+                                    light_storage,
+                                    indirect_count_buffer,
+                                    params_buffer,
+                                    layout,
+                                    pipeline,
+                                    bind_group: None,
+                                },
+                                GpuLightBuffers {
+                                    light_metadata,
+                                    light_storage,
+                                    indirect_count_buffer: Some(indirect_count_buffer),
+                                },
+                            )
+                        })
                 }))
             })
             .render();

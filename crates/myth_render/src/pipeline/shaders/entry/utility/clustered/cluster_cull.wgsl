@@ -17,10 +17,6 @@ const MAX_LOCAL_LIGHTS: u32 = {{ clustered_max_local_lights }};
 const ALLOCATOR_OFFSET_SLOT: u32 = 0u;
 
 var<workgroup> wg_plane_normals: array<vec4<f32>, 4>;
-var<workgroup> wg_corner_rays: array<vec3<f32>, 4>;
-var<workgroup> wg_min_pixel: vec2<f32>;
-var<workgroup> wg_max_pixel: vec2<f32>;
-var<workgroup> wg_center_dir: vec3<f32>;
 var<workgroup> wg_slice_near: f32;
 var<workgroup> wg_slice_far: f32;
 var<workgroup> wg_cluster_index: u32;
@@ -116,81 +112,34 @@ fn main(
             min(f32(u_clustered_lighting.screen_dimensions.x), f32(workgroup_id.x + 1u) * tile_size.x),
             min(f32(u_clustered_lighting.screen_dimensions.y), f32(workgroup_id.y + 1u) * tile_size.y),
         );
+        let top_left = view_ray(min_pixel);
+        let top_right = view_ray(vec2<f32>(max_pixel.x, min_pixel.y));
+        let bottom_left = view_ray(vec2<f32>(min_pixel.x, max_pixel.y));
+        let bottom_right = view_ray(max_pixel);
+        let center_dir = normalize(top_left + top_right + bottom_left + bottom_right);
 
-        wg_min_pixel = min_pixel;
-        wg_max_pixel = max_pixel;
         wg_slice_near = slice_depth(workgroup_id.z);
         wg_slice_far = slice_depth(workgroup_id.z + 1u);
+        wg_plane_normals[0] = vec4<f32>(
+            oriented_plane_normal(bottom_left, top_left, center_dir),
+            0.0,
+        );
+        wg_plane_normals[1] = vec4<f32>(
+            oriented_plane_normal(top_right, bottom_right, center_dir),
+            0.0,
+        );
+        wg_plane_normals[2] = vec4<f32>(
+            oriented_plane_normal(top_left, top_right, center_dir),
+            0.0,
+        );
+        wg_plane_normals[3] = vec4<f32>(
+            oriented_plane_normal(bottom_right, bottom_left, center_dir),
+            0.0,
+        );
         wg_cluster_index = cluster_index;
         wg_reserved_offset = 0u;
         wg_reserved_count = 0u;
         atomicStore(&wg_local_match_count, 0u);
-    }
-
-    workgroupBarrier();
-
-    if local_id.x < 4u {
-        var corner_pixel = wg_min_pixel;
-        switch local_id.x {
-            case 0u: {
-                corner_pixel = wg_min_pixel;
-            }
-            case 1u: {
-                corner_pixel = vec2<f32>(wg_max_pixel.x, wg_min_pixel.y);
-            }
-            case 2u: {
-                corner_pixel = vec2<f32>(wg_min_pixel.x, wg_max_pixel.y);
-            }
-            default: {
-                corner_pixel = wg_max_pixel;
-            }
-        }
-        wg_corner_rays[local_id.x] = view_ray(corner_pixel);
-    }
-
-    workgroupBarrier();
-
-    if local_id.x == 0u {
-        wg_center_dir = normalize(
-            wg_corner_rays[0] + wg_corner_rays[1] + wg_corner_rays[2] + wg_corner_rays[3]
-        );
-    }
-
-    workgroupBarrier();
-
-    if local_id.x < 4u {
-        var plane_normal = wg_center_dir;
-        switch local_id.x {
-            case 0u: {
-                plane_normal = oriented_plane_normal(
-                    wg_corner_rays[2],
-                    wg_corner_rays[0],
-                    wg_center_dir,
-                );
-            }
-            case 1u: {
-                plane_normal = oriented_plane_normal(
-                    wg_corner_rays[1],
-                    wg_corner_rays[3],
-                    wg_center_dir,
-                );
-            }
-            case 2u: {
-                plane_normal = oriented_plane_normal(
-                    wg_corner_rays[0],
-                    wg_corner_rays[1],
-                    wg_center_dir,
-                );
-            }
-            default: {
-                plane_normal = oriented_plane_normal(
-                    wg_corner_rays[3],
-                    wg_corner_rays[2],
-                    wg_center_dir,
-                );
-            }
-        }
-        wg_plane_normals[local_id.x] = vec4<f32>(plane_normal, 0.0);
     }
 
     workgroupBarrier();

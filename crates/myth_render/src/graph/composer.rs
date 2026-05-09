@@ -226,8 +226,8 @@ impl PassNode<'_> for SceneLightingImportPassNode {
     fn execute(&self, _ctx: &ExecuteContext, _encoder: &mut wgpu::CommandEncoder) {}
 }
 
-fn import_scene_lighting<'a>(
-    ctx: &mut GraphBuilderContext<'a, '_>,
+fn import_scene_lighting(
+    ctx: &mut GraphBuilderContext<'_, '_>,
     render_lists: &RenderLists,
 ) -> GpuLightBuffers {
     let light_metadata_buffer = render_lists
@@ -305,8 +305,9 @@ pub struct FrameComposer<'a> {
     ctx: ComposerContext<'a>,
     frame_config: FrameConfig,
     #[allow(clippy::type_complexity)]
-    gpu_local_light_hook:
-        Option<Box<dyn for<'g> FnMut(&mut GraphBuilderContext<'a, 'g>) -> Option<GpuLightBuffers> + 'a>>,
+    gpu_local_light_hook: Option<
+        Box<dyn for<'g> FnMut(&mut GraphBuilderContext<'a, 'g>) -> Option<GpuLightBuffers> + 'a>,
+    >,
     #[allow(clippy::type_complexity)]
     hooks: smallvec::SmallVec<
         [(
@@ -677,18 +678,15 @@ impl<'a> FrameComposer<'a> {
                         .gpu_local_light_hook
                         .as_mut()
                         .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
-                    let clustered_out = self
-                        .ctx
-                        .clustered_lighting_pass
-                        .add_to_graph(
-                            c,
-                            ClusteredLightingInputs {
-                                enabled: self.ctx.clustered_lighting_enabled,
-                                cpu_light_metadata_buffer: scene_lights.light_metadata,
-                                cpu_light_data_buffer: scene_lights.light_storage,
-                                injected_gpu_lights,
-                            },
-                        );
+                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(
+                        c,
+                        ClusteredLightingInputs {
+                            enabled: self.ctx.clustered_lighting_enabled,
+                            cpu_light_metadata_buffer: scene_lights.light_metadata,
+                            cpu_light_data_buffer: scene_lights.light_storage,
+                            injected_gpu_lights,
+                        },
+                    );
                     let scene_lighting = ClusteredScreenBindings {
                         light_metadata: Some(clustered_out.final_light_metadata_buffer),
                         lights: Some(clustered_out.final_light_data_buffer),
@@ -997,18 +995,15 @@ impl<'a> FrameComposer<'a> {
                         .gpu_local_light_hook
                         .as_mut()
                         .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
-                    let clustered_out = self
-                        .ctx
-                        .clustered_lighting_pass
-                        .add_to_graph(
-                            c,
-                            ClusteredLightingInputs {
-                                enabled: self.ctx.clustered_lighting_enabled,
-                                cpu_light_metadata_buffer: scene_lights.light_metadata,
-                                cpu_light_data_buffer: scene_lights.light_storage,
-                                injected_gpu_lights,
-                            },
-                        );
+                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(
+                        c,
+                        ClusteredLightingInputs {
+                            enabled: self.ctx.clustered_lighting_enabled,
+                            cpu_light_metadata_buffer: scene_lights.light_metadata,
+                            cpu_light_data_buffer: scene_lights.light_storage,
+                            injected_gpu_lights,
+                        },
+                    );
                     let scene_lighting = ClusteredScreenBindings {
                         light_metadata: Some(clustered_out.final_light_metadata_buffer),
                         lights: Some(clustered_out.final_light_data_buffer),

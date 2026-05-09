@@ -16,8 +16,8 @@
 use glam::Mat4;
 use rustc_hash::FxHashMap;
 
-use crate::core::{BindGroupContext, RenderView, ResourceManager};
 use crate::core::gpu::Tracked;
+use crate::core::{BindGroupContext, RenderView, ResourceManager};
 use crate::graph::core::TextureNodeId;
 use crate::pipeline::RenderPipelineId;
 use crate::renderer::FrameTime;
@@ -648,7 +648,8 @@ impl RenderFrame {
                 light.cascade_splits = Vec4::ZERO;
             }
 
-            let mut directional_light_storage = extracted_scene.directional_light_storage_buffer.write();
+            let mut directional_light_storage =
+                extracted_scene.directional_light_storage_buffer.write();
             for light in directional_light_storage.iter_mut() {
                 light.shadow_layer_index = -1;
                 light.point_shadow_index = -1;

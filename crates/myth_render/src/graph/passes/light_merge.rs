@@ -10,7 +10,7 @@ use myth_resources::uniforms::{GpuLightStorage, LightBufferMetadata, scene_light
 
 pub const LIGHT_MERGE_WG_SIZE: u32 = 64;
 
-const LIGHT_MERGE_SHADER_TEMPLATE: &str = r#"
+const LIGHT_MERGE_SHADER_TEMPLATE: &str = r"
 {{ scene_lighting_structs }}
 
 @group(0) @binding(0) var<uniform> u_cpu_light_metadata: LightBufferMetadata;
@@ -50,7 +50,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let gpu_index = index - cpu_count;
     st_merged_lights[index] = st_gpu_lights[gpu_index];
 }
-"#;
+";
 
 #[derive(Clone, Copy)]
 pub struct LightMergePassOutputs {
@@ -104,7 +104,10 @@ impl LightMergeFeature {
 
         let mut options = ShaderCompilationOptions::default();
         options.inject_code("scene_lighting_structs", scene_lighting_structs_wgsl());
-        options.inject_code("light_merge_workgroup_size", LIGHT_MERGE_WG_SIZE.to_string());
+        options.inject_code(
+            "light_merge_workgroup_size",
+            LIGHT_MERGE_WG_SIZE.to_string(),
+        );
 
         let compilation_options = wgpu::PipelineCompilationOptions::default();
         let (module, shader_hash) = ctx.shader_manager.get_or_compile(

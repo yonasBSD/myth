@@ -400,7 +400,8 @@ impl ExtractedScene {
             upload_cache.push(GpuLightStorage::default());
         }
 
-        let needs_update = self.directional_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
+        let needs_update =
+            self.directional_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
         if needs_update {
             self.directional_light_storage_buffer
                 .write()
@@ -423,9 +424,12 @@ impl ExtractedScene {
             upload_cache.push(GpuLightStorage::default());
         }
 
-        let needs_update = self.local_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
+        let needs_update =
+            self.local_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
         if needs_update {
-            self.local_light_storage_buffer.write().clone_from(&upload_cache);
+            self.local_light_storage_buffer
+                .write()
+                .clone_from(&upload_cache);
         }
 
         self.local_light_upload_cache = upload_cache;

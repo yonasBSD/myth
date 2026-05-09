@@ -30,8 +30,10 @@ use myth_scene::camera::RenderCamera;
 use crate::core::{ResourceManager, WgpuContext};
 use crate::graph::extracted::SceneFeatures;
 use crate::graph::{FrameComposer, RenderFrame};
-use crate::pipeline::PipelineCache;
-use crate::pipeline::ShaderManager;
+use crate::pipeline::{
+    ComputePipelineId, ComputePipelineKey, PipelineCache, ShaderCompilationOptions, ShaderManager,
+    ShaderSource,
+};
 use crate::settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
 
 /// The main renderer responsible for GPU rendering operations.
@@ -882,6 +884,54 @@ impl Renderer {
             .as_mut()
             .expect("Renderer must be initialized before registering shader templates");
         state.shader_manager.register_template(name, source);
+    }
+
+    /// Compiles or retrieves a cached compute pipeline from the renderer's
+    /// standard shader template system.
+    ///
+    /// Use [`register_shader_template`](Self::register_shader_template) first
+    /// when `source` is [`ShaderSource::File`] backed by a custom template.
+    /// This keeps standalone examples on the same shader compilation and cache
+    /// path as engine-owned passes.
+    pub fn get_or_create_compute_pipeline(
+        &mut self,
+        source: ShaderSource<'_>,
+        shader_options: &ShaderCompilationOptions,
+        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        label: &str,
+    ) -> ComputePipelineId {
+        let state = self
+            .context
+            .as_mut()
+            .expect("Renderer must be initialized before creating compute pipelines");
+
+        let compilation_options = wgpu::PipelineCompilationOptions::default();
+        let (module, shader_hash) =
+            state
+                .shader_manager
+                .get_or_compile(&state.wgpu_ctx.device, source, shader_options);
+        let bind_group_layouts = bind_group_layouts
+            .iter()
+            .map(|layout| Some(*layout))
+            .collect::<Vec<_>>();
+        let pipeline_layout =
+            state
+                .wgpu_ctx
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("{label} Layout")),
+                    bind_group_layouts: &bind_group_layouts,
+                    immediate_size: 0,
+                });
+
+        state.pipeline_cache.get_or_create_compute(
+            &state.wgpu_ctx.device,
+            module,
+            &pipeline_layout,
+            &ComputePipelineKey::new(shader_hash).with_compilation_options(&compilation_options),
+            &compilation_options,
+            label,
+        )
     }
 
     /// Returns `true` if the renderer is in headless (offscreen) mode.

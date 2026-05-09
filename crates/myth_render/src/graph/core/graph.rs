@@ -1274,12 +1274,7 @@ mod tests {
 
         let backbuffer = graph.register_texture("Backbuffer", dummy_desc(), true);
 
-        let mut ctx = GraphBuilderContext::new(
-            &mut graph,
-            &pipeline_cache,
-            &frame_config,
-            0,
-        );
+        let mut ctx = GraphBuilderContext::new(&mut graph, &pipeline_cache, &frame_config, 0);
 
         let scene_color = ctx.with_group("Scene", |ctx| {
             let opaque_out = ctx.graph.add_pass("Opaque", |builder| {
@@ -1325,12 +1320,7 @@ mod tests {
 
         let backbuffer = graph.register_texture("Backbuffer", dummy_desc(), true);
 
-        let mut ctx = GraphBuilderContext::new(
-            &mut graph,
-            &pipeline_cache,
-            &frame_config,
-            0,
-        );
+        let mut ctx = GraphBuilderContext::new(&mut graph, &pipeline_cache, &frame_config, 0);
 
         let bloom_out = ctx.with_group("Bloom_System", |ctx| {
             let extract_out = ctx.graph.add_pass("Bloom_Extract", |builder| {

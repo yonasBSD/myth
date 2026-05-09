@@ -479,7 +479,11 @@ fn create_default_light_metadata(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     }));
-    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&LightBufferMetadata::default()));
+    queue.write_buffer(
+        &buffer,
+        0,
+        bytemuck::bytes_of(&LightBufferMetadata::default()),
+    );
     buffer
 }
 

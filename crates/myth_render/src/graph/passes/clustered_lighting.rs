@@ -66,6 +66,7 @@ pub struct ClusteredLightingFeature {
     frame_params: ClusteredLightingParams,
 }
 
+#[derive(Clone, Copy)]
 pub struct ClusteredLightingInputs {
     pub enabled: bool,
     pub cpu_light_metadata_buffer: BufferNodeId,
@@ -354,7 +355,7 @@ impl ClusteredLightingFeature {
         drop(render_uniforms);
 
         let far =
-            resolve_cluster_far_depth(near, camera_far, estimate_cluster_scene_max_depth(ctx));
+            resolve_cluster_far_depth(near, camera_far, estimate_cluster_light_max_depth(ctx));
 
         let cluster_x = width.div_ceil(self.config.tile_size_x.max(1));
         let cluster_y = height.div_ceil(self.config.tile_size_y.max(1));
@@ -447,8 +448,9 @@ impl ClusteredLightingFeature {
         });
 
         let cpu_local_light_count = ctx.scene_local_light_count();
-        let cpu_light_capacity = light_capacity_from_desc(ctx.buffer_desc(inputs.cpu_light_data_buffer))
-            .max(cpu_local_light_count);
+        let cpu_light_capacity =
+            light_capacity_from_desc(ctx.buffer_desc(inputs.cpu_light_data_buffer))
+                .max(cpu_local_light_count);
         let final_lights = match inputs.injected_gpu_lights {
             Some(gpu_lights) if cpu_local_light_count == 0 => ClusteredLightingOutputs {
                 final_light_metadata_buffer: gpu_lights.light_metadata,
@@ -489,7 +491,8 @@ impl ClusteredLightingFeature {
             return final_lights;
         }
 
-        let light_slots = light_capacity_from_desc(ctx.buffer_desc(final_lights.final_light_data_buffer));
+        let light_slots =
+            light_capacity_from_desc(ctx.buffer_desc(final_lights.final_light_data_buffer));
 
         let dispatch_args_layout = self
             .dispatch_args_layout
@@ -515,26 +518,32 @@ impl ClusteredLightingFeature {
             .pipeline_cache
             .get_compute_pipeline(self.cull_pipeline.expect("Clustered cull pipeline missing"));
 
-        let dispatch_args_buffer = final_lights.final_indirect_count_buffer.map(|count_buffer| {
-            ctx.graph.add_pass("Cluster_Light_Dispatch_Args", |builder| {
-                let count_buffer = builder.read_buffer(count_buffer);
-                let dispatch_args =
-                    builder.create_buffer("Cluster_Light_Dispatch_Args", self.dispatch_args_desc());
+        let dispatch_args_buffer = final_lights
+            .final_indirect_count_buffer
+            .map(|count_buffer| {
+                ctx.graph
+                    .add_pass("Cluster_Light_Dispatch_Args", |builder| {
+                        let count_buffer = builder.read_buffer(count_buffer);
+                        let dispatch_args = builder.create_buffer(
+                            "Cluster_Light_Dispatch_Args",
+                            self.dispatch_args_desc(),
+                        );
 
-                let node = ClusterDispatchArgsPassNode {
-                    count_buffer,
-                    dispatch_args,
-                    dispatch_args_layout,
-                    dispatch_args_pipeline,
-                    bind_group: None,
-                };
+                        let node = ClusterDispatchArgsPassNode {
+                            count_buffer,
+                            dispatch_args,
+                            dispatch_args_layout,
+                            dispatch_args_pipeline,
+                            bind_group: None,
+                        };
 
-                (node, dispatch_args)
-            })
-        });
+                        (node, dispatch_args)
+                    })
+            });
 
         let light_view_positions = ctx.graph.add_pass("Cluster_Light_View_Pass", |builder| {
-            let light_metadata_buffer = builder.read_buffer(final_lights.final_light_metadata_buffer);
+            let light_metadata_buffer =
+                builder.read_buffer(final_lights.final_light_metadata_buffer);
             let light_data_buffer = builder.read_buffer(final_lights.final_light_data_buffer);
             if let Some(dispatch_args) = dispatch_args_buffer {
                 builder.read_buffer(dispatch_args);
@@ -560,7 +569,8 @@ impl ClusteredLightingFeature {
 
         ctx.graph.add_pass("Cluster_Cull_Pass", |builder| {
             let params_buffer = builder.read_buffer(imported_params);
-            let light_metadata_buffer = builder.read_buffer(final_lights.final_light_metadata_buffer);
+            let light_metadata_buffer =
+                builder.read_buffer(final_lights.final_light_metadata_buffer);
             let light_view_positions = builder.read_buffer(light_view_positions);
             let cluster_records =
                 builder.create_buffer("Cluster_Records", self.cluster_record_desc());
@@ -600,23 +610,9 @@ impl ClusteredLightingFeature {
     }
 }
 
-fn estimate_cluster_scene_max_depth(ctx: &ExtractContext) -> Option<f32> {
+fn estimate_cluster_light_max_depth(ctx: &ExtractContext) -> Option<f32> {
     let view_matrix = ctx.render_camera.view_matrix;
     let mut max_depth = 0.0_f32;
-
-    for item in &ctx.extracted_scene.render_items {
-        let aabb = item.world_aabb;
-        if !aabb.is_finite() {
-            continue;
-        }
-
-        let view_center = view_matrix * aabb.center().extend(1.0);
-        let view_radius = aabb.size().length() * 0.5;
-        let far_depth = -view_center.z + view_radius;
-        if far_depth.is_finite() {
-            max_depth = max_depth.max(far_depth);
-        }
-    }
 
     for light in &ctx.extracted_scene.lights {
         let range = match &light.kind {
@@ -642,14 +638,15 @@ fn estimate_cluster_scene_max_depth(ctx: &ExtractContext) -> Option<f32> {
 fn resolve_cluster_far_depth(
     near: f32,
     camera_far: f32,
-    estimated_scene_depth: Option<f32>,
+    estimated_light_depth: Option<f32>,
 ) -> f32 {
     if camera_far.is_finite() {
         return camera_far.max(near + 0.001);
     }
 
-    let fallback_depth = estimated_scene_depth.unwrap_or(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK);
-    (fallback_depth * 1.1).max(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK)
+    estimated_light_depth
+        .unwrap_or(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK)
+        .max(near + DEFAULT_CLUSTER_FAR_DEPTH_FALLBACK)
 }
 
 struct ClusterParamsImportPassNode;
@@ -684,7 +681,11 @@ impl<'a> PassNode<'a> for ClusterDispatchArgsPassNode<'a> {
             timestamp_writes: None,
         });
         pass.set_pipeline(self.dispatch_args_pipeline);
-        pass.set_bind_group(0, self.bind_group.expect("Cluster dispatch args BG missing"), &[]);
+        pass.set_bind_group(
+            0,
+            self.bind_group.expect("Cluster dispatch args BG missing"),
+            &[],
+        );
         pass.dispatch_workgroups(1, 1, 1);
     }
 }
