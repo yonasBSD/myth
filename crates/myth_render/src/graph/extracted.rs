@@ -21,7 +21,7 @@ use myth_assets::{AssetServer, GeometryHandle, MaterialHandle};
 use myth_resources::BoundingBox;
 use myth_resources::buffer::CpuBuffer;
 use myth_resources::shader_defines::ShaderDefines;
-use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage};
+use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage, LightBufferMetadata};
 use myth_scene::background::BackgroundMode;
 use myth_scene::camera::RenderCamera;
 use myth_scene::environment::Environment;
@@ -135,14 +135,21 @@ pub struct ExtractedScene {
     pub envvironment: Environment,
     pub has_transmission: bool,
     pub lights: Vec<ExtractedLight>,
-    /// GPU-visible punctual/directional light payload for the current frame.
-    pub light_storage_buffer: CpuBuffer<Vec<GpuLightStorage>>,
+    /// Number of local point / spot lights occupying the head segment of `lights`.
+    local_light_count: usize,
+    /// GPU-visible directional-light payload for the current frame.
+    pub directional_light_storage_buffer: CpuBuffer<Vec<GpuLightStorage>>,
+    /// GPU-visible local-light payload for the current frame.
+    pub local_light_storage_buffer: CpuBuffer<Vec<GpuLightStorage>>,
+    /// GPU-visible local-light metadata used by RDG scene-light bindings.
+    pub local_light_metadata_buffer: CpuBuffer<LightBufferMetadata>,
     /// GPU-visible environment uniforms for the current frame.
     pub environment_uniforms_buffer: CpuBuffer<EnvironmentUniforms>,
 
     collected_meshes: Vec<CollectedMesh>,
     collected_skeleton_keys: HashSet<SkeletonKey>,
-    light_upload_cache: Vec<GpuLightStorage>,
+    local_light_upload_cache: Vec<GpuLightStorage>,
+    directional_light_upload_cache: Vec<GpuLightStorage>,
 }
 
 struct CollectedMesh {
@@ -170,10 +177,21 @@ impl ExtractedScene {
             envvironment: Environment::default(),
             has_transmission: false,
             lights: Vec::new(),
-            light_storage_buffer: CpuBuffer::new(
+            local_light_count: 0,
+            directional_light_storage_buffer: CpuBuffer::new(
                 vec![GpuLightStorage::default()],
                 wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                Some("ExtractedSceneLightStorageBuffer"),
+                Some("ExtractedSceneDirectionalLightStorageBuffer"),
+            ),
+            local_light_storage_buffer: CpuBuffer::new(
+                vec![GpuLightStorage::default()],
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneLocalLightStorageBuffer"),
+            ),
+            local_light_metadata_buffer: CpuBuffer::new(
+                LightBufferMetadata::default(),
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneLocalLightMetadata"),
             ),
             environment_uniforms_buffer: CpuBuffer::new(
                 EnvironmentUniforms::default(),
@@ -183,7 +201,8 @@ impl ExtractedScene {
 
             collected_meshes: Vec::new(),
             collected_skeleton_keys: HashSet::default(),
-            light_upload_cache: Vec::with_capacity(16),
+            local_light_upload_cache: Vec::with_capacity(16),
+            directional_light_upload_cache: Vec::with_capacity(4),
         }
     }
 
@@ -199,10 +218,21 @@ impl ExtractedScene {
             envvironment: Environment::default(),
             has_transmission: false,
             lights: Vec::with_capacity(16),
-            light_storage_buffer: CpuBuffer::new(
+            local_light_count: 0,
+            directional_light_storage_buffer: CpuBuffer::new(
+                vec![GpuLightStorage::default(); 4],
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneDirectionalLightStorageBuffer"),
+            ),
+            local_light_storage_buffer: CpuBuffer::new(
                 vec![GpuLightStorage::default(); 16],
                 wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                Some("ExtractedSceneLightStorageBuffer"),
+                Some("ExtractedSceneLocalLightStorageBuffer"),
+            ),
+            local_light_metadata_buffer: CpuBuffer::new(
+                LightBufferMetadata::default(),
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                Some("ExtractedSceneLocalLightMetadata"),
             ),
             environment_uniforms_buffer: CpuBuffer::new(
                 EnvironmentUniforms::default(),
@@ -212,7 +242,8 @@ impl ExtractedScene {
 
             collected_meshes: Vec::with_capacity(item_capacity),
             collected_skeleton_keys: HashSet::default(),
-            light_upload_cache: Vec::with_capacity(16),
+            local_light_upload_cache: Vec::with_capacity(16),
+            directional_light_upload_cache: Vec::with_capacity(4),
         }
     }
 
@@ -222,6 +253,7 @@ impl ExtractedScene {
         self.scene_defines.clear();
         self.scene_id = 0;
         self.lights.clear();
+        self.local_light_count = 0;
 
         self.collected_meshes.clear();
         self.collected_skeleton_keys.clear();
@@ -229,10 +261,22 @@ impl ExtractedScene {
 
     #[must_use]
     pub fn local_light_count(&self) -> usize {
-        self.lights
-            .iter()
-            .filter(|light| !light.is_directional())
-            .count()
+        self.local_light_count
+    }
+
+    #[must_use]
+    pub fn directional_light_count(&self) -> usize {
+        self.lights.len().saturating_sub(self.local_light_count)
+    }
+
+    #[must_use]
+    pub fn local_lights(&self) -> &[ExtractedLight] {
+        &self.lights[..self.local_light_count]
+    }
+
+    #[must_use]
+    pub fn directional_lights(&self) -> &[ExtractedLight] {
+        &self.lights[self.local_light_count..]
     }
 
     /// Reuse current instance memory, extract data from Scene.
@@ -293,7 +337,9 @@ impl ExtractedScene {
 
     /// Refresh the extracted scene's GPU-facing light and environment buffers.
     pub fn prepare_gpu_scene_inputs(&mut self, env_map_max_mip_level: f32) {
-        self.sync_light_storage_buffer();
+        self.sync_directional_light_storage_buffer();
+        self.sync_local_light_storage_buffer();
+        self.sync_local_light_metadata_buffer();
         self.sync_environment_uniforms(env_map_max_mip_level);
     }
 
@@ -327,7 +373,7 @@ impl ExtractedScene {
 
         let visible_light_count = visible_lights.len();
         let camera_position = camera.position.to_array().into();
-        let (ordered_lights, truncated_count) =
+        let (ordered_lights, local_light_count, truncated_count) =
             partition_sort_and_truncate_lights(visible_lights, camera_position, max_light_count);
         if truncated_count > 0 {
             log::warn!(
@@ -337,15 +383,16 @@ impl ExtractedScene {
             );
         }
 
+        self.local_light_count = local_light_count;
         self.lights = ordered_lights;
     }
 
-    fn sync_light_storage_buffer(&mut self) {
-        let mut upload_cache = std::mem::take(&mut self.light_upload_cache);
+    fn sync_directional_light_storage_buffer(&mut self) {
+        let mut upload_cache = std::mem::take(&mut self.directional_light_upload_cache);
         upload_cache.clear();
-        upload_cache.reserve(self.lights.len().max(1));
+        upload_cache.reserve(self.directional_light_count().max(1));
 
-        for light in &self.lights {
+        for light in self.directional_lights() {
             upload_cache.push(extracted_light_to_gpu(light));
         }
 
@@ -353,19 +400,55 @@ impl ExtractedScene {
             upload_cache.push(GpuLightStorage::default());
         }
 
-        let needs_update = self.light_storage_buffer.read().as_slice() != upload_cache.as_slice();
+        let needs_update = self.directional_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
         if needs_update {
-            self.light_storage_buffer.write().clone_from(&upload_cache);
+            self.directional_light_storage_buffer
+                .write()
+                .clone_from(&upload_cache);
         }
 
-        self.light_upload_cache = upload_cache;
+        self.directional_light_upload_cache = upload_cache;
+    }
+
+    fn sync_local_light_storage_buffer(&mut self) {
+        let mut upload_cache = std::mem::take(&mut self.local_light_upload_cache);
+        upload_cache.clear();
+        upload_cache.reserve(self.local_light_count.max(1));
+
+        for light in self.local_lights() {
+            upload_cache.push(extracted_light_to_gpu(light));
+        }
+
+        if upload_cache.is_empty() {
+            upload_cache.push(GpuLightStorage::default());
+        }
+
+        let needs_update = self.local_light_storage_buffer.read().as_slice() != upload_cache.as_slice();
+        if needs_update {
+            self.local_light_storage_buffer.write().clone_from(&upload_cache);
+        }
+
+        self.local_light_upload_cache = upload_cache;
+    }
+
+    fn sync_local_light_metadata_buffer(&mut self) {
+        let new_metadata = LightBufferMetadata {
+            total_light_count: self.local_light_count as u32,
+            active_local_light_count: self.local_light_count as u32,
+            ..Default::default()
+        };
+
+        let needs_update = *self.local_light_metadata_buffer.read() != new_metadata;
+        if needs_update {
+            *self.local_light_metadata_buffer.write() = new_metadata;
+        }
     }
 
     fn sync_environment_uniforms(&mut self, env_map_max_mip_level: f32) {
         let env = &self.envvironment;
         let new_uniforms = EnvironmentUniforms {
             ambient_light: env.ambient,
-            num_lights: self.lights.len() as u32,
+            directional_light_count: self.directional_light_count() as u32,
             env_map_intensity: env.intensity,
             env_map_rotation: env.rotation,
             env_map_max_mip_level,
@@ -616,7 +699,7 @@ fn partition_sort_and_truncate_lights(
     lights: Vec<ExtractedLight>,
     camera_position: Vec3,
     max_light_count: usize,
-) -> (Vec<ExtractedLight>, usize) {
+) -> (Vec<ExtractedLight>, usize, usize) {
     let mut local_lights = Vec::with_capacity(lights.len());
     let mut directional_lights = Vec::new();
     for light in lights {
@@ -646,9 +729,10 @@ fn partition_sort_and_truncate_lights(
         }
     }
 
+    let retained_local_light_count = local_lights.len();
     local_lights.extend(directional_lights);
     let truncated_count = visible_light_count.saturating_sub(local_lights.len());
-    (local_lights, truncated_count)
+    (local_lights, retained_local_light_count, truncated_count)
 }
 
 fn extracted_light_radius(light: &ExtractedLight) -> f32 {
@@ -729,9 +813,10 @@ mod tests {
             spot_light(3, Vec3::new(0.0, 0.0, -2.0), 2.0, 5.0),
         ];
 
-        let (ordered, truncated_count) =
+        let (ordered, local_light_count, truncated_count) =
             partition_sort_and_truncate_lights(lights, Vec3::ZERO, usize::MAX);
 
+        assert_eq!(local_light_count, 2);
         assert_eq!(truncated_count, 0);
         assert_eq!(
             ordered.iter().map(|light| light.id).collect::<Vec<_>>(),
@@ -748,8 +833,10 @@ mod tests {
             directional_light(4),
         ];
 
-        let (ordered, truncated_count) = partition_sort_and_truncate_lights(lights, Vec3::ZERO, 2);
+        let (ordered, local_light_count, truncated_count) =
+            partition_sort_and_truncate_lights(lights, Vec3::ZERO, 2);
 
+        assert_eq!(local_light_count, 1);
         assert_eq!(truncated_count, 2);
         assert_eq!(
             ordered.iter().map(|light| light.id).collect::<Vec<_>>(),

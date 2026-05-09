@@ -229,6 +229,10 @@ impl PrepassFeature {
                 &gpu_geometry.layout_info.vertex_input_code,
             );
             options.inject_code("binding_code", binding_code);
+            options.inject_code(
+                "scene_lighting_structs",
+                myth_resources::uniforms::scene_lighting_structs_wgsl(),
+            );
 
             let (shader_module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,

@@ -1,32 +1,32 @@
-// Assigns visible punctual lights to each cluster using per-cluster frustum
-// tests and a compact global light-index allocator.
+// Assigns visible local lights to each cluster using only precomputed
+// view-space bounding spheres and a compact global light-index allocator.
 
 {{ binding_code }}
+{{ scene_lighting_structs }}
 {{ clustered_lighting_structs }}
 
 @group(1) @binding(0) var<uniform> u_clustered_lighting: ClusteredLightingParams;
 @group(1) @binding(1) var<storage, read_write> st_cluster_records: array<ClusterRecord>;
 @group(1) @binding(2) var<storage, read_write> st_cluster_light_indices: array<u32>;
-@group(1) @binding(3) var<storage, read_write> st_light_index_allocator: array<atomic<u32>, 4>;
-@group(1) @binding(4) var<storage, read> st_light_view_positions: array<vec4<f32>>;
+@group(1) @binding(3) var<storage, read_write> st_light_index_allocator: array<atomic<u32>, 1>;
+@group(1) @binding(4) var<uniform> u_local_light_buffer_metadata: LightBufferMetadata;
+@group(1) @binding(5) var<storage, read> st_light_view_positions: array<vec4<f32>>;
 
 const CLUSTER_CULL_WG_SIZE: u32 = 64u;
-const MAX_LOCAL_LIGHTS: u32 = 512u;
+const MAX_LOCAL_LIGHTS: u32 = {{ clustered_max_local_lights }};
 const ALLOCATOR_OFFSET_SLOT: u32 = 0u;
-const ALLOCATOR_OVERFLOW_SLOT: u32 = 1u;
-const ATTENUATION_QUICK_REJECT_THRESHOLD: f32 = 0.005;
 
 var<workgroup> wg_plane_normals: array<vec4<f32>, 4>;
+var<workgroup> wg_corner_rays: array<vec3<f32>, 4>;
+var<workgroup> wg_min_pixel: vec2<f32>;
+var<workgroup> wg_max_pixel: vec2<f32>;
+var<workgroup> wg_center_dir: vec3<f32>;
 var<workgroup> wg_slice_near: f32;
 var<workgroup> wg_slice_far: f32;
-var<workgroup> wg_cluster_center: vec3<f32>;
-var<workgroup> wg_cluster_radius: f32;
 var<workgroup> wg_cluster_index: u32;
 var<workgroup> wg_reserved_offset: u32;
 var<workgroup> wg_reserved_count: u32;
-var<workgroup> wg_total_match_count: u32;
 var<workgroup> wg_local_match_count: atomic<u32>;
-var<workgroup> wg_local_write_count: atomic<u32>;
 var<workgroup> wg_local_light_indices: array<u32, MAX_LOCAL_LIGHTS>;
 
 fn screen_to_ndc(pixel: vec2<f32>) -> vec2<f32> {
@@ -58,41 +58,6 @@ fn oriented_plane_normal(edge_a: vec3<f32>, edge_b: vec3<f32>, inside_dir: vec3<
         normal = -normal;
     }
     return normal;
-}
-
-fn ray_at_depth(ray: vec3<f32>, view_depth: f32) -> vec3<f32> {
-    let depth_scale = view_depth / max(-ray.z, 1e-4);
-    return ray * depth_scale;
-}
-
-fn pow2(x: f32) -> f32 {
-    return x * x;
-}
-
-fn pow4(x: f32) -> f32 {
-    let x2 = x * x;
-    return x2 * x2;
-}
-
-fn cluster_distance_attenuation(light_distance: f32, cutoff_distance: f32, decay_exponent: f32) -> f32 {
-    var distance_falloff = 1.0 / max(pow(light_distance, decay_exponent), 0.01);
-    if (cutoff_distance > 0.0) {
-        distance_falloff *= pow2(saturate(1.0 - pow4(light_distance / cutoff_distance)));
-    }
-    return distance_falloff;
-}
-
-fn passes_quick_reject(
-    light: Struct_lights,
-    light_sphere_center: vec3<f32>,
-    cluster_center: vec3<f32>,
-    cluster_radius: f32,
-) -> bool {
-    // Evaluate against the nearest possible point on the cluster volume instead
-    // of its center to avoid hard light discontinuities at cluster borders.
-    let shortest_distance = max(0.0, distance(light_sphere_center, cluster_center) - cluster_radius);
-    let attenuation = cluster_distance_attenuation(shortest_distance, light.range, light.decay);
-    return attenuation >= ATTENUATION_QUICK_REJECT_THRESHOLD;
 }
 
 fn sphere_intersects_cluster_cached(
@@ -152,48 +117,80 @@ fn main(
             min(f32(u_clustered_lighting.screen_dimensions.y), f32(workgroup_id.y + 1u) * tile_size.y),
         );
 
-        let top_left = view_ray(min_pixel);
-        let top_right = view_ray(vec2<f32>(max_pixel.x, min_pixel.y));
-        let bottom_left = view_ray(vec2<f32>(min_pixel.x, max_pixel.y));
-        let bottom_right = view_ray(max_pixel);
-        let center_dir = normalize(top_left + top_right + bottom_left + bottom_right);
-        let center_pixel = (min_pixel + max_pixel) * 0.5;
-        let center_ray = view_ray(center_pixel);
-
-        wg_plane_normals[0] = vec4<f32>(oriented_plane_normal(bottom_left, top_left, center_dir), 0.0);
-        wg_plane_normals[1] = vec4<f32>(oriented_plane_normal(top_right, bottom_right, center_dir), 0.0);
-        wg_plane_normals[2] = vec4<f32>(oriented_plane_normal(top_left, top_right, center_dir), 0.0);
-        wg_plane_normals[3] = vec4<f32>(oriented_plane_normal(bottom_right, bottom_left, center_dir), 0.0);
+        wg_min_pixel = min_pixel;
+        wg_max_pixel = max_pixel;
         wg_slice_near = slice_depth(workgroup_id.z);
         wg_slice_far = slice_depth(workgroup_id.z + 1u);
-        let cluster_depth = (wg_slice_near + wg_slice_far) * 0.5;
-        let cluster_center = ray_at_depth(center_ray, cluster_depth);
-        let top_left_near = ray_at_depth(top_left, wg_slice_near);
-        let top_right_near = ray_at_depth(top_right, wg_slice_near);
-        let bottom_left_near = ray_at_depth(bottom_left, wg_slice_near);
-        let bottom_right_near = ray_at_depth(bottom_right, wg_slice_near);
-        let top_left_far = ray_at_depth(top_left, wg_slice_far);
-        let top_right_far = ray_at_depth(top_right, wg_slice_far);
-        let bottom_left_far = ray_at_depth(bottom_left, wg_slice_far);
-        let bottom_right_far = ray_at_depth(bottom_right, wg_slice_far);
-
-        var cluster_radius = distance(cluster_center, top_left_near);
-        cluster_radius = max(cluster_radius, distance(cluster_center, top_right_near));
-        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_left_near));
-        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_right_near));
-        cluster_radius = max(cluster_radius, distance(cluster_center, top_left_far));
-        cluster_radius = max(cluster_radius, distance(cluster_center, top_right_far));
-        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_left_far));
-        cluster_radius = max(cluster_radius, distance(cluster_center, bottom_right_far));
-
-        wg_cluster_center = cluster_center;
-        wg_cluster_radius = cluster_radius;
         wg_cluster_index = cluster_index;
         wg_reserved_offset = 0u;
         wg_reserved_count = 0u;
-        wg_total_match_count = 0u;
         atomicStore(&wg_local_match_count, 0u);
-        atomicStore(&wg_local_write_count, 0u);
+    }
+
+    workgroupBarrier();
+
+    if local_id.x < 4u {
+        var corner_pixel = wg_min_pixel;
+        switch local_id.x {
+            case 0u: {
+                corner_pixel = wg_min_pixel;
+            }
+            case 1u: {
+                corner_pixel = vec2<f32>(wg_max_pixel.x, wg_min_pixel.y);
+            }
+            case 2u: {
+                corner_pixel = vec2<f32>(wg_min_pixel.x, wg_max_pixel.y);
+            }
+            default: {
+                corner_pixel = wg_max_pixel;
+            }
+        }
+        wg_corner_rays[local_id.x] = view_ray(corner_pixel);
+    }
+
+    workgroupBarrier();
+
+    if local_id.x == 0u {
+        wg_center_dir = normalize(
+            wg_corner_rays[0] + wg_corner_rays[1] + wg_corner_rays[2] + wg_corner_rays[3]
+        );
+    }
+
+    workgroupBarrier();
+
+    if local_id.x < 4u {
+        var plane_normal = wg_center_dir;
+        switch local_id.x {
+            case 0u: {
+                plane_normal = oriented_plane_normal(
+                    wg_corner_rays[2],
+                    wg_corner_rays[0],
+                    wg_center_dir,
+                );
+            }
+            case 1u: {
+                plane_normal = oriented_plane_normal(
+                    wg_corner_rays[1],
+                    wg_corner_rays[3],
+                    wg_center_dir,
+                );
+            }
+            case 2u: {
+                plane_normal = oriented_plane_normal(
+                    wg_corner_rays[0],
+                    wg_corner_rays[1],
+                    wg_center_dir,
+                );
+            }
+            default: {
+                plane_normal = oriented_plane_normal(
+                    wg_corner_rays[3],
+                    wg_corner_rays[2],
+                    wg_center_dir,
+                );
+            }
+        }
+        wg_plane_normals[local_id.x] = vec4<f32>(plane_normal, 0.0);
     }
 
     workgroupBarrier();
@@ -205,18 +202,14 @@ fn main(
     let local_plane_1 = wg_plane_normals[1].xyz;
     let local_plane_2 = wg_plane_normals[2].xyz;
     let local_plane_3 = wg_plane_normals[3].xyz;
-    let local_cluster_center = wg_cluster_center;
-    let local_cluster_radius = wg_cluster_radius;
-    let local_light_count = min(u_clustered_lighting.budget.w, u_environment.num_lights);
+    let local_light_count = min(
+        u_local_light_buffer_metadata.total_light_count,
+        arrayLength(&st_light_view_positions),
+    );
 
     for (var light_index = local_id.x; light_index < local_light_count; light_index += CLUSTER_CULL_WG_SIZE) {
         let light_view = st_light_view_positions[light_index];
         if (light_view.w < 0.0) {
-            continue;
-        }
-
-        let light = st_lights[light_index];
-        if (light.light_type == 0u || light.range <= 0.0) {
             continue;
         }
 
@@ -229,15 +222,6 @@ fn main(
             local_plane_1,
             local_plane_2,
             local_plane_3,
-        )) {
-            continue;
-        }
-
-        if (!passes_quick_reject(
-            light,
-            light_view.xyz,
-            local_cluster_center,
-            local_cluster_radius,
         )) {
             continue;
         }
@@ -251,20 +235,12 @@ fn main(
     workgroupBarrier();
 
     if local_id.x == 0u {
-        let matched_count = atomicLoad(&wg_local_match_count);
-        wg_total_match_count = matched_count;
+        let matched_count = min(atomicLoad(&wg_local_match_count), MAX_LOCAL_LIGHTS);
         let max_light_indices = max(u_clustered_lighting.budget.y, 1u);
         let requested_offset = atomicAdd(&st_light_index_allocator[ALLOCATOR_OFFSET_SLOT], matched_count);
         let clamped_offset = min(requested_offset, max_light_indices);
         let available = max_light_indices - clamped_offset;
         let reserved_count = min(matched_count, available);
-
-        if matched_count > reserved_count {
-            atomicAdd(
-                &st_light_index_allocator[ALLOCATOR_OVERFLOW_SLOT],
-                matched_count - reserved_count,
-            );
-        }
 
         wg_reserved_offset = clamped_offset;
         wg_reserved_count = reserved_count;
@@ -277,53 +253,7 @@ fn main(
         return;
     }
 
-    if wg_total_match_count <= MAX_LOCAL_LIGHTS {
-        for (var cached_index = local_id.x; cached_index < wg_reserved_count; cached_index += CLUSTER_CULL_WG_SIZE) {
-            st_cluster_light_indices[wg_reserved_offset + cached_index] = wg_local_light_indices[cached_index];
-        }
-        return;
-    }
-
-    for (var light_index = local_id.x; light_index < local_light_count; light_index += CLUSTER_CULL_WG_SIZE) {
-        if atomicLoad(&wg_local_write_count) >= wg_reserved_count {
-            break;
-        }
-
-        let light_view = st_light_view_positions[light_index];
-        if (light_view.w < 0.0) {
-            continue;
-        }
-
-        let light = st_lights[light_index];
-        if (light.light_type == 0u || light.range <= 0.0) {
-            continue;
-        }
-
-        if (!sphere_intersects_cluster_cached(
-            light_view.xyz,
-            light_view.w,
-            local_slice_near,
-            local_slice_far,
-            local_plane_0,
-            local_plane_1,
-            local_plane_2,
-            local_plane_3,
-        )) {
-            continue;
-        }
-
-        if (!passes_quick_reject(
-            light,
-            light_view.xyz,
-            local_cluster_center,
-            local_cluster_radius,
-        )) {
-            continue;
-        }
-
-        let write_index = atomicAdd(&wg_local_write_count, 1u);
-        if write_index < wg_reserved_count {
-            st_cluster_light_indices[wg_reserved_offset + write_index] = light_index;
-        }
+    for (var cached_index = local_id.x; cached_index < wg_reserved_count; cached_index += CLUSTER_CULL_WG_SIZE) {
+        st_cluster_light_indices[wg_reserved_offset + cached_index] = wg_local_light_indices[cached_index];
     }
 }

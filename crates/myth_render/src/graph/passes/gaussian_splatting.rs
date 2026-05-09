@@ -560,6 +560,10 @@ impl GaussianSplattingFeature {
         {
             let mut shader_options = ShaderCompilationOptions::default();
             shader_options.inject_code("binding_code", &gpu_world.binding_wgsl);
+            shader_options.inject_code(
+                "scene_lighting_structs",
+                myth_resources::uniforms::scene_lighting_structs_wgsl(),
+            );
             let (module, _) = ctx.shader_manager.get_or_compile(
                 device,
                 ShaderSource::File("entry/utility/3dgs/gaussian_preprocess"),

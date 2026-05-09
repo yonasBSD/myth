@@ -5,6 +5,7 @@
 
 {{ vertex_input_code }}
 {{ binding_code }}
+{{ scene_lighting_structs }}
 {$ include 'modules/geometry/morphing' $}
 {$ include 'modules/geometry/skinning' $}
 {$ include 'core/alpha_test' $}

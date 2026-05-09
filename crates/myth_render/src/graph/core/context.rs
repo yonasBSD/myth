@@ -81,6 +81,8 @@ pub struct PrepareContext<'a> {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClusteredScreenBindings {
+    pub light_metadata: Option<BufferNodeId>,
+    pub lights: Option<BufferNodeId>,
     pub params: Option<BufferNodeId>,
     pub records: Option<BufferNodeId>,
     pub light_indices: Option<BufferNodeId>,
@@ -799,13 +801,36 @@ pub fn build_screen_bind_group<'a>(
         &sys.screen_layout
     };
 
+    let (light_metadata_id, light_metadata_binding) = match clustered.light_metadata {
+        Some(id) => (
+            views.get_physical_buffer_uid(id),
+            wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+        ),
+        None => (
+            sys.light_metadata.id(),
+            sys.light_metadata.as_entire_binding(),
+        ),
+    };
+    let (light_storage_id, light_storage_binding) = match clustered.lights {
+        Some(id) => (
+            views.get_physical_buffer_uid(id),
+            wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+        ),
+        None => (
+            sys.light_storage.id(),
+            sys.light_storage.as_entire_binding(),
+        ),
+    };
+
     let base_key = BindGroupKey::new(layout.id())
         .with_resource(transmission_view.id())
         .with_resource(sys.screen_sampler.id())
         .with_resource(ssao_view.id())
         .with_resource(shadow_view.id())
         .with_resource(shadow_cube_view.id())
-        .with_resource(sys.shadow_compare_sampler.id());
+        .with_resource(sys.shadow_compare_sampler.id())
+        .with_resource(light_metadata_id)
+        .with_resource(light_storage_id);
 
     if !use_clustered_layout {
         return cache.get_or_create_bg(base_key, || {
@@ -836,6 +861,14 @@ pub fn build_screen_bind_group<'a>(
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: wgpu::BindingResource::Sampler(&sys.shadow_compare_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: light_metadata_binding,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: light_storage_binding,
                     },
                 ],
             })
@@ -909,14 +942,22 @@ pub fn build_screen_bind_group<'a>(
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: cluster_params_binding,
+                    resource: light_metadata_binding,
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: cluster_records_binding,
+                    resource: light_storage_binding,
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
+                    resource: cluster_params_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: cluster_records_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
                     resource: cluster_light_indices_binding,
                 },
             ],

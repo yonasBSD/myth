@@ -430,7 +430,38 @@ fn render(&mut self, engine: &mut Engine, _window: &dyn Window) {
 }
 ```
 
-See examples/custom_post_fx.rs and examples/procedural_sky.rs for complete, current examples.
+For RDG-owned scene lighting, use the dedicated GPU local-light injection hook. It runs before clustered lighting and forward shading consume the frame's final local-light buffers:
+
+```rust
+use myth::renderer::graph::composer::GpuLightBuffers;
+
+composer
+    .inject_gpu_local_lights(|ctx| {
+        if gpu_swarm_disabled {
+            return None;
+        }
+
+        Some(ctx.graph.add_pass("GpuSwarmLights", |builder| {
+            let gpu_light_metadata = builder.create_buffer("Gpu_Light_Metadata", /* ... */);
+            let gpu_light_storage = builder.create_buffer("Gpu_Light_Storage", /* ... */);
+            let gpu_light_count = builder.create_buffer("Gpu_Light_Count", /* ... */);
+
+            (
+                GpuSwarmLightPassNode { /* ... */ },
+                GpuLightBuffers {
+                    light_metadata: gpu_light_metadata,
+                    light_storage: gpu_light_storage,
+                    indirect_count_buffer: Some(gpu_light_count),
+                },
+            )
+        }))
+    })
+    .render();
+```
+
+`inject_gpu_local_lights(...)` only injects the optional GPU local-light track. CPU directional lights and their shadow data remain in the global scene bindings, while CPU point and spot lights keep flowing through the engine's extracted local-light path. The clustered-lighting feature now performs the smart routing internally: if the hook returns `None`, the renderer stays on the original CPU-only path; if CPU local lights are absent, the injected GPU lights are forwarded directly; otherwise the engine runs its built-in safe merge pass and exposes the merged buffers to both clustered lighting and forward shading. `GpuLightBuffers` contains the local-light metadata buffer, the local-light storage buffer, and an optional indirect-count buffer. When the count buffer is present, Myth can derive `dispatch_workgroups_indirect` arguments on-GPU for clustered light preprocessing.
+
+See examples/custom_post_fx.rs, examples/procedural_sky.rs, and examples/gpu_driven_particle_lights.rs for complete, current examples.
 
 ### Low-level GPU access
 

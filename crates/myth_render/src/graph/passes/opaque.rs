@@ -29,8 +29,8 @@
 use crate::HDR_TEXTURE_FORMAT;
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
-    BufferNodeId, ClusteredScreenBindings, ExecuteContext, PassNode, PrepareContext,
-    RenderTargetOps, TextureDesc, TextureNodeId, build_screen_bind_group,
+    ClusteredScreenBindings, ExecuteContext, PassNode, PrepareContext, RenderTargetOps,
+    TextureDesc, TextureNodeId, build_screen_bind_group,
 };
 use crate::graph::passes::draw::submit_draw_commands;
 
@@ -75,9 +75,7 @@ impl OpaqueFeature {
         shadow_cube_tex: Option<TextureNodeId>,
         env_map_tex: Option<TextureNodeId>,
         pmrem_tex: Option<TextureNodeId>,
-        clustered_params: Option<BufferNodeId>,
-        clustered_records: Option<BufferNodeId>,
-        clustered_light_indices: Option<BufferNodeId>,
+        scene_lighting: ClusteredScreenBindings,
     ) -> OpaqueOutputs {
         let fc = ctx.frame_config;
         let is_msaa = fc.msaa_samples > 1;
@@ -174,13 +172,19 @@ impl OpaqueFeature {
             if let Some(pmrem) = pmrem_tex {
                 builder.read_texture(pmrem);
             }
-            if let Some(params) = clustered_params {
+            if let Some(light_metadata) = scene_lighting.light_metadata {
+                builder.read_buffer(light_metadata);
+            }
+            if let Some(lights) = scene_lighting.lights {
+                builder.read_buffer(lights);
+            }
+            if let Some(params) = scene_lighting.params {
                 builder.read_buffer(params);
             }
-            if let Some(records) = clustered_records {
+            if let Some(records) = scene_lighting.records {
                 builder.read_buffer(records);
             }
-            if let Some(indices) = clustered_light_indices {
+            if let Some(indices) = scene_lighting.light_indices {
                 builder.read_buffer(indices);
             }
 
@@ -194,9 +198,7 @@ impl OpaqueFeature {
                 shadow_cube_tex,
                 specular_tex,
                 specular_resolved,
-                clustered_params,
-                clustered_records,
-                clustered_light_indices,
+                scene_lighting,
             );
 
             let specular_mrt = if needs_specular {
@@ -239,9 +241,7 @@ pub struct OpaquePassNode<'a> {
     pub ssao_input: Option<TextureNodeId>,
     pub shadow_input: Option<TextureNodeId>,
     pub shadow_cube_input: Option<TextureNodeId>,
-    pub clustered_params: Option<BufferNodeId>,
-    pub clustered_records: Option<BufferNodeId>,
-    pub clustered_light_indices: Option<BufferNodeId>,
+    pub scene_lighting: ClusteredScreenBindings,
 
     // ─── Internal Cache ────────────────────────────────────────────
     screen_bind_group: Option<&'a wgpu::BindGroup>,
@@ -259,9 +259,7 @@ impl OpaquePassNode<'_> {
         shadow_cube_input: Option<TextureNodeId>,
         specular_tex: TextureNodeId,
         specular_resolve_target: Option<TextureNodeId>,
-        clustered_params: Option<BufferNodeId>,
-        clustered_records: Option<BufferNodeId>,
-        clustered_light_indices: Option<BufferNodeId>,
+        scene_lighting: ClusteredScreenBindings,
     ) -> Self {
         Self {
             color_target,
@@ -273,9 +271,7 @@ impl OpaquePassNode<'_> {
             ssao_input,
             shadow_input,
             shadow_cube_input,
-            clustered_params,
-            clustered_records,
-            clustered_light_indices,
+            scene_lighting,
             screen_bind_group: None,
         }
     }
@@ -289,11 +285,7 @@ impl<'a> PassNode<'a> for OpaquePassNode<'a> {
             self.ssao_input,
             self.shadow_input,
             self.shadow_cube_input,
-            ClusteredScreenBindings {
-                params: self.clustered_params,
-                records: self.clustered_records,
-                light_indices: self.clustered_light_indices,
-            },
+            self.scene_lighting,
         );
         self.screen_bind_group = Some(bg);
     }

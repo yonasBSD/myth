@@ -46,10 +46,9 @@ fn get_light_info( light: Struct_lights, geometry: GeometricContext ) -> Inciden
 }
 
 fn evaluate_light_visibility(
-    light_idx: u32, 
+    light: Struct_lights,
     geometry: GeometricContext
 ) -> IncidentLight {
-    let light = st_lights[light_idx];
     var punctual_light = get_light_info(light, geometry);
 
     $$ if HAS_SHADOWS and RECEIVE_SHADOWS
@@ -116,8 +115,7 @@ fn evaluate_punctual_lights(
     let grid_z = max(u_clustered_lighting.grid_dimensions.x, 1u);
     let tile_size_x = max(f32(u_clustered_lighting.grid_dimensions.z), 1.0);
     let tile_size_y = max(f32(u_clustered_lighting.grid_dimensions.w), 1.0);
-        let total_light_count = u_environment.num_lights;
-        let local_light_count = min(u_clustered_lighting.budget.w, total_light_count);
+    let directional_light_count = u_environment.directional_light_count;
 
     let cluster_x = min(u32(frag_coord.x / tile_size_x), grid_x - 1u);
     let cluster_y = min(u32(frag_coord.y / tile_size_y), grid_y - 1u);
@@ -139,12 +137,8 @@ fn evaluate_punctual_lights(
     );
     let cluster = st_cluster_records[cluster_index];
 
-    for (var light_index = local_light_count; light_index < total_light_count; light_index ++ ) {
-        if (st_lights[light_index].light_type != 0u) {
-            continue;
-        }
-
-        let punctual_light = evaluate_light_visibility(light_index, geometry);
+    for (var light_index = 0u; light_index < directional_light_count; light_index ++ ) {
+        let punctual_light = evaluate_light_visibility(st_directional_lights[light_index], geometry);
         if (punctual_light.visible) {
             RE_Direct( punctual_light, geometry, material, reflected_light );
         }
@@ -152,18 +146,25 @@ fn evaluate_punctual_lights(
 
     for (var i = 0u; i < cluster.count; i ++ ) {
         let light_index = st_cluster_light_indices[cluster.offset + i];
-        if (light_index >= local_light_count || st_lights[light_index].light_type == 0u) {
+        if (light_index >= u_local_light_buffer_metadata.total_light_count) {
             continue;
         }
 
-        let punctual_light = evaluate_light_visibility(light_index, geometry);
+        let punctual_light = evaluate_light_visibility(st_local_lights[light_index], geometry);
         if (punctual_light.visible) {
             RE_Direct( punctual_light, geometry, material, reflected_light );
         }
     }
     $$ else
-    for (var i = 0u; i < u_environment.num_lights; i ++ ) {
-        let punctual_light = evaluate_light_visibility(i, geometry);
+    for (var i = 0u; i < u_environment.directional_light_count; i ++ ) {
+        let punctual_light = evaluate_light_visibility(st_directional_lights[i], geometry);
+        if (punctual_light.visible) {
+            RE_Direct( punctual_light, geometry, material, reflected_light );
+        }
+    }
+
+    for (var i = 0u; i < u_local_light_buffer_metadata.total_light_count; i ++ ) {
+        let punctual_light = evaluate_light_visibility(st_local_lights[i], geometry);
         if (punctual_light.visible) {
             RE_Direct( punctual_light, geometry, material, reflected_light );
         }

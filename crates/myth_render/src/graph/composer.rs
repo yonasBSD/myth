@@ -52,13 +52,12 @@ use crate::core::gpu::{CubeSourceType, Tracked};
 use crate::core::{ResourceManager, WgpuContext};
 use crate::graph::ExtractedScene;
 use crate::graph::RenderState;
-#[cfg(feature = "debug_view")]
 use crate::graph::core::ClusteredScreenBindings;
 use crate::graph::core::GraphStorage;
 use crate::graph::core::graph::FrameConfig;
 use crate::graph::core::{
-    ExecuteContext, FrameArena, GraphBlackboard, HookStage, PrepareContext, RenderGraph,
-    TextureDesc, TransientPool, ViewResolver,
+    BufferDesc, BufferNodeId, ExecuteContext, FrameArena, GraphBlackboard, HookStage, PassNode,
+    PrepareContext, RenderGraph, TextureDesc, TransientPool, ViewResolver,
 };
 use crate::graph::frame::{PreparedSkyboxDraw, RenderLists};
 #[cfg(feature = "3dgs")]
@@ -66,15 +65,17 @@ use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::utils::add_msaa_resolve_pass;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
-    EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
-    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature,
-    TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
+    ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, IblComputeFeature,
+    MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature,
+    SkyboxFeature, SsaoFeature, SsssFeature, TaaFeature, ToneMappingFeature,
+    TransmissionCopyFeature, TransparentFeature,
 };
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
 use crate::renderer::FrameTime;
 use crate::settings::RendererSettings;
 use myth_assets::AssetServer;
+use myth_resources::uniforms::LightBufferMetadata;
 use myth_scene::Scene;
 use myth_scene::camera::RenderCamera;
 
@@ -144,9 +145,25 @@ pub struct GraphBuilderContext<'a, 'g> {
     pub graph: &'g mut RenderGraph<'a>,
     pub pipeline_cache: &'a PipelineCache,
     pub frame_config: &'g FrameConfig,
+    scene_local_light_count: u32,
 }
 
 impl GraphBuilderContext<'_, '_> {
+    #[inline]
+    pub(crate) fn new<'a, 'g>(
+        graph: &'g mut RenderGraph<'a>,
+        pipeline_cache: &'a PipelineCache,
+        frame_config: &'g FrameConfig,
+        scene_local_light_count: u32,
+    ) -> GraphBuilderContext<'a, 'g> {
+        GraphBuilderContext {
+            graph,
+            pipeline_cache,
+            frame_config,
+            scene_local_light_count,
+        }
+    }
+
     #[cfg(feature = "rdg_inspector")]
     pub fn with_group<F, R>(&mut self, group_name: &'static str, f: F) -> R
     where
@@ -167,6 +184,24 @@ impl GraphBuilderContext<'_, '_> {
     {
         f(self)
     }
+
+    /// Returns the logical descriptor of an RDG buffer visible to the current
+    /// graph build. User hooks can use this to size derived transient buffers
+    /// without reaching into renderer internals.
+    #[inline]
+    #[must_use]
+    pub fn buffer_desc(&self, id: BufferNodeId) -> BufferDesc {
+        self.graph.storage.resources[id.index() as usize].buffer_desc()
+    }
+
+    /// Returns the extracted CPU local-light count for the current frame.
+    /// This is the authoritative emptiness check for local-light hooks; the
+    /// imported storage buffer may still be a one-slot dummy allocation.
+    #[inline]
+    #[must_use]
+    pub const fn scene_local_light_count(&self) -> u32 {
+        self.scene_local_light_count
+    }
 }
 
 struct SceneEnvironmentGraphResources<'a> {
@@ -174,6 +209,63 @@ struct SceneEnvironmentGraphResources<'a> {
     pmrem: crate::graph::core::TextureNodeId,
     source_type: CubeSourceType,
     compute_state: Option<&'a crate::core::gpu::EnvironmentComputeState>,
+}
+
+#[derive(Clone, Copy)]
+pub struct GpuLightBuffers {
+    pub light_metadata: BufferNodeId,
+    pub light_storage: BufferNodeId,
+    pub indirect_count_buffer: Option<BufferNodeId>,
+}
+
+struct SceneLightingImportPassNode;
+
+impl PassNode<'_> for SceneLightingImportPassNode {
+    fn prepare(&mut self, _ctx: &mut PrepareContext<'_>) {}
+
+    fn execute(&self, _ctx: &ExecuteContext, _encoder: &mut wgpu::CommandEncoder) {}
+}
+
+fn import_scene_lighting<'a>(
+    ctx: &mut GraphBuilderContext<'a, '_>,
+    render_lists: &RenderLists,
+) -> GpuLightBuffers {
+    let light_metadata_buffer = render_lists
+        .gpu_local_light_metadata_buffer
+        .as_ref()
+        .expect("scene light metadata buffer missing");
+    let light_storage_buffer = render_lists
+        .gpu_local_light_storage_buffer
+        .as_ref()
+        .expect("scene light storage buffer missing");
+
+    ctx.graph.add_pass("Scene_Lighting_Import", |builder| {
+        let light_metadata = builder.read_external_buffer(
+            "Scene_Local_Light_Metadata",
+            BufferDesc::new(
+                std::mem::size_of::<LightBufferMetadata>() as u64,
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            ),
+            light_metadata_buffer,
+        );
+        let light_storage = builder.read_external_buffer(
+            "Scene_Local_Lights",
+            BufferDesc::new(
+                light_storage_buffer.size(),
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            ),
+            light_storage_buffer,
+        );
+
+        (
+            SceneLightingImportPassNode,
+            GpuLightBuffers {
+                light_metadata,
+                light_storage,
+                indirect_count_buffer: None,
+            },
+        )
+    })
 }
 
 fn base_cube_desc(texture: &wgpu::Texture) -> TextureDesc {
@@ -213,6 +305,9 @@ pub struct FrameComposer<'a> {
     ctx: ComposerContext<'a>,
     frame_config: FrameConfig,
     #[allow(clippy::type_complexity)]
+    gpu_local_light_hook:
+        Option<Box<dyn for<'g> FnMut(&mut GraphBuilderContext<'a, 'g>) -> Option<GpuLightBuffers> + 'a>>,
+    #[allow(clippy::type_complexity)]
     hooks: smallvec::SmallVec<
         [(
             HookStage,
@@ -236,6 +331,7 @@ impl<'a> FrameComposer<'a> {
         Self {
             ctx,
             frame_config,
+            gpu_local_light_hook: None,
             hooks: smallvec::SmallVec::new(),
         }
     }
@@ -288,6 +384,18 @@ impl<'a> FrameComposer<'a> {
         F: FnOnce(&mut RenderGraph<'a>, GraphBlackboard) -> GraphBlackboard + 'a,
     {
         self.hooks.push((stage, Some(Box::new(hook))));
+        self
+    }
+
+    /// Registers a hook that can inject an optional GPU-generated local-light
+    /// track before clustered lighting and forward shading are wired.
+    #[inline]
+    #[must_use]
+    pub fn inject_gpu_local_lights<F>(mut self, hook: F) -> Self
+    where
+        F: for<'g> FnMut(&mut GraphBuilderContext<'a, 'g>) -> Option<GpuLightBuffers> + 'a,
+    {
+        self.gpu_local_light_hook = Some(Box::new(hook));
         self
     }
 
@@ -368,11 +476,12 @@ impl<'a> FrameComposer<'a> {
         let surface_out =
             graph.import_external_resource("Surface_View", surface_desc, &surface_view_tracked);
 
-        let mut graph_ctx = GraphBuilderContext {
-            graph: &mut graph,
-            pipeline_cache: self.ctx.pipeline_cache,
-            frame_config: &self.frame_config,
-        };
+        let mut graph_ctx = GraphBuilderContext::new(
+            &mut graph,
+            self.ctx.pipeline_cache,
+            &self.frame_config,
+            self.ctx.extracted_scene.local_light_count() as u32,
+        );
 
         // ── 2a. Register Resources ──────────────────────────────────────
         // Only the swapchain surface is truly external.
@@ -561,24 +670,42 @@ impl<'a> FrameComposer<'a> {
                 let fxaa_enabled = self.ctx.camera.aa_mode.is_fxaa();
 
                 let (mut active_color, mut scene_depth) = graph_ctx.with_group("Scene", |c| {
+                    let scene_lights = c.with_group("Scene_Lighting", |c| {
+                        import_scene_lighting(c, self.ctx.render_lists)
+                    });
+                    let injected_gpu_lights = self
+                        .gpu_local_light_hook
+                        .as_mut()
+                        .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
                     let clustered_out = self
                         .ctx
                         .clustered_lighting_pass
-                        .add_to_graph(c, self.ctx.clustered_lighting_enabled);
-                    let scene_clustered_params = if self.ctx.clustered_lighting_enabled {
-                        Some(clustered_out.params_buffer)
-                    } else {
-                        None
-                    };
-                    let scene_clustered_records = if self.ctx.clustered_lighting_enabled {
-                        clustered_out.cluster_records
-                    } else {
-                        None
-                    };
-                    let scene_clustered_light_indices = if self.ctx.clustered_lighting_enabled {
-                        clustered_out.light_indices
-                    } else {
-                        None
+                        .add_to_graph(
+                            c,
+                            ClusteredLightingInputs {
+                                enabled: self.ctx.clustered_lighting_enabled,
+                                cpu_light_metadata_buffer: scene_lights.light_metadata,
+                                cpu_light_data_buffer: scene_lights.light_storage,
+                                injected_gpu_lights,
+                            },
+                        );
+                    let scene_lighting = ClusteredScreenBindings {
+                        light_metadata: Some(clustered_out.final_light_metadata_buffer),
+                        lights: Some(clustered_out.final_light_data_buffer),
+                        params: self
+                            .ctx
+                            .clustered_lighting_enabled
+                            .then_some(clustered_out.params_buffer),
+                        records: if self.ctx.clustered_lighting_enabled {
+                            clustered_out.cluster_records
+                        } else {
+                            None
+                        },
+                        light_indices: if self.ctx.clustered_lighting_enabled {
+                            clustered_out.light_indices
+                        } else {
+                            None
+                        },
                     };
 
                     #[cfg(feature = "debug_view")]
@@ -623,9 +750,7 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
-                        scene_clustered_params,
-                        scene_clustered_records,
-                        scene_clustered_light_indices,
+                        scene_lighting,
                     );
 
                     let mut active_color = opaque_out.active_color;
@@ -724,9 +849,7 @@ impl<'a> FrameComposer<'a> {
                         ssao_output,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
-                        scene_clustered_params,
-                        scene_clustered_records,
-                        scene_clustered_light_indices,
+                        scene_lighting,
                     );
 
                     // Capture intermediate IDs for debug view resolution.
@@ -827,6 +950,8 @@ impl<'a> FrameComposer<'a> {
                     if let Some(src) = source {
                         let clustered = if target == DebugViewTarget::ClusterHeatmap {
                             ClusteredScreenBindings {
+                                light_metadata: None,
+                                lights: None,
                                 params: dbg_clustered_params,
                                 records: dbg_clustered_records,
                                 light_indices: None,
@@ -865,24 +990,42 @@ impl<'a> FrameComposer<'a> {
                 };
 
                 graph_ctx.with_group("BasicForward", |c| {
+                    let scene_lights = c.with_group("Scene_Lighting", |c| {
+                        import_scene_lighting(c, self.ctx.render_lists)
+                    });
+                    let injected_gpu_lights = self
+                        .gpu_local_light_hook
+                        .as_mut()
+                        .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
                     let clustered_out = self
                         .ctx
                         .clustered_lighting_pass
-                        .add_to_graph(c, self.ctx.clustered_lighting_enabled);
-                    let scene_clustered_params = if self.ctx.clustered_lighting_enabled {
-                        Some(clustered_out.params_buffer)
-                    } else {
-                        None
-                    };
-                    let scene_clustered_records = if self.ctx.clustered_lighting_enabled {
-                        clustered_out.cluster_records
-                    } else {
-                        None
-                    };
-                    let scene_clustered_light_indices = if self.ctx.clustered_lighting_enabled {
-                        clustered_out.light_indices
-                    } else {
-                        None
+                        .add_to_graph(
+                            c,
+                            ClusteredLightingInputs {
+                                enabled: self.ctx.clustered_lighting_enabled,
+                                cpu_light_metadata_buffer: scene_lights.light_metadata,
+                                cpu_light_data_buffer: scene_lights.light_storage,
+                                injected_gpu_lights,
+                            },
+                        );
+                    let scene_lighting = ClusteredScreenBindings {
+                        light_metadata: Some(clustered_out.final_light_metadata_buffer),
+                        lights: Some(clustered_out.final_light_data_buffer),
+                        params: self
+                            .ctx
+                            .clustered_lighting_enabled
+                            .then_some(clustered_out.params_buffer),
+                        records: if self.ctx.clustered_lighting_enabled {
+                            clustered_out.cluster_records
+                        } else {
+                            None
+                        },
+                        light_indices: if self.ctx.clustered_lighting_enabled {
+                            clustered_out.light_indices
+                        } else {
+                            None
+                        },
                     };
                     self.ctx.simple_forward_pass.add_to_graph(
                         c,
@@ -893,9 +1036,7 @@ impl<'a> FrameComposer<'a> {
                         shadow_output.shadow_cube,
                         env_dependency_base,
                         env_dependency_pmrem,
-                        scene_clustered_params,
-                        scene_clustered_records,
-                        scene_clustered_light_indices,
+                        scene_lighting,
                     );
                 });
             }

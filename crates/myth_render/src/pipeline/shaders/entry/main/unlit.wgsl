@@ -5,6 +5,7 @@
 
 {{ vertex_input_code }} 
 {{ binding_code }}      
+{{ scene_lighting_structs }}
 {$ include 'core/vertex_output' $}
 {$ include 'core/fragment_output' $}
 

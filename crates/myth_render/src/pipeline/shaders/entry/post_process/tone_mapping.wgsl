@@ -6,6 +6,7 @@
 
 // Auto-injected binding code for global resources (e.g. frame-level uniforms, scene-level data, etc.)
 {{ binding_code }}
+{{ scene_lighting_structs }}
 
 // Group 1: Persistent feature resources (Feature-owned, long-lived)
 @group(1) @binding(0)

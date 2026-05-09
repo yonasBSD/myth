@@ -5,6 +5,7 @@
 // Sort dispatch granularity is specialized at pipeline creation.
 
 {{ binding_code }}
+{{ scene_lighting_structs }}
 
 override GS_SORT_KEYS_PER_WG: u32 = 3840u;
 

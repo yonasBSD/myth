@@ -41,7 +41,7 @@ use crate::pipeline::shader_gen::ShaderCompilationOptions;
 use crate::pipeline::shader_manager::{ShaderManager, ShaderSource};
 use crate::pipeline::vertex::GeneratedVertexLayout;
 use myth_assets::{GeometryHandle, MaterialHandle};
-use myth_resources::uniforms::clustered_lighting_structs_wgsl;
+use myth_resources::uniforms::{clustered_lighting_structs_wgsl, scene_lighting_structs_wgsl};
 
 // ─── L1 Fast Keys ────────────────────────────────────────────────────────────
 
@@ -285,6 +285,7 @@ impl PipelineCache {
         let mut opts = options.clone();
         opts.inject_code("vertex_input_code", &vertex_layout.vertex_input_code);
         opts.inject_code("binding_code", binding_code);
+        opts.inject_code("scene_lighting_structs", scene_lighting_structs_wgsl());
         opts.inject_code(
             "clustered_lighting_structs",
             clustered_lighting_structs_wgsl(),

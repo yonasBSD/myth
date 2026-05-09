@@ -11,6 +11,7 @@ pub mod fxaa;
 #[cfg(feature = "3dgs")]
 pub mod gaussian_splatting;
 pub mod ibl_compute;
+pub mod light_merge;
 pub mod msaa_sync;
 pub mod opaque;
 pub mod prepass;
@@ -28,7 +29,7 @@ pub mod utils;
 pub use atmosphere::AtmosphereFeature;
 pub use bloom::BloomFeature;
 pub use cas::CasFeature;
-pub use clustered_lighting::ClusteredLightingFeature;
+pub use clustered_lighting::{ClusteredLightingFeature, ClusteredLightingInputs};
 pub use compute::BrdfLutFeature;
 #[cfg(feature = "debug_view")]
 pub use debug_view::DebugViewFeature;

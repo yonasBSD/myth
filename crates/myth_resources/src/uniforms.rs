@@ -252,6 +252,15 @@ pub trait WgslStruct: Pod + Zeroable {
 }
 
 #[must_use]
+pub fn scene_lighting_structs_wgsl() -> String {
+    format!(
+        "{}\n{}",
+        GpuLightStorage::wgsl_struct_def("Struct_lights"),
+        LightBufferMetadata::wgsl_struct_def("LightBufferMetadata"),
+    )
+}
+
+#[must_use]
 pub fn clustered_lighting_structs_wgsl() -> String {
     format!(
         "{}\n{}",
@@ -333,7 +342,7 @@ pub struct RenderStateUniforms {
 #[gpu_struct(crate_path = "crate")]
 pub struct EnvironmentUniforms {
     pub ambient_light: Vec3,
-    pub num_lights: u32,
+    pub directional_light_count: u32,
 
     #[default(1.0)]
     pub env_map_intensity: f32,
@@ -371,6 +380,17 @@ pub struct GpuLightStorage {
 
     /// Shadow VP matrices: up to 4 cascades for directional, 1 for spot.
     pub shadow_matrices: UniformArray<Mat4, 4>,
+}
+
+/// Scene light-list metadata shared by compute and fragment stages.
+#[gpu_struct(crate_path = "crate")]
+pub struct LightBufferMetadata {
+    /// Total number of lights stored in the bound light buffer.
+    pub total_light_count: u32,
+    /// Number of local point/spot lights occupying the buffer head segment.
+    pub active_local_light_count: u32,
+    pub reserved_0: u32,
+    pub reserved_1: u32,
 }
 
 /// Clustered-lighting frame parameters shared by compute and fragment stages.
@@ -439,6 +459,11 @@ mod tests {
             mem::size_of::<ClusterRecord>() % 16,
             0,
             "ClusterRecord not aligned to 16 bytes"
+        );
+        assert_eq!(
+            mem::size_of::<LightBufferMetadata>() % 16,
+            0,
+            "LightBufferMetadata not aligned to 16 bytes"
         );
     }
 

@@ -181,6 +181,8 @@ scene.add_light(Light::new_directional(Vec3::ONE, 5.0));
 scene.add_light(Light::new_point(Vec3::new(1.0, 0.8, 0.6), 100.0, 0.0));
 ```
 
+Directional lights stay on the renderer's global-light path. Point and spot lights also feed the RDG-managed local-light track used by clustered lighting. Optional GPU local lights can now be injected into that same track through `inject_gpu_local_lights(...)`, with the engine handling CPU-only, GPU-only, and merged routing internally.
+
 ### Environment and sky
 
 The current scene surface exposes:
@@ -268,10 +270,53 @@ Use this pattern when you need:
 - a debug overlay inserted before or after built-in post-processing
 - custom graph resources that should live inside the RDG lifetime model
 
+For RDG-owned scene lighting, `FrameComposer` also exposes a dedicated hook that injects an optional GPU local-light track before clustered lighting and forward shading are wired:
+
+```rust
+fn render(&mut self, engine: &mut Engine, _window: &dyn Window) {
+    use myth::renderer::graph::composer::GpuLightBuffers;
+
+    let Some(composer) = engine.compose_frame() else {
+        return;
+    };
+
+    composer
+        .inject_gpu_local_lights(move |ctx| {
+            if gpu_swarm_disabled {
+                return None;
+            }
+
+            Some(ctx.graph.add_pass("GpuSwarmLights", |builder| {
+                let gpu_light_metadata = builder.create_buffer("Gpu_Light_Metadata", /* ... */);
+                let gpu_light_storage = builder.create_buffer("Gpu_Light_Storage", /* ... */);
+                let gpu_light_count = builder.create_buffer("Gpu_Light_Count", /* ... */);
+
+                (
+                    GpuSwarmLightPassNode { /* ... */ },
+                    GpuLightBuffers {
+                        light_metadata: gpu_light_metadata,
+                        light_storage: gpu_light_storage,
+                        indirect_count_buffer: Some(gpu_light_count),
+                    },
+                )
+            }))
+        })
+        .render();
+}
+```
+
+Use `inject_gpu_local_lights(...)` when you need:
+
+- custom GPU light generators or particle-light systems
+- a zero-overhead CPU-only fallback by returning `None`
+- engine-owned routing that automatically preserves the original CPU path, forwards pure GPU lights when CPU local lights are absent, or safely merges both tracks when they coexist
+- `dispatch_workgroups_indirect` for clustered light preprocessing via an optional count buffer
+
 Reference implementations:
 
 - `examples/custom_post_fx.rs`
 - `examples/procedural_sky.rs`
+- `examples/gpu_driven_particle_lights.rs`
 
 ---
 
@@ -351,8 +396,9 @@ If you are onboarding to the current codebase, read examples in this order:
 3. `examples/helmet_gltf.rs`
 4. `examples/custom_post_fx.rs`
 5. `examples/procedural_sky.rs`
-6. `examples/gaussian_splatting.rs`
-7. `examples/headless_export.rs`
+6. `examples/gpu_driven_particle_lights.rs`
+7. `examples/gaussian_splatting.rs`
+8. `examples/headless_export.rs`
 
 This order mirrors the engine's current architecture from basic scene setup through advanced frame-graph extension.
 

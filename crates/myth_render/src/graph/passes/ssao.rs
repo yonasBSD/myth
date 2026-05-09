@@ -300,6 +300,10 @@ impl SsaoFeature {
                 SsaoUniforms::wgsl_struct_def("SsaoUniforms").as_str(),
             );
             options.inject_code("binding_code", &gpu_world.binding_wgsl);
+            options.inject_code(
+                "scene_lighting_structs",
+                myth_resources::uniforms::scene_lighting_structs_wgsl(),
+            );
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 device,

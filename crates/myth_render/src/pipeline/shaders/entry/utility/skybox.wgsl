@@ -18,6 +18,7 @@
 
 // Auto-injected global bind group bindings (Group 0: camera, environment, etc.)
 {{ binding_code }}
+{{ scene_lighting_structs }}
 
 // --- Skybox-specific bindings (Group 1) ---
 $$ if SKYBOX_PROCEDURAL

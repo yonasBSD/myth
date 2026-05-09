@@ -2,6 +2,7 @@
 
 {{ struct_definitions }}
 {{ binding_code }}
+{{ scene_lighting_structs }}
 
 @group(1) @binding(0) var t_depth: texture_depth_2d;
 @group(1) @binding(1) var t_normal: texture_2d<f32>;

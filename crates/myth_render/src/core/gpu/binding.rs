@@ -447,7 +447,8 @@ impl ResourceManager {
 
         // === Ensure: upload all buffers, obtain physical resource IDs ===
         let (_, camera_result) = self.ensure_buffer(render_state.uniforms());
-        let (_, light_result) = self.ensure_buffer(&extracted_scene.light_storage_buffer);
+        let (_, directional_light_result) =
+            self.ensure_buffer(&extracted_scene.directional_light_storage_buffer);
         let (_, scene_uniform_result) =
             self.ensure_buffer(&extracted_scene.environment_uniforms_buffer);
 
@@ -476,9 +477,8 @@ impl ResourceManager {
         // === Collect: gather all resource IDs ===
         let mut current_ids = super::ResourceIdSet::with_capacity(8);
         current_ids.push(camera_result.resource_id);
-        // current_ids.push(env_result.resource_id);
-        current_ids.push(light_result.resource_id);
         current_ids.push(scene_uniform_result.resource_id);
+        current_ids.push(directional_light_result.resource_id);
         current_ids.push(processed_env_map_id);
         current_ids.push(pmrem_map_id);
         current_ids.push(brdf_lut_id);
@@ -551,8 +551,7 @@ impl ResourceManager {
         builder: &mut ResourceBuilder<'a>,
         extracted_scene: &'a ExtractedScene,
     ) {
-        use myth_resources::WgslStructName;
-        use myth_resources::uniforms::{EnvironmentUniforms, GpuLightStorage};
+        use myth_resources::uniforms::EnvironmentUniforms;
 
         // Environment Uniforms
         builder.add_uniform_buffer(
@@ -567,14 +566,13 @@ impl ResourceManager {
             )),
         );
 
-        // Light Storage Buffer
         builder.add_storage_buffer(
-            "lights",
-            &extracted_scene.light_storage_buffer.handle(),
+            "directional_lights",
+            &extracted_scene.directional_light_storage_buffer.handle(),
             None,
             true,
-            wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
-            Some(WgslStructName::Generator(GpuLightStorage::wgsl_struct_def)),
+            wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+            Some(WgslStructName::Name("Struct_lights".to_string())),
         );
 
         // Resolve env_map from GpuEnvironment cache

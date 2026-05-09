@@ -32,7 +32,9 @@
 //! `ScreenBindGroupInfo` and `ResourceManager`.
 
 use super::Tracked;
-use myth_resources::uniforms::{ClusterRecord, ClusteredLightingParams};
+use myth_resources::uniforms::{
+    ClusterRecord, ClusteredLightingParams, GpuLightStorage, LightBufferMetadata,
+};
 
 /// Global system fallback texture pool and Group 3 bind-group infrastructure.
 ///
@@ -71,6 +73,12 @@ pub struct SystemTextures {
     /// Default clustered-lighting parameters used when the scene pass has no
     /// active cluster buffers wired.
     pub clustered_params: Tracked<wgpu::Buffer>,
+
+    /// Default scene-light metadata used when no explicit light buffer is bound.
+    pub light_metadata: Tracked<wgpu::Buffer>,
+
+    /// Default scene-light storage buffer containing a single inert light.
+    pub light_storage: Tracked<wgpu::Buffer>,
 
     /// Default cluster record buffer containing a single empty record.
     pub clustered_records: Tracked<wgpu::Buffer>,
@@ -111,6 +119,8 @@ impl SystemTextures {
         let depth_d2array = create_1x1_depth_d2array(device, "sys_depth_d2array");
         let depth_cube_array = create_1x1_depth_cube_array(device, "sys_depth_cube_array");
         let clustered_params = create_default_clustered_params(device, queue);
+        let light_metadata = create_default_light_metadata(device, queue);
+        let light_storage = create_default_light_storage(device, queue);
         let clustered_records = create_default_clustered_records(device, queue);
         let clustered_light_indices = create_default_clustered_light_indices(device, queue);
 
@@ -154,6 +164,8 @@ impl SystemTextures {
             depth_d2array,
             depth_cube_array,
             clustered_params,
+            light_metadata,
+            light_storage,
             clustered_records,
             clustered_light_indices,
             screen_layout,
@@ -172,7 +184,7 @@ fn create_screen_bind_group_layout(
     device: &wgpu::Device,
     clustered: bool,
 ) -> Tracked<wgpu::BindGroupLayout> {
-    let mut entries = Vec::with_capacity(if clustered { 9 } else { 6 });
+    let mut entries = Vec::with_capacity(if clustered { 11 } else { 8 });
 
     entries.push(wgpu::BindGroupLayoutEntry {
         binding: 0,
@@ -226,10 +238,30 @@ fn create_screen_bind_group_layout(
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
         count: None,
     });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 6,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 7,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    });
 
     if clustered {
         entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 6,
+            binding: 8,
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
@@ -239,7 +271,7 @@ fn create_screen_bind_group_layout(
             count: None,
         });
         entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 7,
+            binding: 9,
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -249,7 +281,7 @@ fn create_screen_bind_group_layout(
             count: None,
         });
         entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 8,
+            binding: 10,
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -434,6 +466,34 @@ fn create_default_clustered_params(
         depth_params: glam::Vec4::new(0.1, 1.0, 0.0, 0.0),
     };
     queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&params));
+    buffer
+}
+
+fn create_default_light_metadata(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_light_metadata"),
+        size: std::mem::size_of::<LightBufferMetadata>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&LightBufferMetadata::default()));
+    buffer
+}
+
+fn create_default_light_storage(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_light_storage"),
+        size: std::mem::size_of::<GpuLightStorage>() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&GpuLightStorage::default()));
     buffer
 }
 

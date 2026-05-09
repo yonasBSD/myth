@@ -17,10 +17,12 @@ use glam::Mat4;
 use rustc_hash::FxHashMap;
 
 use crate::core::{BindGroupContext, RenderView, ResourceManager};
+use crate::core::gpu::Tracked;
 use crate::graph::core::TextureNodeId;
 use crate::pipeline::RenderPipelineId;
 use crate::renderer::FrameTime;
 use myth_assets::{AssetServer, GeometryHandle, MaterialHandle};
+use myth_resources::buffer::CpuBuffer;
 use myth_scene::Scene;
 use myth_scene::camera::RenderCamera;
 
@@ -224,6 +226,12 @@ pub struct RenderLists {
     /// Global bind group (camera, lighting, environment, etc.)
     pub gpu_global_bind_group: Option<wgpu::BindGroup>,
 
+    /// Stable per-frame scene-light metadata buffer for RDG imports.
+    pub gpu_local_light_metadata_buffer: Option<Tracked<wgpu::Buffer>>,
+
+    /// Stable per-frame scene-light storage buffer for RDG imports.
+    pub gpu_local_light_storage_buffer: Option<Tracked<wgpu::Buffer>>,
+
     /// Whether a transmission copy is needed this frame
     pub use_transmission: bool,
 }
@@ -239,6 +247,8 @@ impl RenderLists {
             shadow_lights: Vec::with_capacity(16),
             active_views: Vec::with_capacity(16),
             gpu_global_bind_group: None,
+            gpu_local_light_metadata_buffer: None,
+            gpu_local_light_storage_buffer: None,
             use_transmission: false,
         }
     }
@@ -252,6 +262,8 @@ impl RenderLists {
         self.shadow_lights.clear();
         self.active_views.clear();
         self.gpu_global_bind_group = None;
+        self.gpu_local_light_metadata_buffer = None;
+        self.gpu_local_light_storage_buffer = None;
         self.use_transmission = false;
     }
 
@@ -419,13 +431,15 @@ impl RenderFrame {
     /// 1. **Extract** — Pull rendering data from the [`Scene`] into
     ///    [`ExtractedScene`].
     /// 2. **Light Ordering** — Keep local lights packed at the front of the
-    ///    GPU light buffer and pre-sort dense local-light sets by camera-
-    ///    weighted importance.
+    ///    extracted list and pre-sort dense local-light sets by camera-
+    ///    weighted importance so they can be short-circuited directly into
+    ///    the clustered local-light track when no GPU merge is needed.
     /// 3. **Shadow View Generation** — Build [`RenderView`]s for all
     ///    shadow-casting lights (pure math, no GPU work).
     /// 4. **Shadow Metadata** — Write per-light shadow layer indices,
-    ///    cascade matrices and split distances into the light storage
-    ///    buffer so the global bind group already contains correct data.
+    ///    cascade matrices and split distances into the directional / local
+    ///    light tracks so both the global bind group and the RDG local-light
+    ///    path already contain correct data.
     /// 5. **Global Prepare** — Upload camera / scene / light uniforms and
     ///    create the global bind group (Group 0).
     ///
@@ -498,6 +512,16 @@ impl RenderFrame {
         // ── 6. Global GPU resources ────────────────────────────────────
         self.render_state.update(camera, frame_time, surface_size);
         resource_manager.prepare_global(assets, &self.extracted_scene, &self.render_state);
+        resource_manager.ensure_buffer(&self.extracted_scene.local_light_metadata_buffer);
+        resource_manager.ensure_buffer(&self.extracted_scene.local_light_storage_buffer);
+        render_lists.gpu_local_light_metadata_buffer = tracked_cpu_buffer(
+            resource_manager,
+            &self.extracted_scene.local_light_metadata_buffer,
+        );
+        render_lists.gpu_local_light_storage_buffer = tracked_cpu_buffer(
+            resource_manager,
+            &self.extracted_scene.local_light_storage_buffer,
+        );
     }
 
     /// Build [`RenderView`]s for all shadow-casting lights.
@@ -615,8 +639,17 @@ impl RenderFrame {
 
         // Reset shadow fields
         {
-            let mut light_storage = extracted_scene.light_storage_buffer.write();
-            for light in light_storage.iter_mut() {
+            let mut local_light_storage = extracted_scene.local_light_storage_buffer.write();
+            for light in local_light_storage.iter_mut() {
+                light.shadow_layer_index = -1;
+                light.point_shadow_index = -1;
+                light.shadow_matrices.0 = [Mat4::IDENTITY; 4];
+                light.cascade_count = 0;
+                light.cascade_splits = Vec4::ZERO;
+            }
+
+            let mut directional_light_storage = extracted_scene.directional_light_storage_buffer.write();
+            for light in directional_light_storage.iter_mut() {
                 light.shadow_layer_index = -1;
                 light.point_shadow_index = -1;
                 light.shadow_matrices.0 = [Mat4::IDENTITY; 4];
@@ -628,13 +661,17 @@ impl RenderFrame {
         let total_layers = active_views.iter().filter(|v| v.is_shadow()).count() as u32;
 
         if total_layers == 0 {
-            resource_manager.ensure_buffer(&extracted_scene.light_storage_buffer);
+            resource_manager.ensure_buffer(&extracted_scene.local_light_storage_buffer);
+            resource_manager.ensure_buffer(&extracted_scene.directional_light_storage_buffer);
             return;
         }
 
         // Aggregate per-light shadow metadata
         {
-            let mut light_storage = extracted_scene.light_storage_buffer.write();
+            let mut local_light_storage = extracted_scene.local_light_storage_buffer.write();
+            let mut directional_light_storage =
+                extracted_scene.directional_light_storage_buffer.write();
+            let local_light_count = extracted_scene.local_light_count();
             let mut point_shadow_counter = 0i32;
             let mut d2_layer_counter = 0u32;
 
@@ -674,7 +711,7 @@ impl RenderFrame {
                 // Point lights: store cube index, skip VP matrices (shader
                 // uses direction vector + depth comparison).
                 if is_point {
-                    if let Some(gpu_light) = light_storage.get_mut(light_buffer_index) {
+                    if let Some(gpu_light) = local_light_storage.get_mut(light_buffer_index) {
                         // point_shadow_index = sequential cube index (0, 1, 2, ...)
                         gpu_light.point_shadow_index = point_shadow_counter;
                         gpu_light.shadow_bias = shadow_cfg.bias;
@@ -705,7 +742,13 @@ impl RenderFrame {
                     }
                 }
 
-                if let Some(gpu_light) = light_storage.get_mut(light_buffer_index) {
+                let storage = if light.is_directional() {
+                    directional_light_storage.get_mut(light_buffer_index - local_light_count)
+                } else {
+                    local_light_storage.get_mut(light_buffer_index)
+                };
+
+                if let Some(gpu_light) = storage {
                     gpu_light.shadow_layer_index = d2_layer_counter.cast_signed();
                     gpu_light.shadow_matrices.0 = cascade_matrices;
                     gpu_light.cascade_count = view_count;
@@ -722,7 +765,8 @@ impl RenderFrame {
             }
         }
 
-        resource_manager.ensure_buffer(&extracted_scene.light_storage_buffer);
+        resource_manager.ensure_buffer(&extracted_scene.local_light_storage_buffer);
+        resource_manager.ensure_buffer(&extracted_scene.directional_light_storage_buffer);
     }
 
     /// Periodically prune stale resources.
@@ -732,4 +776,13 @@ impl RenderFrame {
             resource_manager.prune(6000);
         }
     }
+}
+
+fn tracked_cpu_buffer<T: myth_resources::buffer::GpuData>(
+    resource_manager: &ResourceManager,
+    cpu_buffer: &CpuBuffer<T>,
+) -> Option<Tracked<wgpu::Buffer>> {
+    resource_manager
+        .get_gpu_buffer_by_cpu_id(cpu_buffer.id())
+        .map(|gpu_buffer| Tracked::with_id(gpu_buffer.buffer.clone(), gpu_buffer.id))
 }
