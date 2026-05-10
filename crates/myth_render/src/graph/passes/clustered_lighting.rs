@@ -754,11 +754,11 @@ struct ClusterCullPassNode<'a> {
 
 impl<'a> PassNode<'a> for ClusterCullPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        ctx.queue.write_buffer(
-            ctx.views.get_buffer(self.light_index_allocator),
-            0,
-            bytemuck::bytes_of(&0u32),
-        );
+        // ctx.queue.write_buffer(
+        //     ctx.views.get_buffer(self.light_index_allocator),
+        //     0,
+        //     bytemuck::bytes_of(&0u32),
+        // );
 
         self.bind_group = Some(
             ctx.build_bind_group(self.cull_layout, Some("Cluster Cull BG"))
@@ -773,6 +773,9 @@ impl<'a> PassNode<'a> for ClusterCullPassNode<'a> {
     }
 
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
+        // Clear the light index allocator to zero before culling so that the first cluster starts with a clean slate;
+        encoder.clear_buffer(ctx.get_buffer(self.light_index_allocator), 0, None);
+
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Cluster Cull Pass"),
             timestamp_writes: None,
