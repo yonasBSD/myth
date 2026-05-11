@@ -8,12 +8,11 @@
 
 use myth::prelude::*;
 use myth::renderer::HDR_TEXTURE_FORMAT;
-use myth::renderer::core::gpu::{CommonSampler, Tracked};
+use myth::renderer::core::gpu::CommonSampler;
 use myth::renderer::graph::core::{
-    ExecuteContext, GraphBlackboard, HookStage, PassNode, PrepareContext, RenderTargetOps,
-    TextureDesc, TextureNodeId,
+    GraphBlackboard, HookStage, RenderPassBuilder, RenderTargetOps, TemplateFullscreenPass,
+    TextureDesc,
 };
-use myth::renderer::pipeline::{RenderPipelineId, ShaderCompilationOptions, ShaderSource};
 use myth::resources::Key;
 use myth_dev_utils::FpsCounter;
 
@@ -77,44 +76,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-struct ChromaticPostNode<'a> {
-    input_tex: TextureNodeId,
-    output_tex: TextureNodeId,
-    pipeline_id: RenderPipelineId,
-    transient_bg: Option<&'a wgpu::BindGroup>,
-}
-
-impl<'a> PassNode<'a> for ChromaticPostNode<'a> {
-    fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        let layout = ctx.pipeline_cache.get_tracked_layout(self.pipeline_id, 0);
-        self.transient_bg = Some(myth_render::myth_bind_group!(
-            ctx,
-            layout,
-            Some("CustomPostFX BindGroup"),
-            [0 => self.input_tex, 1 => CommonSampler::LinearClamp]
-        ));
-    }
-
-    fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
-        let bind_group = self.transient_bg.expect("custom post bg not prepared");
-        let color_attachment =
-            ctx.get_color_attachment(self.output_tex, RenderTargetOps::DontCare, None);
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Custom Post FX Pass"),
-            color_attachments: &[color_attachment],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-
-        pass.set_pipeline(ctx.pipeline_cache.get_render_pipeline(self.pipeline_id));
-        pass.set_bind_group(0, bind_group, &[]);
-        pass.draw(0..3, 0..1);
-    }
-}
-
 struct PostFxOrb {
     handle: NodeHandle,
     phase: f32,
@@ -126,60 +87,28 @@ struct CustomPostFxDemo {
     fps_counter: FpsCounter,
     orbs: Vec<PostFxOrb>,
     ring_light: NodeHandle,
-    post_pipeline: RenderPipelineId,
+    post_pass: TemplateFullscreenPass,
     effect_enabled: bool,
     time: f32,
 }
 
 impl AppHandler for CustomPostFxDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        let post_layout = {
-            let wgpu_ctx = engine
-                .renderer
-                .wgpu_ctx()
-                .expect("renderer should be initialized before example setup");
-            Tracked::new(wgpu_ctx.device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("CustomPostFX Layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ],
-                },
-            ))
-        };
-        engine.renderer.register_shader_template(
-            CUSTOM_POST_SHADER_NAME,
-            CUSTOM_POST_SHADER_TEMPLATE,
-        );
-        let post_shader_options = ShaderCompilationOptions::default();
-        let post_pipeline = engine.renderer.get_or_create_fullscreen_pipeline(
-            ShaderSource::File(CUSTOM_POST_SHADER_NAME),
-            &post_shader_options,
-            &[&post_layout],
-            &[wgpu::ColorTargetState {
+        let post_pass = RenderPassBuilder::fullscreen("Custom Post FX Pipeline")
+            .inline_shader_template(CUSTOM_POST_SHADER_NAME, CUSTOM_POST_SHADER_TEMPLATE)
+            .bind_texture_2d(0, 0, wgpu::ShaderStages::FRAGMENT, true)
+            .bind_sampler(
+                0,
+                1,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::SamplerBindingType::Filtering,
+            )
+            .color_target(wgpu::ColorTargetState {
                 format: HDR_TEXTURE_FORMAT,
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
-            }],
-            None,
-            wgpu::MultisampleState::default(),
-            "Custom Post FX Pipeline",
-        );
+            })
+            .build(&mut engine.renderer);
 
         let sphere_geo = engine.assets.geometries.add(Geometry::new_sphere(1.0));
         let box_geo = engine
@@ -262,7 +191,7 @@ impl AppHandler for CustomPostFxDemo {
             fps_counter: FpsCounter::new(),
             orbs,
             ring_light,
-            post_pipeline,
+            post_pass,
             effect_enabled: true,
             time: 0.0,
         }
@@ -331,7 +260,7 @@ impl AppHandler for CustomPostFxDemo {
         };
 
         let enabled = self.effect_enabled;
-        let pipeline_id = self.post_pipeline;
+        let post_pass = &self.post_pass;
         let post_output_desc = post_output_desc;
 
         composer
@@ -347,15 +276,18 @@ impl AppHandler for CustomPostFxDemo {
                 let new_color = rdg.add_pass("Custom_Post_FX", |builder| {
                     builder.read_texture(scene_color);
                     let out = builder.create_texture("Scene_Color_CustomPost", post_output_desc);
-                    (
-                        ChromaticPostNode {
-                            input_tex: scene_color,
-                            output_tex: out,
-                            pipeline_id,
-                            transient_bg: None,
-                        },
+                    let node = post_pass.build_node(
+                        builder,
+                        "Custom Post FX Pass",
                         out,
-                    )
+                        RenderTargetOps::DontCare,
+                        Some("CustomPostFX BindGroup"),
+                        |bindings| {
+                            bindings.bind_texture(0, 0, scene_color);
+                            bindings.bind_common_sampler(0, 1, CommonSampler::LinearClamp);
+                        },
+                    );
+                    (node, out)
                 });
 
                 GraphBlackboard {

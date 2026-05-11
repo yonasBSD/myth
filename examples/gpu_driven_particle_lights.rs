@@ -15,9 +15,9 @@ use myth::renderer::{
     core::gpu::Tracked,
     graph::{
         composer::GpuLightBuffers,
-        core::{BufferDesc, BufferNodeId, ExecuteContext, PassNode, PrepareContext},
+        core::{BufferDesc, ComputePassBuilder, TemplateComputePass},
     },
-    pipeline::{ComputePipelineId, ShaderCompilationOptions, ShaderSource},
+    pipeline::ShaderCompilationOptions,
 };
 use myth::resources::{
     image::ColorSpace,
@@ -182,50 +182,11 @@ struct SwarmLightParams {
     pad: [u32; 2],
 }
 
-struct GpuParticleLightNode<'a> {
-    light_metadata: BufferNodeId,
-    light_storage: BufferNodeId,
-    indirect_count_buffer: BufferNodeId,
-    params_buffer: &'a Tracked<wgpu::Buffer>,
-    pipeline_id: ComputePipelineId,
-    bind_group: Option<&'a wgpu::BindGroup>,
-}
-
-impl<'a> PassNode<'a> for GpuParticleLightNode<'a> {
-    fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        let layout = ctx
-            .pipeline_cache
-            .get_tracked_compute_layout(self.pipeline_id, 0);
-        self.bind_group = Some(
-            ctx.build_bind_group(layout, Some("GPU Particle Light BG"))
-                .bind_tracked_buffer(0, self.params_buffer)
-                .bind_buffer(1, self.light_metadata)
-                .bind_buffer(2, self.light_storage)
-                .bind_buffer(3, self.indirect_count_buffer)
-                .build(),
-        );
-    }
-
-    fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("GPU Particle Light Pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(ctx.pipeline_cache.get_compute_pipeline(self.pipeline_id));
-        pass.set_bind_group(
-            0,
-            self.bind_group.expect("GPU particle light BG missing"),
-            &[],
-        );
-        pass.dispatch_workgroups(GPU_LIGHT_COUNT.div_ceil(PARTICLE_LIGHT_WG_SIZE), 1, 1);
-    }
-}
-
 struct GpuDrivenParticleLightsDemo {
     controls: OrbitControls,
     fps_counter: FpsCounter,
     centerpiece: NodeHandle,
-    swarm_pipeline: ComputePipelineId,
+    swarm_pass: TemplateComputePass,
     swarm_params: Tracked<wgpu::Buffer>,
     swarm_enabled: bool,
     time: f32,
@@ -409,77 +370,23 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             .look_at(Vec3::new(0.0, 1.8, 0.0));
         scene.active_camera = Some(camera);
 
-        engine.renderer.register_shader_template(
-            GPU_PARTICLE_LIGHT_SHADER_NAME,
-            GPU_PARTICLE_LIGHT_SHADER_TEMPLATE,
-        );
-
-        let swarm_layout = {
-            let wgpu_ctx = engine
-                .renderer
-                .wgpu_ctx()
-                .expect("renderer must be initialized before example setup");
-            Tracked::new(wgpu_ctx.device.create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GPU Particle Light Layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                },
-            ))
-        };
-
         let mut swarm_shader_options = ShaderCompilationOptions::default();
         swarm_shader_options.inject_code("scene_lighting_structs", scene_lighting_structs_wgsl());
         swarm_shader_options.inject_code(
             "particle_light_workgroup_size",
             format!("{}u", PARTICLE_LIGHT_WG_SIZE),
         );
-        let swarm_pipeline = engine.renderer.get_or_create_compute_pipeline(
-            ShaderSource::File(GPU_PARTICLE_LIGHT_SHADER_NAME),
-            &swarm_shader_options,
-            &[&swarm_layout],
-            "GPU Particle Light Pipeline",
-        );
+        let swarm_pass = ComputePassBuilder::new("GPU Particle Light Pipeline")
+            .inline_shader_template(
+                GPU_PARTICLE_LIGHT_SHADER_NAME,
+                GPU_PARTICLE_LIGHT_SHADER_TEMPLATE,
+            )
+            .shader_options(swarm_shader_options)
+            .bind_uniform_buffer(0, 0, wgpu::ShaderStages::COMPUTE)
+            .bind_storage_buffer(0, 1, wgpu::ShaderStages::COMPUTE, false)
+            .bind_storage_buffer(0, 2, wgpu::ShaderStages::COMPUTE, false)
+            .bind_storage_buffer(0, 3, wgpu::ShaderStages::COMPUTE, false)
+            .build(&mut engine.renderer);
         let swarm_params = {
             let wgpu_ctx = engine
                 .renderer
@@ -497,7 +404,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             controls: OrbitControls::new(Vec3::new(0.0, 4.8, 17.5), Vec3::new(0.0, 1.8, 0.0)),
             fps_counter: FpsCounter::new(),
             centerpiece,
-            swarm_pipeline,
+            swarm_pass,
             swarm_params,
             swarm_enabled: true,
             time: 0.0,
@@ -564,7 +471,7 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
             return;
         };
 
-        let pipeline_id = self.swarm_pipeline;
+        let swarm_pass = &self.swarm_pass;
         let params_buffer = &self.swarm_params;
         let swarm_enabled = self.swarm_enabled;
 
@@ -597,15 +504,21 @@ impl AppHandler for GpuDrivenParticleLightsDemo {
                                 BufferDesc::new(4, wgpu::BufferUsages::STORAGE),
                             );
 
-                            (
-                                GpuParticleLightNode {
-                                    light_metadata,
-                                    light_storage,
-                                    indirect_count_buffer,
-                                    params_buffer,
-                                    pipeline_id,
-                                    bind_group: None,
+                            let node = swarm_pass.build_node(
+                                builder,
+                                "GPU Particle Light Pass",
+                                [GPU_LIGHT_COUNT.div_ceil(PARTICLE_LIGHT_WG_SIZE), 1, 1],
+                                Some("GPU Particle Light BG"),
+                                |bindings| {
+                                    bindings.bind_tracked_buffer(0, 0, params_buffer);
+                                    bindings.bind_buffer(0, 1, light_metadata);
+                                    bindings.bind_buffer(0, 2, light_storage);
+                                    bindings.bind_buffer(0, 3, indirect_count_buffer);
                                 },
+                            );
+
+                            (
+                                node,
                                 GpuLightBuffers {
                                     light_metadata,
                                     light_storage,

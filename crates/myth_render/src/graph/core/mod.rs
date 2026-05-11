@@ -5,6 +5,7 @@ pub mod builder;
 pub mod context;
 pub mod graph;
 pub mod node;
+pub mod template_pass;
 pub mod types;
 
 pub use allocator::{SubViewKey, TransientPool};
@@ -18,6 +19,11 @@ pub use context::{
 };
 pub use graph::{GraphStorage, RenderGraph};
 pub use node::PassNode;
+pub use template_pass::{
+    ComputePassBuilder, RenderPassBuilder, StandardComputeNode, StandardFullscreenNode,
+    TemplateBindingLayoutDesc, TemplateComputePass, TemplateFullscreenPass,
+    TemplatePassBindingsBuilder, TemplatePassDescriptor, TemplateShaderSource,
+};
 pub use types::{
     Buffer, BufferDesc, BufferNodeId, GraphResourceType, RenderTargetOps, ResourceKind,
     ResourceNodeId, ResourceRecord, Texture, TextureDesc, TextureNodeId,

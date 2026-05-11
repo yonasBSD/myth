@@ -33,9 +33,9 @@ use crate::core::{ResourceManager, WgpuContext};
 use crate::graph::extracted::SceneFeatures;
 use crate::graph::{FrameComposer, RenderFrame};
 use crate::pipeline::{
-    ColorTargetKey, ComputePipelineId, ComputePipelineKey, DepthStencilKey,
-    FullscreenPipelineKey, MultisampleKey, PipelineCache, RenderPipelineId,
-    ShaderCompilationOptions, ShaderManager, ShaderSource,
+    ColorTargetKey, ComputePipelineId, ComputePipelineKey, DepthStencilKey, FullscreenPipelineKey,
+    MultisampleKey, PipelineCache, RenderPipelineId, ShaderCompilationOptions, ShaderManager,
+    ShaderSource,
 };
 use crate::settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
 
@@ -926,7 +926,7 @@ impl Renderer {
     /// path as engine-owned passes. The provided tracked bind-group layouts are
     /// also registered into [`PipelineCache`] so later RDG code can look them
     /// up by pipeline ID instead of carrying layouts through user state.
-    pub fn get_or_create_compute_pipeline(
+    pub(crate) fn get_or_create_compute_pipeline(
         &mut self,
         source: ShaderSource<'_>,
         shader_options: &ShaderCompilationOptions,
@@ -944,11 +944,8 @@ impl Renderer {
             state
                 .shader_manager
                 .get_or_compile(&state.wgpu_ctx.device, source, shader_options);
-        let (pipeline_layout, tracked_layouts) = build_pipeline_layout(
-            &state.wgpu_ctx.device,
-            bind_group_layouts,
-            &layout_label,
-        );
+        let (pipeline_layout, tracked_layouts) =
+            build_pipeline_layout(&state.wgpu_ctx.device, bind_group_layouts, &layout_label);
 
         let pipeline_id = state.pipeline_cache.get_or_create_compute(
             &state.wgpu_ctx.device,
@@ -972,7 +969,7 @@ impl Renderer {
     /// construction behind the same template system used by engine-owned
     /// passes, while also registering tracked bind-group layouts in
     /// [`PipelineCache`] for later lookup by pipeline ID.
-    pub fn get_or_create_fullscreen_pipeline(
+    pub(crate) fn get_or_create_fullscreen_pipeline(
         &mut self,
         source: ShaderSource<'_>,
         shader_options: &ShaderCompilationOptions,
@@ -992,11 +989,8 @@ impl Renderer {
             state
                 .shader_manager
                 .get_or_compile(&state.wgpu_ctx.device, source, shader_options);
-        let (pipeline_layout, tracked_layouts) = build_pipeline_layout(
-            &state.wgpu_ctx.device,
-            bind_group_layouts,
-            &layout_label,
-        );
+        let (pipeline_layout, tracked_layouts) =
+            build_pipeline_layout(&state.wgpu_ctx.device, bind_group_layouts, &layout_label);
         let key = FullscreenPipelineKey {
             shader_hash,
             color_targets: color_targets
