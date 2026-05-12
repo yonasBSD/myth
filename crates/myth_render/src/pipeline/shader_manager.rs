@@ -200,6 +200,12 @@ impl ShaderManager {
         self.custom_templates.insert(name, source.into());
     }
 
+    /// Returns whether a custom template has been registered under `name`.
+    #[must_use]
+    pub fn has_template(&self, name: &str) -> bool {
+        self.custom_templates.contains_key(name)
+    }
+
     /// Compile a shader (or return a cached module).
     ///
     /// For [`ShaderSource::File`], if a custom template was registered under

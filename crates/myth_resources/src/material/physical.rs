@@ -4,8 +4,6 @@ use myth_macros::myth_material;
 use parking_lot::RwLock;
 
 use crate::ShaderDefines;
-use crate::TextureHandle;
-use crate::material::{AlphaMode, Side};
 use crate::screen_space::FeatureId;
 use crate::uniforms::Mat3Uniform;
 
@@ -46,7 +44,7 @@ pub struct PhysicalMaterial {
     pub color: Vec4,
 
     /// Emissive color.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub emissive: Vec3,
 
     /// Emissive intensity.
@@ -90,11 +88,11 @@ pub struct PhysicalMaterial {
     pub specular_intensity: f32,
 
     /// Clearcoat factor.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub clearcoat: f32,
 
     /// Clearcoat roughness factor.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub clearcoat_roughness: f32,
 
     /// Clearcoat normal map scale.
@@ -102,27 +100,27 @@ pub struct PhysicalMaterial {
     pub clearcoat_normal_scale: Vec2,
 
     /// The sheen tint. Default is (0, 0, 0), black.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub sheen_color: Vec3,
 
     /// The sheen roughness. Default is 1.0.
-    #[uniform(default = "1.0")]
+    #[uniform(skip_builder, default = "1.0")]
     pub sheen_roughness: f32,
 
     /// The intensity of the iridescence layer, simulating RGB color shift based on the angle between the surface and the viewer.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub iridescence: f32,
 
     /// The strength of the iridescence RGB color shift effect, represented by an index-of-refraction. Default is 1.3.
-    #[uniform(default = "1.3")]
+    #[uniform(skip_builder, default = "1.3")]
     pub iridescence_ior: f32,
 
     /// The minimum thickness of the thin-film layer given in nanometers. Default is 100 nm.
-    #[uniform(default = "100.0")]
+    #[uniform(skip_builder, default = "100.0")]
     pub iridescence_thickness_min: f32,
 
     /// The maximum thickness of the thin-film layer given in nanometers. Default is 400 nm.
-    #[uniform(default = "400.0")]
+    #[uniform(skip_builder, default = "400.0")]
     pub iridescence_thickness_max: f32,
 
     /// Anisotropy direction vector (computed from angle and intensity).
@@ -130,23 +128,23 @@ pub struct PhysicalMaterial {
     pub anisotropy_vector: Vec2,
 
     /// The transmission factor controlling the amount of light that passes through the surface.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub transmission: f32,
 
     /// The thickness of the object used for subsurface absorption.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub thickness: f32,
 
     /// The color that light is attenuated towards as it passes through the material.
-    #[uniform(default = "Vec3::ONE")]
+    #[uniform(skip_builder, default = "Vec3::ONE")]
     pub attenuation_color: Vec3,
 
     /// The distance that light travels through the material before it is absorbed.
-    #[uniform(default = "-1.0f32")]
+    #[uniform(skip_builder, default = "-1.0f32")]
     pub attenuation_distance: f32,
 
     /// The amount of chromatic dispersion in the transmitted light.
-    #[uniform]
+    #[uniform(skip_builder)]
     pub dispersion: f32,
 
     /// Subsurface scattering feature ID.
@@ -247,29 +245,6 @@ impl PhysicalMaterial {
         })
     }
 
-    // -- Core builder methods --
-
-    /// Sets the base color (builder).
-    #[must_use]
-    pub fn with_color(self, color: Vec4) -> Self {
-        self.uniforms.write().color = color;
-        self
-    }
-
-    /// Sets the roughness factor (builder).
-    #[must_use]
-    pub fn with_roughness(self, roughness: f32) -> Self {
-        self.uniforms.write().roughness = roughness;
-        self
-    }
-
-    /// Sets the metalness factor (builder).
-    #[must_use]
-    pub fn with_metalness(self, metalness: f32) -> Self {
-        self.uniforms.write().metalness = metalness;
-        self
-    }
-
     /// Sets the emissive color and intensity (builder).
     #[must_use]
     pub fn with_emissive(self, color: Vec3, intensity: f32) -> Self {
@@ -278,90 +253,6 @@ impl PhysicalMaterial {
             u.emissive = color;
             u.emissive_intensity = intensity;
         }
-        self
-    }
-
-    /// Sets the opacity (builder).
-    #[must_use]
-    pub fn with_opacity(self, opacity: f32) -> Self {
-        self.uniforms.write().opacity = opacity;
-        self
-    }
-
-    /// Sets the index of refraction (builder).
-    #[must_use]
-    pub fn with_ior(self, ior: f32) -> Self {
-        self.uniforms.write().ior = ior;
-        self
-    }
-
-    /// Sets the normal map scale (builder).
-    #[must_use]
-    pub fn with_normal_scale(self, scale: Vec2) -> Self {
-        self.uniforms.write().normal_scale = scale;
-        self
-    }
-
-    /// Sets the color map texture (builder).
-    #[must_use]
-    pub fn with_map(self, handle: TextureHandle) -> Self {
-        self.set_map(Some(handle));
-        self
-    }
-
-    /// Sets the normal map texture (builder).
-    #[must_use]
-    pub fn with_normal_map(self, handle: TextureHandle) -> Self {
-        self.set_normal_map(Some(handle));
-        self
-    }
-
-    /// Sets the roughness map texture (builder).
-    #[must_use]
-    pub fn with_roughness_map(self, handle: TextureHandle) -> Self {
-        self.set_roughness_map(Some(handle));
-        self
-    }
-
-    /// Sets the metalness map texture (builder).
-    #[must_use]
-    pub fn with_metalness_map(self, handle: TextureHandle) -> Self {
-        self.set_metalness_map(Some(handle));
-        self
-    }
-
-    /// Sets the emissive map texture (builder).
-    #[must_use]
-    pub fn with_emissive_map(self, handle: TextureHandle) -> Self {
-        self.set_emissive_map(Some(handle));
-        self
-    }
-
-    /// Sets the AO map texture (builder).
-    #[must_use]
-    pub fn with_ao_map(self, handle: TextureHandle) -> Self {
-        self.set_ao_map(Some(handle));
-        self
-    }
-
-    /// Sets the face culling side (builder).
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-
-    /// Sets the alpha mode (builder).
-    #[must_use]
-    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
-        self.set_alpha_mode(mode);
-        self
-    }
-
-    /// Sets depth write (builder).
-    #[must_use]
-    pub fn with_depth_write(self, enabled: bool) -> Self {
-        self.set_depth_write(enabled);
         self
     }
 
@@ -562,8 +453,3 @@ impl PhysicalMaterial {
     }
 }
 
-impl Default for PhysicalMaterial {
-    fn default() -> Self {
-        Self::new(Vec4::ONE)
-    }
-}

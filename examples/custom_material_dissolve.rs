@@ -137,7 +137,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_dissolve_energy")]
+#[myth_material(shader = "custom_dissolve_energy", shader_src = DISSOLVE_SHADER)]
 pub struct DissolveMaterial {
     #[uniform(default = "Vec4::new(0.16, 0.42, 0.98, 1.0)")]
     pub base_color: Vec4,
@@ -167,65 +167,6 @@ pub struct DissolveMaterial {
     pub phase_offset: f32,
 }
 
-impl DissolveMaterial {
-    #[must_use]
-    pub fn new(base_color: Vec4, edge_color: Vec4) -> Self {
-        Self::from_uniforms(DissolveUniforms {
-            base_color,
-            edge_color,
-            ..Default::default()
-        })
-    }
-
-    #[must_use]
-    pub fn with_noise_scale(self, value: f32) -> Self {
-        self.uniforms.write().noise_scale = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_dissolve_width(self, value: f32) -> Self {
-        self.uniforms.write().dissolve_width = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_dissolve_speed(self, value: f32) -> Self {
-        self.uniforms.write().dissolve_speed = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_displacement(self, value: f32) -> Self {
-        self.uniforms.write().displacement = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_phase_offset(self, value: f32) -> Self {
-        self.uniforms.write().phase_offset = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
-        self.set_alpha_mode(mode);
-        self
-    }
-
-    #[must_use]
-    pub fn with_depth_write(self, enabled: bool) -> Self {
-        self.set_depth_write(enabled);
-        self
-    }
-
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-}
-
 struct DissolveDemo {
     box_node: NodeHandle,
     sphere_node: NodeHandle,
@@ -236,10 +177,6 @@ struct DissolveDemo {
 
 impl AppHandler for DissolveDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_dissolve_energy", DISSOLVE_SHADER);
-
         let scene = engine.scene_manager.create_active();
 
         let ground = scene.spawn_plane(
@@ -264,10 +201,9 @@ impl AppHandler for DissolveDemo {
             1.7,
             1.7,
             Material::new_custom(
-                DissolveMaterial::new(
-                    Vec4::new(0.18, 0.55, 1.0, 1.0),
-                    Vec4::new(1.20, 0.65, 0.22, 1.0),
-                )
+                DissolveMaterial::default()
+                .with_base_color(Vec4::new(0.18, 0.55, 1.0, 1.0))
+                .with_edge_color(Vec4::new(1.20, 0.65, 0.22, 1.0))
                 .with_noise_scale(2.3)
                 .with_dissolve_width(0.10)
                 .with_dissolve_speed(1.6)
@@ -284,10 +220,9 @@ impl AppHandler for DissolveDemo {
         let sphere_node = scene.spawn_sphere(
             1.0,
             Material::new_custom(
-                DissolveMaterial::new(
-                    Vec4::new(0.22, 1.00, 0.74, 1.0),
-                    Vec4::new(1.00, 1.25, 0.35, 1.0),
-                )
+                DissolveMaterial::default()
+                .with_base_color(Vec4::new(0.22, 1.00, 0.74, 1.0))
+                .with_edge_color(Vec4::new(1.00, 1.25, 0.35, 1.0))
                 .with_noise_scale(3.0)
                 .with_dissolve_width(0.12)
                 .with_dissolve_speed(2.2)
@@ -306,10 +241,9 @@ impl AppHandler for DissolveDemo {
             2.6,
             0.9,
             Material::new_custom(
-                DissolveMaterial::new(
-                    Vec4::new(0.90, 0.22, 1.05, 1.0),
-                    Vec4::new(1.25, 0.72, 1.20, 1.0),
-                )
+                DissolveMaterial::default()
+                .with_base_color(Vec4::new(0.90, 0.22, 1.05, 1.0))
+                .with_edge_color(Vec4::new(1.25, 0.72, 1.20, 1.0))
                 .with_noise_scale(2.9)
                 .with_dissolve_width(0.08)
                 .with_dissolve_speed(1.9)

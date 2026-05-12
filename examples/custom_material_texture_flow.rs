@@ -118,7 +118,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_texture_flow")]
+#[myth_material(shader = "custom_texture_flow", shader_src = TEXTURE_FLOW_SHADER)]
 pub struct TextureFlowMaterial {
     #[uniform(default = "Vec4::new(0.14, 0.72, 1.20, 1.0)")]
     pub tint: Vec4,
@@ -148,65 +148,6 @@ pub struct TextureFlowMaterial {
     pub map: TextureSlot,
 }
 
-impl TextureFlowMaterial {
-    #[must_use]
-    pub fn new(tint: Vec4, glow_color: Vec4) -> Self {
-        Self::from_uniforms(TextureFlowUniforms {
-            tint,
-            glow_color,
-            ..Default::default()
-        })
-    }
-
-    #[must_use]
-    pub fn with_repeat(self, value: f32) -> Self {
-        self.uniforms.write().repeat = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_flow_speed(self, value: f32) -> Self {
-        self.uniforms.write().flow_speed = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_distortion(self, value: f32) -> Self {
-        self.uniforms.write().distortion = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_panel_warp(self, value: f32) -> Self {
-        self.uniforms.write().panel_warp = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_map(self, handle: TextureHandle) -> Self {
-        self.set_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
-        self.set_alpha_mode(mode);
-        self
-    }
-
-    #[must_use]
-    pub fn with_depth_write(self, enabled: bool) -> Self {
-        self.set_depth_write(enabled);
-        self
-    }
-
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-}
-
 struct TextureFlowDemo {
     panel_left: NodeHandle,
     panel_right: NodeHandle,
@@ -217,10 +158,6 @@ struct TextureFlowDemo {
 
 impl AppHandler for TextureFlowDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_texture_flow", TEXTURE_FLOW_SHADER);
-
         let scene = engine.scene_manager.create_active();
         let checker = engine.assets.checkerboard(512, 16);
 
@@ -245,10 +182,9 @@ impl AppHandler for TextureFlowDemo {
             2.8,
             3.8,
             Material::new_custom(
-                TextureFlowMaterial::new(
-                    Vec4::new(0.18, 0.85, 1.20, 1.0),
-                    Vec4::new(0.95, 1.18, 1.28, 1.0),
-                )
+                TextureFlowMaterial::default()
+                .with_tint(Vec4::new(0.18, 0.85, 1.20, 1.0))
+                .with_glow_color(Vec4::new(0.95, 1.18, 1.28, 1.0))
                 .with_map(checker)
                 .with_repeat(3.6)
                 .with_flow_speed(1.8)
@@ -269,10 +205,9 @@ impl AppHandler for TextureFlowDemo {
             2.8,
             3.8,
             Material::new_custom(
-                TextureFlowMaterial::new(
-                    Vec4::new(1.05, 0.22, 0.85, 1.0),
-                    Vec4::new(1.30, 0.92, 1.20, 1.0),
-                )
+                TextureFlowMaterial::default()
+                .with_tint(Vec4::new(1.05, 0.22, 0.85, 1.0))
+                .with_glow_color(Vec4::new(1.30, 0.92, 1.20, 1.0))
                 .with_map(checker)
                 .with_repeat(4.2)
                 .with_flow_speed(2.2)
@@ -294,10 +229,9 @@ impl AppHandler for TextureFlowDemo {
             1.4,
             1.4,
             Material::new_custom(
-                TextureFlowMaterial::new(
-                    Vec4::new(0.20, 1.00, 0.72, 1.0),
-                    Vec4::new(1.00, 1.24, 0.94, 1.0),
-                )
+                TextureFlowMaterial::default()
+                .with_tint(Vec4::new(0.20, 1.00, 0.72, 1.0))
+                .with_glow_color(Vec4::new(1.00, 1.24, 0.94, 1.0))
                 .with_map(checker)
                 .with_repeat(2.2)
                 .with_flow_speed(1.4)

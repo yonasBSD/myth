@@ -97,7 +97,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_triplanar_surface")]
+#[myth_material(shader = "custom_triplanar_surface", shader_src = TRIPLANAR_SHADER)]
 pub struct TriplanarMaterial {
     #[uniform(default = "Vec4::new(0.95, 0.95, 1.02, 1.0)")]
     pub base_tint: Vec4,
@@ -130,43 +130,6 @@ pub struct TriplanarMaterial {
     pub map: TextureSlot,
 }
 
-impl TriplanarMaterial {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(TriplanarUniforms::default())
-    }
-
-    #[must_use]
-    pub fn with_map(self, handle: TextureHandle) -> Self {
-        self.set_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_texture_scale(self, value: f32) -> Self {
-        self.uniforms.write().texture_scale = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_blend_sharpness(self, value: f32) -> Self {
-        self.uniforms.write().blend_sharpness = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_contrast(self, value: f32) -> Self {
-        self.uniforms.write().contrast = value;
-        self
-    }
-}
-
-impl Default for TriplanarMaterial {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct TriplanarDemo {
     monolith_a: NodeHandle,
     monolith_b: NodeHandle,
@@ -177,10 +140,6 @@ struct TriplanarDemo {
 
 impl AppHandler for TriplanarDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_triplanar_surface", TRIPLANAR_SHADER);
-
         let scene = engine.scene_manager.create_active();
 
         let env = engine.assets.load_cube_texture(

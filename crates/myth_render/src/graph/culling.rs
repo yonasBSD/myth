@@ -39,6 +39,7 @@ use crate::pipeline::{
     BlendStateKey, DepthStencilKey, FastPipelineKey, FastShadowPipelineKey, GraphicsPipelineKey,
     PipelineCache, ShaderManager, SimpleGeometryPipelineKey,
 };
+use myth_resources::RenderableMaterialTrait;
 use myth_assets::AssetServer;
 use myth_resources::AntiAliasingMode;
 use myth_resources::material::{AlphaMode, Side};
@@ -218,6 +219,13 @@ fn prepare_main_camera_commands(
             let pipeline_id = if let Some(id) = pipeline_cache.get_pipeline_fast(fast_key) {
                 id
             } else {
+                if let Some(template_source) = material.shader_template(){
+                    let template_name = material.shader_name();
+                    if !shader_manager.has_template(template_name) {
+                        shader_manager.register_template(template_name, template_source);
+                    }
+                }
+
                 let geo_defines = geometry.shader_defines();
                 let mat_defines = material.shader_defines();
 

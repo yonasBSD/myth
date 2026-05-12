@@ -150,8 +150,8 @@ pub mod prelude {
     // Resources
     pub use myth_resources::{
         AlphaMode, BloomSettings, FxaaQuality, FxaaSettings, Geometry, Image, Material,
-        MaterialType, Mesh, PhongMaterial, PhysicalMaterial, Side, SsaoSettings, TaaSettings,
-        Texture, TextureSlot, UnlitMaterial,
+        MaterialType, Mesh, PhongMaterial, PhysicalMaterial, RenderableMaterialTrait, Side,
+        SsaoSettings, TaaSettings, Texture, TextureSlot, UnlitMaterial,
     };
 
     // Assets

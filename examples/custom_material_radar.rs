@@ -91,7 +91,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_radar_sweep")]
+#[myth_material(shader = "custom_radar_sweep", shader_src = RADAR_SHADER)]
 pub struct RadarMaterial {
     #[uniform(default = "Vec4::new(0.06, 0.22, 0.14, 1.0)")]
     pub base_color: Vec4,
@@ -121,67 +121,6 @@ pub struct RadarMaterial {
     pub sweep_power: f32,
 }
 
-impl RadarMaterial {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(RadarUniforms::default())
-    }
-
-    #[must_use]
-    pub fn with_grid_scale(self, value: f32) -> Self {
-        self.uniforms.write().grid_scale = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_ring_density(self, value: f32) -> Self {
-        self.uniforms.write().ring_density = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_sweep_speed(self, value: f32) -> Self {
-        self.uniforms.write().sweep_speed = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_sweep_power(self, value: f32) -> Self {
-        self.uniforms.write().sweep_power = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_opacity(self, value: f32) -> Self {
-        self.uniforms.write().opacity = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
-        self.set_alpha_mode(mode);
-        self
-    }
-
-    #[must_use]
-    pub fn with_depth_write(self, enabled: bool) -> Self {
-        self.set_depth_write(enabled);
-        self
-    }
-
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-}
-
-impl Default for RadarMaterial {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct RadarSweepDemo {
     blip_a: NodeHandle,
     blip_b: NodeHandle,
@@ -191,17 +130,13 @@ struct RadarSweepDemo {
 
 impl AppHandler for RadarSweepDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_radar_sweep", RADAR_SHADER);
-
         let scene = engine.scene_manager.create_active();
 
         let radar_plane = scene.spawn_plane(
             8.0,
             8.0,
             Material::new_custom(
-                RadarMaterial::default()
+                RadarMaterial::new()
                     .with_grid_scale(20.0)
                     .with_ring_density(2.2)
                     .with_sweep_speed(1.6)

@@ -123,7 +123,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "hologram_energy")]
+#[myth_material(shader = "hologram_energy", shader_src = HOLOGRAM_SHADER)]
 pub struct HologramMaterial {
     /// Main body color of the hologram.
     #[uniform(default = "Vec4::new(0.08, 0.78, 1.15, 1.0)")]
@@ -172,76 +172,12 @@ pub struct HologramMaterial {
 
 impl HologramMaterial {
     #[must_use]
-    pub fn new(base_color: Vec4, edge_color: Vec4, scan_color: Vec4) -> Self {
-        Self::from_uniforms(HologramUniforms {
-            base_color,
-            edge_color,
-            scan_color,
-            ..Default::default()
-        })
-    }
-
-    #[must_use]
-    pub fn with_opacity(self, opacity: f32) -> Self {
-        self.uniforms.write().opacity = opacity;
-        self
-    }
-
-    #[must_use]
-    pub fn with_grid_scale(self, grid_scale: f32) -> Self {
-        self.uniforms.write().grid_scale = grid_scale;
-        self
-    }
-
-    #[must_use]
-    pub fn with_scan_density(self, scan_density: f32) -> Self {
-        self.uniforms.write().scan_density = scan_density;
-        self
-    }
-
-    #[must_use]
-    pub fn with_pulse_speed(self, pulse_speed: f32) -> Self {
-        self.uniforms.write().pulse_speed = pulse_speed;
-        self
-    }
-
-    #[must_use]
-    pub fn with_displacement(self, displacement: f32) -> Self {
-        self.uniforms.write().displacement = displacement;
-        self
-    }
-
-    #[must_use]
     pub fn with_fresnel(self, power: f32, intensity: f32) -> Self {
         let mut uniforms = self.uniforms.write();
         uniforms.fresnel_power = power;
         uniforms.fresnel_intensity = intensity;
         drop(uniforms);
         self
-    }
-
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-
-    #[must_use]
-    pub fn with_alpha_mode(self, mode: AlphaMode) -> Self {
-        self.set_alpha_mode(mode);
-        self
-    }
-
-    #[must_use]
-    pub fn with_depth_write(self, enabled: bool) -> Self {
-        self.set_depth_write(enabled);
-        self
-    }
-}
-
-impl Default for HologramMaterial {
-    fn default() -> Self {
-        Self::from_uniforms(HologramUniforms::default())
     }
 }
 
@@ -255,10 +191,6 @@ struct CustomMaterialDemo {
 
 impl AppHandler for CustomMaterialDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("hologram_energy", HOLOGRAM_SHADER);
-
         let scene = engine.scene_manager.create_active();
 
         let ground = scene.spawn_plane(
@@ -307,11 +239,10 @@ impl AppHandler for CustomMaterialDemo {
             2.6,
             0.85,
             Material::new_custom(
-                HologramMaterial::new(
-                    Vec4::new(1.00, 0.18, 0.55, 1.0),
-                    Vec4::new(1.30, 0.75, 1.00, 1.0),
-                    Vec4::new(0.75, 0.10, 0.95, 1.0),
-                )
+                HologramMaterial::default()
+                .with_base_color(Vec4::new(1.00, 0.18, 0.55, 1.0))
+                .with_edge_color(Vec4::new(1.30, 0.75, 1.00, 1.0))
+                .with_scan_color(Vec4::new(0.75, 0.10, 0.95, 1.0))
                 .with_grid_scale(6.0)
                 .with_scan_density(18.0)
                 .with_pulse_speed(3.4)
@@ -329,11 +260,10 @@ impl AppHandler for CustomMaterialDemo {
         let satellite_sphere = scene.spawn_sphere(
             0.9,
             Material::new_custom(
-                HologramMaterial::new(
-                    Vec4::new(0.10, 1.05, 0.68, 1.0),
-                    Vec4::new(0.95, 1.45, 1.10, 1.0),
-                    Vec4::new(0.15, 0.95, 0.55, 1.0),
-                )
+                HologramMaterial::default()
+                .with_base_color(Vec4::new(0.10, 1.05, 0.68, 1.0))
+                .with_edge_color(Vec4::new(0.95, 1.45, 1.10, 1.0))
+                .with_scan_color(Vec4::new(0.15, 0.95, 0.55, 1.0))
                 .with_grid_scale(9.0)
                 .with_scan_density(11.0)
                 .with_pulse_speed(2.8)

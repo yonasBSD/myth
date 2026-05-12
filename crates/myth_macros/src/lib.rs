@@ -46,6 +46,7 @@ mod parse;
 /// | Attribute | Required | Description |
 /// |-----------|----------|-------------|
 /// | `shader = "path"` | Yes | Shader template path |
+/// | `shader_src = EXPR` | No | Embedded WGSL source used for lazy registration |
 /// | `crate_path = "path"` | No | Path to `myth_resources` (default: `myth_resources`) |
 ///
 /// # Field Attributes
@@ -55,6 +56,7 @@ mod parse;
 /// | `#[uniform]` | Exposes a uniform struct field as a get/set property |
 /// | `#[uniform(default = "expr")]` | Same, with a custom default value |
 /// | `#[uniform(hidden)]` | Includes in uniform struct without generating accessors |
+/// | `#[uniform(skip_builder)]` | Skips the generated `with_xxx` builder while keeping accessors |
 /// | `#[texture]` | Declares a texture slot with automatic GPU binding |
 /// | `#[internal(...)]` | Preserves a field in the generated struct |
 ///
@@ -70,12 +72,13 @@ mod parse;
 /// 1. **Uniform struct** — `{Name}Uniforms` with std140 padding, `Pod`/`Zeroable`/`GpuData`/`WgslStruct`
 /// 2. **TextureSet struct** — `{Name}TextureSet` containing all texture slots
 /// 3. **Material struct** — Rewritten with `CpuBuffer`, `RwLock`, `AtomicU64` internals
-/// 4. **Constructor** — `from_uniforms(uniforms) -> Self`
-/// 5. **Settings API** — `set_alpha_mode`, `set_side`, `set_depth_test`, `set_depth_write`
-/// 6. **Uniform accessors** — Per-field `set_xxx` / `xxx` with double-check locking
-/// 7. **Texture accessors** — Per-slot `set_xxx`, `xxx`, `configure_xxx`
-/// 8. **Clone impl** — Deep clone with atomic version snapshot
-/// 9. **Trait impls** — `MaterialTrait` + `RenderableMaterialTrait`
+/// 4. **Material defaults** — `Default` backed by the generated uniform defaults
+/// 5. **Constructor** — `from_uniforms(uniforms) -> Self`
+/// 6. **Settings API** — `set_xxx` / `with_xxx` for simple render-state toggles
+/// 7. **Uniform accessors** — Per-field `set_xxx` / `xxx` / `with_xxx`
+/// 8. **Texture accessors** — Per-slot `set_xxx`, `xxx`, `with_xxx`, `configure_xxx`
+/// 9. **Clone impl** — Deep clone with atomic version snapshot
+/// 10. **Trait impls** — `MaterialTrait` + `RenderableMaterialTrait`
 #[proc_macro_attribute]
 pub fn myth_material(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = syn::parse_macro_input!(attr as parse::MaterialAttrs);

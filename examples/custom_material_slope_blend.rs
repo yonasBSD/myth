@@ -111,7 +111,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_slope_blend")]
+#[myth_material(shader = "custom_slope_blend", shader_src = SLOPE_BLEND_SHADER)]
 pub struct SlopeBlendMaterial {
     #[uniform(default = "Vec4::new(0.72, 0.63, 0.50, 1.0)")]
     pub base_tint: Vec4,
@@ -152,47 +152,12 @@ pub struct SlopeBlendMaterial {
 
 impl SlopeBlendMaterial {
     #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(SlopeBlendUniforms::default())
-    }
-
-    #[must_use]
-    pub fn with_map(self, handle: TextureHandle) -> Self {
-        self.set_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_repeat(self, value: f32) -> Self {
-        self.uniforms.write().repeat = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_noise_scale(self, value: f32) -> Self {
-        self.uniforms.write().noise_scale = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_slope_power(self, value: f32) -> Self {
-        self.uniforms.write().slope_power = value;
-        self
-    }
-
-    #[must_use]
     pub fn with_height_range(self, start: f32, end: f32) -> Self {
         let mut uniforms = self.uniforms.write();
         uniforms.height_start = start;
         uniforms.height_end = end;
         drop(uniforms);
         self
-    }
-}
-
-impl Default for SlopeBlendMaterial {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -206,10 +171,6 @@ struct SlopeBlendDemo {
 
 impl AppHandler for SlopeBlendDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_slope_blend", SLOPE_BLEND_SHADER);
-
         let scene = engine.scene_manager.create_active();
         let mut sky = ProceduralSkyParams::golden_hour();
         let starbox = engine.assets.load_texture(

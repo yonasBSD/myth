@@ -17,6 +17,7 @@ pub fn generate(attrs: MaterialAttrs, input: DeriveInput) -> syn::Result<TokenSt
     let uniform_struct = gen_uniform_struct(&def)?;
     let texture_set = gen_texture_set(&def);
     let material_struct = gen_material_struct(&def);
+    let default_impl = gen_default_impl(&def);
     let api_impl = gen_api_impl(&def);
     let clone_impl = gen_clone_impl(&def);
     let material_trait = gen_material_trait(&def);
@@ -26,6 +27,7 @@ pub fn generate(attrs: MaterialAttrs, input: DeriveInput) -> syn::Result<TokenSt
         #uniform_struct
         #texture_set
         #material_struct
+        #default_impl
         #api_impl
         #clone_impl
         #material_trait
@@ -334,6 +336,18 @@ fn gen_constructor(def: &MaterialDef) -> TokenStream {
     }
 }
 
+fn gen_default_impl(def: &MaterialDef) -> TokenStream {
+    let name = &def.name;
+
+    quote! {
+        impl Default for #name {
+            fn default() -> Self {
+                Self::from_uniforms(Default::default())
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Settings API
 // ============================================================================
@@ -364,6 +378,13 @@ fn gen_settings_api(def: &MaterialDef) -> TokenStream {
             self.settings_mut().alpha_mode = mode;
         }
 
+        /// Sets the alpha blending mode (builder).
+        #[must_use]
+        pub fn with_alpha_mode(self, mode: #cr::material::AlphaMode) -> Self {
+            self.set_alpha_mode(mode);
+            self
+        }
+
         /// Returns the current alpha blending mode.
         pub fn alpha_mode(&self) -> #cr::material::AlphaMode {
             self.settings.read().alpha_mode
@@ -372,6 +393,13 @@ fn gen_settings_api(def: &MaterialDef) -> TokenStream {
         /// Sets the face culling mode (Front/Back/Double).
         pub fn set_side(&self, side: #cr::material::Side) {
             self.settings_mut().side = side;
+        }
+
+        /// Sets the face culling mode (builder).
+        #[must_use]
+        pub fn with_side(self, side: #cr::material::Side) -> Self {
+            self.set_side(side);
+            self
         }
 
         /// Returns the current face culling mode.
@@ -384,6 +412,13 @@ fn gen_settings_api(def: &MaterialDef) -> TokenStream {
             self.settings_mut().depth_test = depth_test;
         }
 
+        /// Enables or disables depth testing (builder).
+        #[must_use]
+        pub fn with_depth_test(self, depth_test: bool) -> Self {
+            self.set_depth_test(depth_test);
+            self
+        }
+
         /// Returns whether depth testing is enabled.
         pub fn depth_test(&self) -> bool {
             self.settings.read().depth_test
@@ -394,6 +429,13 @@ fn gen_settings_api(def: &MaterialDef) -> TokenStream {
         /// For transparent objects, it is usually recommended to disable this.
         pub fn set_depth_write(&self, depth_write: bool) {
             self.settings_mut().depth_write = depth_write;
+        }
+
+        /// Enables or disables depth writing (builder).
+        #[must_use]
+        pub fn with_depth_write(self, depth_write: bool) -> Self {
+            self.set_depth_write(depth_write);
+            self
         }
 
         /// Returns whether depth buffer writing is enabled.
@@ -416,7 +458,20 @@ fn gen_uniform_accessors(def: &MaterialDef) -> TokenStream {
         let name = &f.name;
         let ty = &f.ty;
         let setter_name = format_ident!("set_{}", name);
+        let builder_name = format_ident!("with_{}", name);
         let docs = &f.docs;
+        let builder = if f.skip_builder {
+            quote! {}
+        } else {
+            quote! {
+                #(#docs)*
+                #[must_use]
+                pub fn #builder_name(self, value: #ty) -> Self {
+                    self.#setter_name(value);
+                    self
+                }
+            }
+        };
 
         quote! {
             #(#docs)*
@@ -440,6 +495,8 @@ fn gen_uniform_accessors(def: &MaterialDef) -> TokenStream {
             pub fn #name(&self) -> #ty {
                 self.uniforms.read().#name
             }
+
+            #builder
         }
     });
 
@@ -472,6 +529,7 @@ fn gen_texture_accessors(def: &MaterialDef) -> TokenStream {
     let accessors = def.texture_fields.iter().map(|f| {
         let name = &f.name;
         let setter_name = format_ident!("set_{}", name);
+        let builder_name = format_ident!("with_{}", name);
         let transform_setter = format_ident!("set_{}_transform", name);
         let configure_name = format_ident!("configure_{}", name);
         let docs = &f.docs;
@@ -489,6 +547,13 @@ fn gen_texture_accessors(def: &MaterialDef) -> TokenStream {
             #(#docs)*
             pub fn #name(&self) -> Option<#cr::TextureHandle> {
                 self.textures.read().#name.texture.clone()
+            }
+
+            #(#docs)*
+            #[must_use]
+            pub fn #builder_name(self, value: impl Into<Option<#cr::TextureHandle>>) -> Self {
+                self.#setter_name(value.into());
+                self
             }
 
             /// Sets the UV transform for this texture slot.
@@ -661,6 +726,13 @@ fn gen_renderable_trait(def: &MaterialDef) -> TokenStream {
     let name = &def.name;
     let uniforms_type = def.uniform_struct_name();
     let shader = &def.shader;
+    let shader_template_impl = def.shader_src.as_ref().map(|shader_src| {
+        quote! {
+            fn shader_template(&self) -> Option<&'static str> {
+                Some(#shader_src)
+            }
+        }
+    });
 
     let has_textures = !def.texture_fields.is_empty();
 
@@ -737,6 +809,8 @@ fn gen_renderable_trait(def: &MaterialDef) -> TokenStream {
             fn shader_name(&self) -> &'static str {
                 #shader
             }
+
+            #shader_template_impl
 
             fn version(&self) -> u64 {
                 self.version.load(std::sync::atomic::Ordering::Relaxed)

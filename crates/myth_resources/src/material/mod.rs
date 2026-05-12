@@ -277,8 +277,22 @@ pub trait MaterialTrait: Any + Send + Sync + std::fmt::Debug {
 ///
 /// See `PhysicalMaterial` for a reference implementation.
 pub trait RenderableMaterialTrait: MaterialTrait {
+    /// Creates a material from its generated defaults.
+    fn new() -> Self
+    where
+        Self: Default + Sized,
+    {
+        Self::default()
+    }
+
     /// Returns the shader template name.
     fn shader_name(&self) -> &'static str;
+    /// Returns an embedded shader template for lazy registration.
+    ///
+    /// Built-in materials use engine-managed templates and therefore return `None`.
+    fn shader_template(&self) -> Option<&'static str> {
+        None
+    }
     /// Returns the material version (used for cache invalidation).
     fn version(&self) -> u64;
     /// Returns shader macro definitions based on current material state.
@@ -475,6 +489,15 @@ impl RenderableMaterialTrait for MaterialType {
             Self::Phong(m) => m.shader_name(),
             Self::Physical(m) => m.shader_name(),
             Self::Custom(m) => m.shader_name(),
+        }
+    }
+
+    fn shader_template(&self) -> Option<&'static str> {
+        match self {
+            Self::Unlit(m) => m.shader_template(),
+            Self::Phong(m) => m.shader_template(),
+            Self::Physical(m) => m.shader_template(),
+            Self::Custom(m) => m.shader_template(),
         }
     }
 

@@ -106,7 +106,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "custom_detail_surface")]
+#[myth_material(shader = "custom_detail_surface", shader_src = DETAIL_SURFACE_SHADER)]
 pub struct DetailSurfaceMaterial {
     #[uniform(default = "Vec4::new(0.96, 0.96, 1.0, 1.0)")]
     pub base_tint: Vec4,
@@ -145,61 +145,6 @@ pub struct DetailSurfaceMaterial {
     pub emissive_map: TextureSlot,
 }
 
-impl DetailSurfaceMaterial {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(DetailSurfaceUniforms::default())
-    }
-
-    #[must_use]
-    pub fn with_map(self, handle: TextureHandle) -> Self {
-        self.set_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_normal_map(self, handle: TextureHandle) -> Self {
-        self.set_normal_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_emissive_map(self, handle: TextureHandle) -> Self {
-        self.set_emissive_map(Some(handle));
-        self
-    }
-
-    #[must_use]
-    pub fn with_emissive_intensity(self, value: f32) -> Self {
-        self.uniforms.write().emissive_intensity = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_flow_speed(self, value: f32) -> Self {
-        self.uniforms.write().flow_speed = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_rim_power(self, value: f32) -> Self {
-        self.uniforms.write().rim_power = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_uv_scale(self, value: f32) -> Self {
-        self.uniforms.write().uv_scale = value;
-        self
-    }
-}
-
-impl Default for DetailSurfaceMaterial {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct DetailSurfaceDemo {
     panel_left: NodeHandle,
     panel_right: NodeHandle,
@@ -210,10 +155,6 @@ struct DetailSurfaceDemo {
 
 impl AppHandler for DetailSurfaceDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("custom_detail_surface", DETAIL_SURFACE_SHADER);
-
         let scene = engine.scene_manager.create_active();
         scene.background.set_mode(BackgroundMode::Gradient {
             top: Vec4::new(0.02, 0.05, 0.11, 1.0),

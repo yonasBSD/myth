@@ -15,12 +15,14 @@ use syn::{
 /// Configuration parsed from `#[myth_material(shader = "...", ...)]`.
 pub struct MaterialAttrs {
     pub shader: String,
+    pub shader_src: Option<Expr>,
     pub crate_path: Path,
 }
 
 impl Parse for MaterialAttrs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut shader = None;
+        let mut shader_src = None;
         let mut crate_path = None;
 
         while !input.is_empty() {
@@ -31,6 +33,9 @@ impl Parse for MaterialAttrs {
                 "shader" => {
                     let lit: LitStr = input.parse()?;
                     shader = Some(lit.value());
+                }
+                "shader_src" => {
+                    shader_src = Some(input.parse()?);
                 }
                 "crate_path" => {
                     let lit: LitStr = input.parse()?;
@@ -51,6 +56,7 @@ impl Parse for MaterialAttrs {
 
         Ok(Self {
             shader: shader.ok_or_else(|| input.error("missing required attribute `shader`"))?,
+            shader_src,
             crate_path: crate_path
                 .unwrap_or_else(|| syn::parse_str("myth_resources").expect("valid path")),
         })
@@ -66,6 +72,7 @@ pub struct MaterialDef {
     pub vis: Visibility,
     pub name: Ident,
     pub shader: String,
+    pub shader_src: Option<Expr>,
     pub crate_path: Path,
     pub uniform_fields: Vec<UniformField>,
     pub texture_fields: Vec<TextureField>,
@@ -81,6 +88,8 @@ pub struct UniformField {
     /// When `true`, the field is included in the uniform struct but
     /// no public getter/setter is generated.
     pub hidden: bool,
+    /// When `true`, the public chainable builder is not generated.
+    pub skip_builder: bool,
 }
 
 /// A field marked with `#[texture]` — generates a texture slot in the texture set.
@@ -145,6 +154,7 @@ impl MaterialDef {
                 FieldKind::Uniform {
                     default_expr,
                     hidden,
+                    skip_builder,
                 } => {
                     uniform_fields.push(UniformField {
                         name: field_name,
@@ -152,6 +162,7 @@ impl MaterialDef {
                         docs,
                         default_expr,
                         hidden,
+                        skip_builder,
                     });
                 }
                 FieldKind::Texture => {
@@ -180,6 +191,7 @@ impl MaterialDef {
             vis,
             name,
             shader: attrs.shader,
+            shader_src: attrs.shader_src,
             crate_path: attrs.crate_path,
             uniform_fields,
             texture_fields,
@@ -210,6 +222,7 @@ enum FieldKind {
     Uniform {
         default_expr: Option<Expr>,
         hidden: bool,
+        skip_builder: bool,
     },
     Texture,
     Internal {
@@ -226,6 +239,7 @@ fn classify_field(field: &Field) -> syn::Result<FieldKind> {
     let mut default_expr = None;
     let mut clone_expr = None;
     let mut hidden = false;
+    let mut skip_builder = false;
 
     for attr in &field.attrs {
         if attr.path().is_ident("uniform") {
@@ -238,6 +252,8 @@ fn classify_field(field: &Field) -> syn::Result<FieldKind> {
                         default_expr = Some(syn::parse_str(&lit.value())?);
                     } else if meta.path.is_ident("hidden") {
                         hidden = true;
+                    } else if meta.path.is_ident("skip_builder") {
+                        skip_builder = true;
                     } else {
                         return Err(meta.error("unknown uniform attribute"));
                     }
@@ -289,6 +305,7 @@ fn classify_field(field: &Field) -> syn::Result<FieldKind> {
         Ok(FieldKind::Uniform {
             default_expr,
             hidden,
+            skip_builder,
         })
     } else if is_texture {
         Ok(FieldKind::Texture)

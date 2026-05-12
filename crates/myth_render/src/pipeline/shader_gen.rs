@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
+use std::borrow::Cow;
 
 use super::shader_manager::{LocationAllocator, get_env};
 use minijinja::value::Value;
@@ -125,6 +126,36 @@ struct ShaderContext<'a> {
 pub struct ShaderGenerator;
 
 impl ShaderGenerator {
+    fn normalize_custom_template<'a>(
+        template_source: &'a str,
+        options: &ShaderCompilationOptions,
+    ) -> Cow<'a, str> {
+        if !template_source.contains("binding_code") {
+            return Cow::Borrowed(template_source);
+        }
+
+        let mut prefix = String::new();
+
+        if options.code_blocks.contains_key("scene_lighting_structs")
+            && !template_source.contains("scene_lighting_structs")
+        {
+            prefix.push_str("{{ scene_lighting_structs }}\n");
+        }
+
+        if options.code_blocks.contains_key("clustered_lighting_structs")
+            && !template_source.contains("clustered_lighting_structs")
+        {
+            prefix.push_str("{{ clustered_lighting_structs }}\n");
+        }
+
+        if prefix.is_empty() {
+            Cow::Borrowed(template_source)
+        } else {
+            prefix.push_str(template_source);
+            Cow::Owned(prefix)
+        }
+    }
+
     /// Builds a [`ShaderContext`] from the compilation options.
     fn build_context(options: &ShaderCompilationOptions) -> ShaderContext<'_> {
         let allocator = LocationAllocator::new();
@@ -163,9 +194,10 @@ impl ShaderGenerator {
     ) -> String {
         let env = get_env();
         let ctx = Self::build_context(options);
+        let template_source = Self::normalize_custom_template(template_source, options);
 
         let source = env
-            .render_named_str(template_name, template_source, &ctx)
+            .render_named_str(template_name, template_source.as_ref(), &ctx)
             .expect("Custom shader render failed");
 
         format!("// === Auto-generated Unified Shader ===\n{source}")

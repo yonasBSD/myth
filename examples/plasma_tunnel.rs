@@ -76,7 +76,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 }
 "#;
 
-#[myth_material(shader = "classic_plasma_tunnel")]
+#[myth_material(shader = "classic_plasma_tunnel", shader_src = PLASMA_TUNNEL_SHADER)]
 pub struct PlasmaTunnelMaterial {
     #[uniform(default = "Vec4::new(0.10, 0.04, 0.24, 1.0)")]
     pub color_a: Vec4,
@@ -106,43 +106,6 @@ pub struct PlasmaTunnelMaterial {
     pub alpha_test: f32,
 }
 
-impl PlasmaTunnelMaterial {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::from_uniforms(PlasmaTunnelUniforms::default())
-    }
-
-    #[must_use]
-    pub fn with_speed(self, value: f32) -> Self {
-        self.uniforms.write().speed = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_glow(self, value: f32) -> Self {
-        self.uniforms.write().glow = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_warp_scale(self, value: f32) -> Self {
-        self.uniforms.write().warp_scale = value;
-        self
-    }
-
-    #[must_use]
-    pub fn with_side(self, side: Side) -> Self {
-        self.set_side(side);
-        self
-    }
-}
-
-impl Default for PlasmaTunnelMaterial {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct PlasmaTunnelDemo {
     controls: OrbitControls,
     fps_counter: FpsCounter,
@@ -153,10 +116,6 @@ struct PlasmaTunnelDemo {
 
 impl AppHandler for PlasmaTunnelDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
-        engine
-            .renderer
-            .register_shader_template("classic_plasma_tunnel", PLASMA_TUNNEL_SHADER);
-
         let scene = engine.scene_manager.create_active();
         scene.environment.set_ambient_light(Vec3::splat(0.015));
         scene.bloom.set_enabled(true);
