@@ -50,7 +50,8 @@ pub use handles::{
 // Re-export common resource types
 pub use material::{
     AlphaMode, Material, MaterialTrait, MaterialType, PhongMaterial, PhysicalFeatures,
-    PhysicalMaterial, RenderableMaterialTrait, Side, TextureSlot, TextureTransform, UnlitMaterial,
+    PhysicalMaterial, RenderableMaterialTrait, ShaderTemplateMode, Side, TextureSlot,
+    TextureTransform, UnlitMaterial,
 };
 pub use mesh::Mesh;
 

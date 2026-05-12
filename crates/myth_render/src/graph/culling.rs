@@ -222,7 +222,11 @@ fn prepare_main_camera_commands(
                 if let Some(template_source) = material.shader_template(){
                     let template_name = material.shader_name();
                     if !shader_manager.has_template(template_name) {
-                        shader_manager.register_template(template_name, template_source);
+                        shader_manager.register_template_with_mode(
+                            template_name,
+                            template_source,
+                            material.shader_template_mode(),
+                        );
                     }
                 }
 

@@ -20,11 +20,6 @@ use myth_resources::myth_material;
 use myth_resources::uniforms::Mat3Uniform;
 
 const TEXTURE_FLOW_SHADER: &str = r#"
-{{ vertex_input_code }}
-{{ binding_code }}
-{$ include 'core/vertex_output' $}
-{$ include 'core/fragment_output' $}
-
 fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);
 }

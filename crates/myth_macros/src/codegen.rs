@@ -8,7 +8,7 @@ use quote::{format_ident, quote};
 use syn::DeriveInput;
 
 use crate::layout::{FieldInput, LayoutField, compute_std140_layout};
-use crate::parse::{MaterialAttrs, MaterialDef};
+use crate::parse::{MaterialAttrs, MaterialDef, MaterialShaderSource};
 
 /// Main entry point: parses input and produces all generated code.
 pub fn generate(attrs: MaterialAttrs, input: DeriveInput) -> syn::Result<TokenStream> {
@@ -726,13 +726,23 @@ fn gen_renderable_trait(def: &MaterialDef) -> TokenStream {
     let name = &def.name;
     let uniforms_type = def.uniform_struct_name();
     let shader = &def.shader;
-    let shader_template_impl = def.shader_src.as_ref().map(|shader_src| {
-        quote! {
+    let shader_template_impl = match def.shader_source.as_ref() {
+        Some(MaterialShaderSource::Body(shader_src)) => Some(quote! {
             fn shader_template(&self) -> Option<&'static str> {
                 Some(#shader_src)
             }
-        }
-    });
+
+            fn shader_template_mode(&self) -> #cr::material::ShaderTemplateMode {
+                #cr::material::ShaderTemplateMode::MaterialBody
+            }
+        }),
+        Some(MaterialShaderSource::Template(shader_src)) => Some(quote! {
+            fn shader_template(&self) -> Option<&'static str> {
+                Some(#shader_src)
+            }
+        }),
+        None => None,
+    };
 
     let has_textures = !def.texture_fields.is_empty();
 

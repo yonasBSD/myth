@@ -904,7 +904,13 @@ impl Renderer {
     /// ```
     ///
     /// After registration, any material declared with
-    /// `#[myth_material(shader = "custom_unlit")]` will use this template.
+    /// `#[myth_material(shader = "custom_unlit", shader_template_src = ...)]`
+    /// or any caller that resolves `custom_unlit` through the template system
+    /// will use this exact template source.
+    ///
+    /// This API is the low-level raw-template escape hatch. For typical
+    /// custom materials, prefer `#[myth_material(shader = "...", shader_src = ...)]`,
+    /// which lets the engine supply the standard material prelude automatically.
     ///
     /// # Panics
     ///

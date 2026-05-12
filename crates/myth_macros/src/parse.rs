@@ -16,6 +16,7 @@ use syn::{
 pub struct MaterialAttrs {
     pub shader: String,
     pub shader_src: Option<Expr>,
+    pub shader_template_src: Option<Expr>,
     pub crate_path: Path,
 }
 
@@ -23,6 +24,7 @@ impl Parse for MaterialAttrs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut shader = None;
         let mut shader_src = None;
+        let mut shader_template_src = None;
         let mut crate_path = None;
 
         while !input.is_empty() {
@@ -36,6 +38,9 @@ impl Parse for MaterialAttrs {
                 }
                 "shader_src" => {
                     shader_src = Some(input.parse()?);
+                }
+                "shader_template_src" => {
+                    shader_template_src = Some(input.parse()?);
                 }
                 "crate_path" => {
                     let lit: LitStr = input.parse()?;
@@ -57,10 +62,16 @@ impl Parse for MaterialAttrs {
         Ok(Self {
             shader: shader.ok_or_else(|| input.error("missing required attribute `shader`"))?,
             shader_src,
+            shader_template_src,
             crate_path: crate_path
                 .unwrap_or_else(|| syn::parse_str("myth_resources").expect("valid path")),
         })
     }
+}
+
+pub enum MaterialShaderSource {
+    Body(Expr),
+    Template(Expr),
 }
 
 // ============================================================================
@@ -72,7 +83,7 @@ pub struct MaterialDef {
     pub vis: Visibility,
     pub name: Ident,
     pub shader: String,
-    pub shader_src: Option<Expr>,
+    pub shader_source: Option<MaterialShaderSource>,
     pub crate_path: Path,
     pub uniform_fields: Vec<UniformField>,
     pub texture_fields: Vec<TextureField>,
@@ -187,11 +198,25 @@ impl MaterialDef {
             }
         }
 
+        let shader_source = match (attrs.shader_src, attrs.shader_template_src) {
+            (Some(_), Some(_)) => {
+                return Err(syn::Error::new(
+                    name.span(),
+                    "`shader_src` and `shader_template_src` are mutually exclusive",
+                ));
+            }
+            (Some(shader_src), None) => Some(MaterialShaderSource::Body(shader_src)),
+            (None, Some(shader_template_src)) => {
+                Some(MaterialShaderSource::Template(shader_template_src))
+            }
+            (None, None) => None,
+        };
+
         Ok(Self {
             vis,
             name,
             shader: attrs.shader,
-            shader_src: attrs.shader_src,
+            shader_source,
             crate_path: attrs.crate_path,
             uniform_fields,
             texture_fields,

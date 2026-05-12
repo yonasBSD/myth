@@ -17,6 +17,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use myth_resources::material::ShaderTemplateMode;
 use xxhash_rust::xxh3::xxh3_128;
 
 use super::shader_gen::{ShaderCompilationOptions, ShaderGenerator};
@@ -168,7 +169,13 @@ pub struct ShaderManager {
     /// xxh3-128 of final WGSL → compiled module.
     module_cache: FxHashMap<u128, wgpu::ShaderModule>,
     /// User-registered custom shader templates (name → WGSL source).
-    custom_templates: FxHashMap<String, String>,
+    custom_templates: FxHashMap<String, RegisteredShaderTemplate>,
+}
+
+#[derive(Debug, Clone)]
+struct RegisteredShaderTemplate {
+    source: String,
+    mode: ShaderTemplateMode,
 }
 
 impl Default for ShaderManager {
@@ -186,18 +193,35 @@ impl ShaderManager {
         }
     }
 
-    /// Registers a custom shader template source under the given name.
+    /// Registers a custom full shader template source under the given name.
     ///
     /// Once registered, any material that references this `name` via
     /// `#[myth_material(shader = "name")]` will use the provided WGSL
     /// source instead of looking up a built-in template.
     ///
-    /// The source string goes through the minijinja template engine, so
-    /// `{$ include "chunks/..." $}` directives are fully supported.
+    /// The source string is treated as an exact WGSL template and goes through
+    /// the minijinja engine as-is, so `{$ include "chunks/..." $}` directives
+    /// are fully supported.
     pub fn register_template(&mut self, name: impl Into<String>, source: impl Into<String>) {
+        self.register_template_with_mode(name, source, ShaderTemplateMode::Template);
+    }
+
+    /// Registers a custom shader source with an explicit interpretation mode.
+    pub fn register_template_with_mode(
+        &mut self,
+        name: impl Into<String>,
+        source: impl Into<String>,
+        mode: ShaderTemplateMode,
+    ) {
         let name = name.into();
         log::info!("Registered custom shader template: {name}");
-        self.custom_templates.insert(name, source.into());
+        self.custom_templates.insert(
+            name,
+            RegisteredShaderTemplate {
+                source: source.into(),
+                mode,
+            },
+        );
     }
 
     /// Returns whether a custom template has been registered under `name`.
@@ -224,7 +248,14 @@ impl ShaderManager {
         let final_wgsl = match source {
             ShaderSource::File(path) => {
                 if let Some(custom_src) = self.custom_templates.get(path) {
-                    ShaderGenerator::generate_custom_shader(path, custom_src, options)
+                    match custom_src.mode {
+                        ShaderTemplateMode::Template => {
+                            ShaderGenerator::generate_custom_shader(path, &custom_src.source, options)
+                        }
+                        ShaderTemplateMode::MaterialBody => {
+                            ShaderGenerator::generate_material_shader(path, &custom_src.source, options)
+                        }
+                    }
                 } else {
                     ShaderGenerator::generate_shader(path, options)
                 }
@@ -233,11 +264,18 @@ impl ShaderManager {
                 name,
                 source: inline_src,
             } => {
-                let src = self
-                    .custom_templates
-                    .get(name)
-                    .map_or(inline_src, String::as_str);
-                ShaderGenerator::generate_custom_shader(name, src, options)
+                if let Some(custom_src) = self.custom_templates.get(name) {
+                    match custom_src.mode {
+                        ShaderTemplateMode::Template => {
+                            ShaderGenerator::generate_custom_shader(name, &custom_src.source, options)
+                        }
+                        ShaderTemplateMode::MaterialBody => {
+                            ShaderGenerator::generate_material_shader(name, &custom_src.source, options)
+                        }
+                    }
+                } else {
+                    ShaderGenerator::generate_custom_shader(name, inline_src, options)
+                }
             }
         };
 

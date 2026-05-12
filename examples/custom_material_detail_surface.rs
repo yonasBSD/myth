@@ -22,11 +22,7 @@ const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
 };
 
 const DETAIL_SURFACE_SHADER: &str = r#"
-{{ vertex_input_code }}
-{{ binding_code }}
 {$ include 'core/common' $}
-{$ include 'core/vertex_output' $}
-{$ include 'core/fragment_output' $}
 
 fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);

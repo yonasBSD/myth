@@ -46,7 +46,8 @@ mod parse;
 /// | Attribute | Required | Description |
 /// |-----------|----------|-------------|
 /// | `shader = "path"` | Yes | Shader template path |
-/// | `shader_src = EXPR` | No | Embedded WGSL source used for lazy registration |
+/// | `shader_src = EXPR` | No | Embedded material shader body wrapped by the engine's standard prelude |
+/// | `shader_template_src = EXPR` | No | Embedded full WGSL template source for advanced manual control |
 /// | `crate_path = "path"` | No | Path to `myth_resources` (default: `myth_resources`) |
 ///
 /// # Field Attributes

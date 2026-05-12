@@ -276,6 +276,18 @@ pub trait MaterialTrait: Any + Send + Sync + std::fmt::Debug {
 /// 4. Create a corresponding shader template
 ///
 /// See `PhysicalMaterial` for a reference implementation.
+#[derive(PartialEq, Eq, Clone, Debug, Copy, Default)]
+pub enum ShaderTemplateMode {
+    /// The embedded source is a complete WGSL template and is rendered as-is.
+    #[default]
+    Template,
+    /// The embedded source is only the material-specific body.
+    ///
+    /// The renderer wraps it with the standard geometry-material template prelude,
+    /// including vertex input, bindings, and core vertex/fragment outputs.
+    MaterialBody,
+}
+
 pub trait RenderableMaterialTrait: MaterialTrait {
     /// Creates a material from its generated defaults.
     fn new() -> Self
@@ -292,6 +304,10 @@ pub trait RenderableMaterialTrait: MaterialTrait {
     /// Built-in materials use engine-managed templates and therefore return `None`.
     fn shader_template(&self) -> Option<&'static str> {
         None
+    }
+    /// Describes how the embedded shader source should be interpreted.
+    fn shader_template_mode(&self) -> ShaderTemplateMode {
+        ShaderTemplateMode::Template
     }
     /// Returns the material version (used for cache invalidation).
     fn version(&self) -> u64;
@@ -498,6 +514,15 @@ impl RenderableMaterialTrait for MaterialType {
             Self::Phong(m) => m.shader_template(),
             Self::Physical(m) => m.shader_template(),
             Self::Custom(m) => m.shader_template(),
+        }
+    }
+
+    fn shader_template_mode(&self) -> ShaderTemplateMode {
+        match self {
+            Self::Unlit(m) => m.shader_template_mode(),
+            Self::Phong(m) => m.shader_template_mode(),
+            Self::Physical(m) => m.shader_template_mode(),
+            Self::Custom(m) => m.shader_template_mode(),
         }
     }
 
