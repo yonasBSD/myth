@@ -39,9 +39,9 @@ use crate::pipeline::{
     BlendStateKey, DepthStencilKey, FastPipelineKey, FastShadowPipelineKey, GraphicsPipelineKey,
     PipelineCache, ShaderManager, SimpleGeometryPipelineKey,
 };
-use myth_resources::RenderableMaterialTrait;
 use myth_assets::AssetServer;
 use myth_resources::AntiAliasingMode;
+use myth_resources::RenderableMaterialTrait;
 use myth_resources::material::{AlphaMode, Side};
 use myth_resources::uniforms::{DynamicModelUniforms, Mat3Uniform};
 use myth_scene::camera::RenderCamera;
@@ -219,16 +219,15 @@ fn prepare_main_camera_commands(
             let pipeline_id = if let Some(id) = pipeline_cache.get_pipeline_fast(fast_key) {
                 id
             } else {
-                if let Some(template_source) = material.shader_template(){
-                    let template_name = material.shader_name();
-                    if !shader_manager.has_template(template_name) {
-                        shader_manager.register_template_with_mode(
-                            template_name,
-                            template_source,
-                            material.shader_template_mode(),
-                        );
+                let shader_source = if let Some(template_source) = material.shader_template() {
+                    ShaderSource::Inline {
+                        name: material.shader_name(),
+                        source: template_source,
+                        mode: material.shader_template_mode(),
                     }
-                }
+                } else {
+                    ShaderSource::File(material.shader_name())
+                };
 
                 let geo_defines = geometry.shader_defines();
                 let mat_defines = material.shader_defines();
@@ -282,7 +281,7 @@ fn prepare_main_camera_commands(
                     options.add_define("HAS_MRT_SSSS", "1");
                 }
 
-                let shader_hash = options.compute_hash();
+                let shader_hash = shader_manager.pipeline_shader_hash(shader_source, &options);
 
                 if is_specular_split {
                     flags |= PipelineFlags::SPECULAR_SPLIT;
@@ -350,7 +349,7 @@ fn prepare_main_camera_commands(
                 let id = pipeline_cache.get_or_create_graphics(
                     &wgpu_ctx.device,
                     shader_manager,
-                    material.shader_name(),
+                    shader_source,
                     &canonical_key,
                     &options,
                     &gpu_geometry.layout_info,

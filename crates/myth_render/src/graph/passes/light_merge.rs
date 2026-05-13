@@ -6,6 +6,7 @@ use crate::graph::core::{
 use crate::pipeline::{
     ComputePipelineId, ComputePipelineKey, ShaderCompilationOptions, ShaderSource,
 };
+use myth_resources::material::ShaderTemplateMode;
 use myth_resources::uniforms::{GpuLightStorage, LightBufferMetadata, scene_lighting_structs_wgsl};
 
 pub const LIGHT_MERGE_WG_SIZE: u32 = 64;
@@ -115,6 +116,7 @@ impl LightMergeFeature {
             ShaderSource::Inline {
                 name: "entry/utility/clustered/light_merge",
                 source: LIGHT_MERGE_SHADER_TEMPLATE,
+                mode: ShaderTemplateMode::Template,
             },
             &options,
         );

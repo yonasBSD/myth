@@ -188,7 +188,8 @@ bitflags! {
 ///
 /// This is the successor to the old `PipelineKey`. It fully describes all
 /// wgpu pipeline state that is relevant for deduplication. The `shader_hash`
-/// collapses the (template + defines) tuple into a single `u64`.
+/// collapses the (shader source identity + compilation options) tuple into a
+/// single `u64`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineKey {
     pub shader_hash: u64,

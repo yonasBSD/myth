@@ -197,16 +197,16 @@ impl AppHandler for DissolveDemo {
             1.7,
             Material::new_custom(
                 DissolveMaterial::default()
-                .with_base_color(Vec4::new(0.18, 0.55, 1.0, 1.0))
-                .with_edge_color(Vec4::new(1.20, 0.65, 0.22, 1.0))
-                .with_noise_scale(2.3)
-                .with_dissolve_width(0.10)
-                .with_dissolve_speed(1.6)
-                .with_displacement(0.20)
-                .with_phase_offset(0.0)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_base_color(Vec4::new(0.18, 0.55, 1.0, 1.0))
+                    .with_edge_color(Vec4::new(1.20, 0.65, 0.22, 1.0))
+                    .with_noise_scale(2.3)
+                    .with_dissolve_width(0.10)
+                    .with_dissolve_speed(1.6)
+                    .with_displacement(0.20)
+                    .with_phase_offset(0.0)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );
@@ -216,16 +216,16 @@ impl AppHandler for DissolveDemo {
             1.0,
             Material::new_custom(
                 DissolveMaterial::default()
-                .with_base_color(Vec4::new(0.22, 1.00, 0.74, 1.0))
-                .with_edge_color(Vec4::new(1.00, 1.25, 0.35, 1.0))
-                .with_noise_scale(3.0)
-                .with_dissolve_width(0.12)
-                .with_dissolve_speed(2.2)
-                .with_displacement(0.15)
-                .with_phase_offset(1.4)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_base_color(Vec4::new(0.22, 1.00, 0.74, 1.0))
+                    .with_edge_color(Vec4::new(1.00, 1.25, 0.35, 1.0))
+                    .with_noise_scale(3.0)
+                    .with_dissolve_width(0.12)
+                    .with_dissolve_speed(2.2)
+                    .with_displacement(0.15)
+                    .with_phase_offset(1.4)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );
@@ -237,16 +237,16 @@ impl AppHandler for DissolveDemo {
             0.9,
             Material::new_custom(
                 DissolveMaterial::default()
-                .with_base_color(Vec4::new(0.90, 0.22, 1.05, 1.0))
-                .with_edge_color(Vec4::new(1.25, 0.72, 1.20, 1.0))
-                .with_noise_scale(2.9)
-                .with_dissolve_width(0.08)
-                .with_dissolve_speed(1.9)
-                .with_displacement(0.12)
-                .with_phase_offset(2.6)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_base_color(Vec4::new(0.90, 0.22, 1.05, 1.0))
+                    .with_edge_color(Vec4::new(1.25, 0.72, 1.20, 1.0))
+                    .with_noise_scale(2.9)
+                    .with_dissolve_width(0.08)
+                    .with_dissolve_speed(1.9)
+                    .with_displacement(0.12)
+                    .with_phase_offset(2.6)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );

@@ -235,18 +235,18 @@ impl AppHandler for CustomMaterialDemo {
             0.85,
             Material::new_custom(
                 HologramMaterial::default()
-                .with_base_color(Vec4::new(1.00, 0.18, 0.55, 1.0))
-                .with_edge_color(Vec4::new(1.30, 0.75, 1.00, 1.0))
-                .with_scan_color(Vec4::new(0.75, 0.10, 0.95, 1.0))
-                .with_grid_scale(6.0)
-                .with_scan_density(18.0)
-                .with_pulse_speed(3.4)
-                .with_displacement(0.10)
-                .with_fresnel(4.8, 1.7)
-                .with_opacity(0.78)
-                .with_side(Side::Double)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false),
+                    .with_base_color(Vec4::new(1.00, 0.18, 0.55, 1.0))
+                    .with_edge_color(Vec4::new(1.30, 0.75, 1.00, 1.0))
+                    .with_scan_color(Vec4::new(0.75, 0.10, 0.95, 1.0))
+                    .with_grid_scale(6.0)
+                    .with_scan_density(18.0)
+                    .with_pulse_speed(3.4)
+                    .with_displacement(0.10)
+                    .with_fresnel(4.8, 1.7)
+                    .with_opacity(0.78)
+                    .with_side(Side::Double)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false),
             ),
             &engine.assets,
         );
@@ -256,18 +256,18 @@ impl AppHandler for CustomMaterialDemo {
             0.9,
             Material::new_custom(
                 HologramMaterial::default()
-                .with_base_color(Vec4::new(0.10, 1.05, 0.68, 1.0))
-                .with_edge_color(Vec4::new(0.95, 1.45, 1.10, 1.0))
-                .with_scan_color(Vec4::new(0.15, 0.95, 0.55, 1.0))
-                .with_grid_scale(9.0)
-                .with_scan_density(11.0)
-                .with_pulse_speed(2.8)
-                .with_displacement(0.14)
-                .with_fresnel(2.8, 2.1)
-                .with_opacity(0.84)
-                .with_side(Side::Double)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false),
+                    .with_base_color(Vec4::new(0.10, 1.05, 0.68, 1.0))
+                    .with_edge_color(Vec4::new(0.95, 1.45, 1.10, 1.0))
+                    .with_scan_color(Vec4::new(0.15, 0.95, 0.55, 1.0))
+                    .with_grid_scale(9.0)
+                    .with_scan_density(11.0)
+                    .with_pulse_speed(2.8)
+                    .with_displacement(0.14)
+                    .with_fresnel(2.8, 2.1)
+                    .with_opacity(0.84)
+                    .with_side(Side::Double)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false),
             ),
             &engine.assets,
         );

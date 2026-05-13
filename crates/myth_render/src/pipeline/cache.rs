@@ -262,7 +262,7 @@ impl PipelineCache {
         &mut self,
         device: &wgpu::Device,
         shader_manager: &mut ShaderManager,
-        template_name: &str,
+        shader_source: ShaderSource<'_>,
         canonical_key: &GraphicsPipelineKey,
         options: &ShaderCompilationOptions,
         vertex_layout: &GeneratedVertexLayout,
@@ -292,7 +292,7 @@ impl PipelineCache {
         );
 
         let (shader_module, _code_hash) =
-            shader_manager.get_or_compile(device, ShaderSource::File(template_name), &opts);
+            shader_manager.get_or_compile(device, shader_source, &opts);
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),

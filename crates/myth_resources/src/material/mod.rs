@@ -276,7 +276,7 @@ pub trait MaterialTrait: Any + Send + Sync + std::fmt::Debug {
 /// 4. Create a corresponding shader template
 ///
 /// See `PhysicalMaterial` for a reference implementation.
-#[derive(PartialEq, Eq, Clone, Debug, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy, Default, Hash)]
 pub enum ShaderTemplateMode {
     /// The embedded source is a complete WGSL template and is rendered as-is.
     #[default]
@@ -290,6 +290,7 @@ pub enum ShaderTemplateMode {
 
 pub trait RenderableMaterialTrait: MaterialTrait {
     /// Creates a material from its generated defaults.
+    #[must_use]
     fn new() -> Self
     where
         Self: Default + Sized,

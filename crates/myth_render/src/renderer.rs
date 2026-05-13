@@ -903,10 +903,9 @@ impl Renderer {
     /// );
     /// ```
     ///
-    /// After registration, any material declared with
-    /// `#[myth_material(shader = "custom_unlit", shader_template_src = ...)]`
-    /// or any caller that resolves `custom_unlit` through the template system
-    /// will use this exact template source.
+    /// After registration, any named template lookup that resolves
+    /// `custom_unlit` through the standard shader template system will use this
+    /// exact template source.
     ///
     /// This API is the low-level raw-template escape hatch. For typical
     /// custom materials, prefer `#[myth_material(shader = "...", shader_src = ...)]`,
@@ -927,7 +926,8 @@ impl Renderer {
     /// standard shader template system.
     ///
     /// Use [`register_shader_template`](Self::register_shader_template) first
-    /// when `source` is [`ShaderSource::File`] backed by a custom template.
+    /// when `source` is [`ShaderSource::File`] and you want that named lookup
+    /// to resolve to a registered custom template.
     /// This keeps standalone examples on the same shader compilation and cache
     /// path as engine-owned passes. The provided tracked bind-group layouts are
     /// also registered into [`PipelineCache`] so later RDG code can look them

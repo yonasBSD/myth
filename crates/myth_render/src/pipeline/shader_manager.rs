@@ -10,14 +10,15 @@
 
 use minijinja::value::{Object, Value};
 use minijinja::{Environment, Error, ErrorKind, syntax::SyntaxConfig};
+use myth_resources::material::ShaderTemplateMode;
 use rust_embed::RustEmbed;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
-use myth_resources::material::ShaderTemplateMode;
 use xxhash_rust::xxh3::xxh3_128;
 
 use super::shader_gen::{ShaderCompilationOptions, ShaderGenerator};
@@ -138,17 +139,22 @@ impl Object for LocationAllocator {
 
 /// Identifies the origin of a shader's WGSL source.
 ///
-/// * [`File`](Self::File) — a built-in template resolved through the embedded
-///   shader asset loader (e.g. `"entry/main/physical"` or `"entry/utility/skybox"`).
-/// * [`Inline`](Self::Inline) — a raw WGSL string supplied at call-time, often
-///   via `include_str!()`. If a custom template with the same `name` was
-///   registered, the custom source takes priority.
+/// * [`File`](Self::File) — a named template lookup. Registered template
+///   overrides take priority; otherwise the embedded shader asset loader is
+///   used (e.g. `"entry/main/physical"` or `"entry/utility/skybox"`).
+/// * [`Inline`](Self::Inline) — a WGSL string supplied directly at call-time,
+///   together with the mode that controls whether it is interpreted as a full
+///   template or only a material body.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
 pub enum ShaderSource<'a> {
-    /// Load from a built-in template file.
+    /// Resolve a named template from registered overrides or built-in assets.
     File(&'a str),
     /// Use an inline WGSL source string identified by `name` for labels.
-    Inline { name: &'a str, source: &'a str },
+    Inline {
+        name: &'a str,
+        source: &'a str,
+        mode: ShaderTemplateMode,
+    },
 }
 
 // ─── ShaderManager ────────────────────────────────────────────────────────────
@@ -176,6 +182,29 @@ pub struct ShaderManager {
 struct RegisteredShaderTemplate {
     source: String,
     mode: ShaderTemplateMode,
+    identity_hash: u64,
+}
+
+fn hash_file_template_identity(name: &str) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    0u8.hash(&mut hasher);
+    name.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_inline_template_identity(source: &str, mode: ShaderTemplateMode) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    1u8.hash(&mut hasher);
+    mode.hash(&mut hasher);
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_pipeline_shader_key(source_identity_hash: u64, options: &ShaderCompilationOptions) -> u64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    source_identity_hash.hash(&mut hasher);
+    options.compute_hash().hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Default for ShaderManager {
@@ -195,9 +224,9 @@ impl ShaderManager {
 
     /// Registers a custom full shader template source under the given name.
     ///
-    /// Once registered, any material that references this `name` via
-    /// `#[myth_material(shader = "name")]` will use the provided WGSL
-    /// source instead of looking up a built-in template.
+    /// Once registered, any named lookup that resolves this `name` via
+    /// [`ShaderSource::File`] will use the provided WGSL source instead of
+    /// looking up a built-in template.
     ///
     /// The source string is treated as an exact WGSL template and goes through
     /// the minijinja engine as-is, so `{$ include "chunks/..." $}` directives
@@ -207,36 +236,56 @@ impl ShaderManager {
     }
 
     /// Registers a custom shader source with an explicit interpretation mode.
-    pub fn register_template_with_mode(
+    fn register_template_with_mode(
         &mut self,
         name: impl Into<String>,
         source: impl Into<String>,
         mode: ShaderTemplateMode,
     ) {
         let name = name.into();
+        let source = source.into();
         log::info!("Registered custom shader template: {name}");
         self.custom_templates.insert(
             name,
             RegisteredShaderTemplate {
-                source: source.into(),
+                identity_hash: hash_inline_template_identity(&source, mode),
+                source,
                 mode,
             },
         );
     }
 
-    /// Returns whether a custom template has been registered under `name`.
+    /// Returns the stable source-identity hash for a named or inline shader.
     #[must_use]
-    pub fn has_template(&self, name: &str) -> bool {
-        self.custom_templates.contains_key(name)
+    pub fn source_identity_hash(&self, source: ShaderSource<'_>) -> u64 {
+        match source {
+            ShaderSource::File(path) => self.custom_templates.get(path).map_or_else(
+                || hash_file_template_identity(path),
+                |template| template.identity_hash,
+            ),
+            ShaderSource::Inline { source, mode, .. } => {
+                hash_inline_template_identity(source, mode)
+            }
+        }
+    }
+
+    /// Returns the graphics-pipeline shader hash used by the L2 pipeline cache.
+    #[must_use]
+    pub fn pipeline_shader_hash(
+        &self,
+        source: ShaderSource<'_>,
+        options: &ShaderCompilationOptions,
+    ) -> u64 {
+        hash_pipeline_shader_key(self.source_identity_hash(source), options)
     }
 
     /// Compile a shader (or return a cached module).
     ///
     /// For [`ShaderSource::File`], if a custom template was registered under
     /// the same name, its source is rendered instead of the built-in template.
-    /// For [`ShaderSource::Inline`], the provided WGSL string is rendered as a
-    /// one-off minijinja template, enabling `{$ include $}` directives even in
-    /// inline sources.
+    /// For [`ShaderSource::Inline`], the provided WGSL string is rendered
+    /// directly using the supplied [`ShaderTemplateMode`], without consulting
+    /// the registered-template map.
     ///
     /// Returns `(module_ref, source_hash)`.
     pub fn get_or_compile(
@@ -249,11 +298,17 @@ impl ShaderManager {
             ShaderSource::File(path) => {
                 if let Some(custom_src) = self.custom_templates.get(path) {
                     match custom_src.mode {
-                        ShaderTemplateMode::Template => {
-                            ShaderGenerator::generate_custom_shader(path, &custom_src.source, options)
-                        }
+                        ShaderTemplateMode::Template => ShaderGenerator::generate_custom_shader(
+                            path,
+                            &custom_src.source,
+                            options,
+                        ),
                         ShaderTemplateMode::MaterialBody => {
-                            ShaderGenerator::generate_material_shader(path, &custom_src.source, options)
+                            ShaderGenerator::generate_material_shader(
+                                path,
+                                &custom_src.source,
+                                options,
+                            )
                         }
                     }
                 } else {
@@ -263,20 +318,15 @@ impl ShaderManager {
             ShaderSource::Inline {
                 name,
                 source: inline_src,
-            } => {
-                if let Some(custom_src) = self.custom_templates.get(name) {
-                    match custom_src.mode {
-                        ShaderTemplateMode::Template => {
-                            ShaderGenerator::generate_custom_shader(name, &custom_src.source, options)
-                        }
-                        ShaderTemplateMode::MaterialBody => {
-                            ShaderGenerator::generate_material_shader(name, &custom_src.source, options)
-                        }
-                    }
-                } else {
+                mode,
+            } => match mode {
+                ShaderTemplateMode::Template => {
                     ShaderGenerator::generate_custom_shader(name, inline_src, options)
                 }
-            }
+                ShaderTemplateMode::MaterialBody => {
+                    ShaderGenerator::generate_material_shader(name, inline_src, options)
+                }
+            },
         };
 
         let hash = xxh3_128(final_wgsl.as_bytes());

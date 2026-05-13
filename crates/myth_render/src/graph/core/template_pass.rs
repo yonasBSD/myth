@@ -8,9 +8,10 @@ use crate::graph::core::{
 };
 use crate::pipeline::{
     ColorTargetKey, ComputePipelineId, ComputePipelineKey, DepthStencilKey, FullscreenPipelineKey,
-    MultisampleKey, RenderPipelineId, ShaderCompilationOptions, ShaderManager, ShaderSource,
+    MultisampleKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
 use crate::renderer::Renderer;
+use myth_resources::material::ShaderTemplateMode;
 
 const MAX_TEMPLATE_BIND_GROUPS: usize = 4;
 
@@ -27,7 +28,11 @@ impl TemplateShaderSource {
     fn as_shader_source(self) -> ShaderSource<'static> {
         match self {
             Self::File(path) => ShaderSource::File(path),
-            Self::Inline { name, source } => ShaderSource::Inline { name, source },
+            Self::Inline { name, source } => ShaderSource::Inline {
+                name,
+                source,
+                mode: ShaderTemplateMode::Template,
+            },
         }
     }
 }
@@ -134,7 +139,6 @@ pub struct TemplatePassDescriptor {
     shader_source: TemplateShaderSource,
     binding_layouts: SmallVec<[TemplateBindingLayoutDesc; 8]>,
     tracked_layouts: SmallVec<[Tracked<wgpu::BindGroupLayout>; MAX_TEMPLATE_BIND_GROUPS]>,
-    inline_registered: bool,
 }
 
 impl TemplatePassDescriptor {
@@ -144,7 +148,6 @@ impl TemplatePassDescriptor {
             shader_source,
             binding_layouts: SmallVec::new(),
             tracked_layouts: SmallVec::new(),
-            inline_registered: false,
         }
     }
 
@@ -216,28 +219,6 @@ impl TemplatePassDescriptor {
         ));
     }
 
-    fn ensure_shader_registered_with_renderer(&mut self, renderer: &mut Renderer) {
-        if self.inline_registered {
-            return;
-        }
-
-        if let TemplateShaderSource::Inline { name, source } = self.shader_source {
-            renderer.register_shader_template(name, source);
-        }
-        self.inline_registered = true;
-    }
-
-    fn ensure_shader_registered_with_manager(&mut self, shader_manager: &mut ShaderManager) {
-        if self.inline_registered {
-            return;
-        }
-
-        if let TemplateShaderSource::Inline { name, source } = self.shader_source {
-            shader_manager.register_template(name, source);
-        }
-        self.inline_registered = true;
-    }
-
     fn ensure_layouts(&mut self, device: &wgpu::Device) {
         if !self.tracked_layouts.is_empty() {
             return;
@@ -256,8 +237,7 @@ impl TemplatePassDescriptor {
             );
             assert!(
                 self.tracked_layouts.len() < MAX_TEMPLATE_BIND_GROUPS,
-                "Template pass exceeds the supported bind-group limit of {}",
-                MAX_TEMPLATE_BIND_GROUPS
+                "Template pass exceeds the supported bind-group limit of {MAX_TEMPLATE_BIND_GROUPS}"
             );
 
             let start = cursor;
@@ -270,7 +250,7 @@ impl TemplatePassDescriptor {
                 .map(|entry| wgpu::BindGroupLayoutEntry {
                     binding: entry.binding,
                     visibility: entry.visibility,
-                    ty: entry.binding_type.clone(),
+                    ty: entry.binding_type,
                     count: None,
                 })
                 .collect::<Vec<_>>();
@@ -301,7 +281,6 @@ impl TemplatePassDescriptor {
         shader_options: &ShaderCompilationOptions,
         label: &str,
     ) -> ComputePipelineId {
-        self.ensure_shader_registered_with_manager(ctx.shader_manager);
         self.ensure_layouts(ctx.device);
 
         let (module, shader_hash) = ctx.shader_manager.get_or_compile(
@@ -347,7 +326,6 @@ impl TemplatePassDescriptor {
         multisample: wgpu::MultisampleState,
         label: &str,
     ) -> RenderPipelineId {
-        self.ensure_shader_registered_with_manager(ctx.shader_manager);
         self.ensure_layouts(ctx.device);
 
         let (module, shader_hash) = ctx.shader_manager.get_or_compile(
@@ -398,7 +376,6 @@ impl TemplatePassDescriptor {
         shader_options: &ShaderCompilationOptions,
         label: &str,
     ) -> ComputePipelineId {
-        self.ensure_shader_registered_with_renderer(renderer);
         {
             let wgpu_ctx = renderer
                 .wgpu_ctx()
@@ -427,7 +404,6 @@ impl TemplatePassDescriptor {
         multisample: wgpu::MultisampleState,
         label: &str,
     ) -> RenderPipelineId {
-        self.ensure_shader_registered_with_renderer(renderer);
         {
             let wgpu_ctx = renderer
                 .wgpu_ctx()
@@ -470,13 +446,11 @@ impl TemplatePassDescriptor {
             let group = sorted[cursor].group;
             assert!(
                 (group as usize) < self.bind_group_count(),
-                "Runtime binding targets undeclared bind group {}",
-                group
+                "Runtime binding targets undeclared bind group {group}"
             );
             assert!(
                 count < MAX_TEMPLATE_BIND_GROUPS,
-                "Runtime bind groups exceed the supported limit of {}",
-                MAX_TEMPLATE_BIND_GROUPS
+                "Runtime bind groups exceed the supported limit of {MAX_TEMPLATE_BIND_GROUPS}"
             );
 
             let start = cursor;
@@ -723,12 +697,12 @@ impl TemplateFullscreenPass {
     }
 }
 
+#[must_use]
 pub struct RenderPassBuilder {
     inner: FullscreenPassTemplateBuilder,
 }
 
 impl RenderPassBuilder {
-    #[must_use]
     pub fn fullscreen(pipeline_label: &'static str) -> Self {
         Self {
             inner: FullscreenPassTemplateBuilder::new(pipeline_label),
@@ -845,12 +819,12 @@ impl RenderPassBuilder {
     }
 }
 
+#[must_use]
 pub struct ComputePassBuilder {
     inner: ComputePassTemplateBuilder,
 }
 
 impl ComputePassBuilder {
-    #[must_use]
     pub fn new(pipeline_label: &'static str) -> Self {
         Self {
             inner: ComputePassTemplateBuilder::new(pipeline_label),
@@ -1343,23 +1317,12 @@ impl<'a> TemplatePassBindingsBuilder<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct RuntimeBindGroupSlot<'a> {
     group: u32,
     bindings: &'a [TemplatePassBinding<'a>],
     label: Option<&'static str>,
     bind_group: Option<&'a wgpu::BindGroup>,
-}
-
-impl<'a> Default for RuntimeBindGroupSlot<'a> {
-    fn default() -> Self {
-        Self {
-            group: 0,
-            bindings: &[],
-            label: None,
-            bind_group: None,
-        }
-    }
 }
 
 pub struct StandardFullscreenNode<'a> {

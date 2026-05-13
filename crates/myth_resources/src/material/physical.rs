@@ -452,4 +452,3 @@ impl PhysicalMaterial {
         self
     }
 }
-

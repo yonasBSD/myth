@@ -127,8 +127,7 @@ pub struct ShaderGenerator;
 impl ShaderGenerator {
     fn wrap_material_body(shader_body: &str) -> String {
         format!(
-            "{{{{ vertex_input_code }}}}\n{{{{ binding_code }}}}\n{{{{ scene_lighting_structs }}}}\n$$ if USE_CLUSTERED_SHADING is defined\n{{{{ clustered_lighting_structs }}}}\n$$ endif\n{{$ include 'core/vertex_output' $}}\n{{$ include 'core/fragment_output' $}}\n\n{}",
-            shader_body,
+            "{{{{ vertex_input_code }}}}\n{{{{ binding_code }}}}\n{{{{ scene_lighting_structs }}}}\n$$ if USE_CLUSTERED_SHADING is defined\n{{{{ clustered_lighting_structs }}}}\n$$ endif\n{{$ include 'core/vertex_output' $}}\n{{$ include 'core/fragment_output' $}}\n\n{shader_body}",
         )
     }
 

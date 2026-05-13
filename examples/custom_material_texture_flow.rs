@@ -178,16 +178,16 @@ impl AppHandler for TextureFlowDemo {
             3.8,
             Material::new_custom(
                 TextureFlowMaterial::default()
-                .with_tint(Vec4::new(0.18, 0.85, 1.20, 1.0))
-                .with_glow_color(Vec4::new(0.95, 1.18, 1.28, 1.0))
-                .with_map(checker)
-                .with_repeat(3.6)
-                .with_flow_speed(1.8)
-                .with_distortion(1.0)
-                .with_panel_warp(0.09)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_tint(Vec4::new(0.18, 0.85, 1.20, 1.0))
+                    .with_glow_color(Vec4::new(0.95, 1.18, 1.28, 1.0))
+                    .with_map(checker)
+                    .with_repeat(3.6)
+                    .with_flow_speed(1.8)
+                    .with_distortion(1.0)
+                    .with_panel_warp(0.09)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );
@@ -201,16 +201,16 @@ impl AppHandler for TextureFlowDemo {
             3.8,
             Material::new_custom(
                 TextureFlowMaterial::default()
-                .with_tint(Vec4::new(1.05, 0.22, 0.85, 1.0))
-                .with_glow_color(Vec4::new(1.30, 0.92, 1.20, 1.0))
-                .with_map(checker)
-                .with_repeat(4.2)
-                .with_flow_speed(2.2)
-                .with_distortion(1.4)
-                .with_panel_warp(0.12)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_tint(Vec4::new(1.05, 0.22, 0.85, 1.0))
+                    .with_glow_color(Vec4::new(1.30, 0.92, 1.20, 1.0))
+                    .with_map(checker)
+                    .with_repeat(4.2)
+                    .with_flow_speed(2.2)
+                    .with_distortion(1.4)
+                    .with_panel_warp(0.12)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );
@@ -225,16 +225,16 @@ impl AppHandler for TextureFlowDemo {
             1.4,
             Material::new_custom(
                 TextureFlowMaterial::default()
-                .with_tint(Vec4::new(0.20, 1.00, 0.72, 1.0))
-                .with_glow_color(Vec4::new(1.00, 1.24, 0.94, 1.0))
-                .with_map(checker)
-                .with_repeat(2.2)
-                .with_flow_speed(1.4)
-                .with_distortion(0.8)
-                .with_panel_warp(0.05)
-                .with_alpha_mode(AlphaMode::Blend)
-                .with_depth_write(false)
-                .with_side(Side::Double),
+                    .with_tint(Vec4::new(0.20, 1.00, 0.72, 1.0))
+                    .with_glow_color(Vec4::new(1.00, 1.24, 0.94, 1.0))
+                    .with_map(checker)
+                    .with_repeat(2.2)
+                    .with_flow_speed(1.4)
+                    .with_distortion(0.8)
+                    .with_panel_warp(0.05)
+                    .with_alpha_mode(AlphaMode::Blend)
+                    .with_depth_write(false)
+                    .with_side(Side::Double),
             ),
             &engine.assets,
         );
