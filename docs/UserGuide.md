@@ -333,6 +333,8 @@ Relevant examples:
 
 Use the built-in materials as a baseline, then move to `MaterialTrait` once you need custom shader defines, per-material uniforms, or different texture binding behavior.
 
+read [AdvancedCustomization.md](AdvancedCustomization.md) for a deeper dive into the material system and shader management.
+
 ---
 
 ## 10. 3D Gaussian Splatting
@@ -418,4 +420,4 @@ This order mirrors the engine's current architecture from basic scene setup thro
 
 - [API.md](API.md)
 - [RenderGraph.md](RenderGraph.md)
-- [README.md](../README.md)
+- [AdvancedCustomization.md](AdvancedCustomization.md)

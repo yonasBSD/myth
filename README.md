@@ -89,8 +89,6 @@ All without manual barriers.
 
 Deep dive: [docs/RenderGraph.md](https://github.com/panxinmiao/myth/blob/main/docs/RenderGraph.md)
 
-Clustered lighting notes: [docs/ClusteredShading.md](docs/ClusteredShading.md)
-
 Here is an actual, auto-generated dump of Myth Engine's RenderGraph during a complex frame:
 
 <details>

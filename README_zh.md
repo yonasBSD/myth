@@ -90,8 +90,6 @@ Myth 使用了严格的基于 SSA 的 RenderGraph，因此引擎能够：
 
 深入了解：[docs/RenderGraph_zh.md](https://github.com/panxinmiao/myth/blob/main/docs/RenderGraph_zh.md)
 
-集群渲染说明：[docs/ClusteredShading_zh.md](docs/ClusteredShading_zh.md)
-
 以下是 Myth 引擎在渲染复杂帧时，自动生成的 RenderGraph 的真实拓扑转储：
 
 <details>
