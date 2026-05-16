@@ -17,7 +17,7 @@ Myth 提供了一套面向高级用户的自定义扩展机制：
 | 目标 | 推荐 API | 你需要写什么 | 参考示例 |
 | --- | --- | --- | --- |
 | 想写一个仍然走标准几何材质管线的自定义网格材质 | `#[myth_material(shader = "...", shader_src = WGSL)]` | 只写材质自己的 WGSL 逻辑 body | [examples/custom_material_hologram.rs](../examples/custom_material_hologram.rs), [examples/custom_material_dissolve.rs](../examples/custom_material_dissolve.rs) |
-| 想完全控制一个网格材质的完整 WGSL 模板 | `#[myth_material(shader = "...", shader_template_src = WGSL)]` | 完整模板源码 | 你自己的高级模板 |
+| 想完全控制一个网格材质的完整 WGSL 模板 | `#[myth_material(shader = "...", shader_template_src = WGSL)]` | 完整模板源码 | [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs) |
 | 材质的 Rust 侧资源模型已经超出宏能描述的范围 | 手写 `RenderableMaterialTrait` | 完整 trait 实现和 WGSL | `myth_resources::material` 中的内置材质 |
 | 想做自定义全屏后处理 | `RenderPassBuilder::fullscreen(...)` | fullscreen WGSL + 图资源绑定 | [examples/custom_post_fx.rs](../examples/custom_post_fx.rs) |
 | 想做自定义 compute pass / GPU 数据生成 pass | `ComputePassBuilder::new(...)` | compute WGSL + 图资源绑定 | [examples/gpu_driven_particle_lights.rs](../examples/gpu_driven_particle_lights.rs) |
@@ -214,6 +214,8 @@ pub map: TextureSlot,
 - 你需要自己掌控 include 顺序、声明顺序与 entry-point 结构
 - 你明确不希望使用引擎管理的几何材质前导块
 
+完整示例可参考 [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs)。
+
 ## 4. 标准几何材质路径中，引擎会自动生成哪些 WGSL 接口
 
 ### 4.1 标准 bind group 分组
@@ -363,6 +365,23 @@ let node = post_pass.build_node(
 
 完整版本可参考 [examples/custom_post_fx.rs](../examples/custom_post_fx.rs)。
 
+如果你希望 fullscreen pass 不是一次性后处理，而是一个可复用的功能模块，可以把编译后的 `TemplateFullscreenPass` 和它依赖的 tracked 资源一起封装进 helper。海洋示例展示了这条路径的两个版本：
+
+- [examples/procedural_ocean.rs](../examples/procedural_ocean.rs) 直接用自定义海洋结果替换 `scene_color`。
+- [examples/ocean_composite_scene.rs](../examples/ocean_composite_scene.rs) 同时绑定 `scene_color` 与 `scene_depth`，只在普通 3D 几何体背后的背景像素上填充海洋。
+
+做这种 depth-aware 合成时，需要在声明阶段额外绑定深度纹理：
+
+```rust
+let composite_pass = RenderPassBuilder::fullscreen("Ocean Composite Pipeline")
+    .inline_shader_template(OCEAN_SHADER_NAME, OCEAN_SHADER_TEMPLATE)
+    .bind_uniform_buffer(0, 0, wgpu::ShaderStages::FRAGMENT)
+    .bind_texture_2d(0, 1, wgpu::ShaderStages::FRAGMENT, true)
+    .bind_sampler(0, 2, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering)
+    .bind_depth_texture_2d(0, 3, wgpu::ShaderStages::FRAGMENT)
+    .build(&mut engine.renderer);
+```
+
 ### 6.3 Compute 示例
 
 声明阶段：
@@ -440,10 +459,13 @@ engine.renderer.register_shader_template(
 
 - [examples/custom_material_hologram.rs](../examples/custom_material_hologram.rs)
 - [examples/custom_material_dissolve.rs](../examples/custom_material_dissolve.rs)
+- [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs)
 - [examples/custom_material_texture_flow.rs](../examples/custom_material_texture_flow.rs)
 - [examples/custom_material_slope_blend.rs](../examples/custom_material_slope_blend.rs)
 - [examples/custom_material_triplanar.rs](../examples/custom_material_triplanar.rs)
 - [examples/custom_post_fx.rs](../examples/custom_post_fx.rs)
+- [examples/procedural_ocean.rs](../examples/procedural_ocean.rs)
+- [examples/ocean_composite_scene.rs](../examples/ocean_composite_scene.rs)
 - [examples/gpu_driven_particle_lights.rs](../examples/gpu_driven_particle_lights.rs)
 
 如果你不确定该从哪条扩展路径开始，优先从这些示例复制出一个最接近的案例，再逐步决定是否需要降到 raw template 或手写 trait 的层级。

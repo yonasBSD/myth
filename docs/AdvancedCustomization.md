@@ -17,7 +17,7 @@ This guide explains the current contract of those systems, with emphasis on the 
 | Goal | Recommended API | What you write | Good examples |
 | --- | --- | --- | --- |
 | Standard mesh material that still participates in the normal geometry pipeline | `#[myth_material(shader = "...", shader_src = WGSL)]` | Only the material-specific WGSL body | [examples/custom_material_hologram.rs](../examples/custom_material_hologram.rs), [examples/custom_material_dissolve.rs](../examples/custom_material_dissolve.rs) |
-| Mesh material with full control over the complete WGSL template | `#[myth_material(shader = "...", shader_template_src = WGSL)]` | Full template source | Your own advanced material templates |
+| Mesh material with full control over the complete WGSL template | `#[myth_material(shader = "...", shader_template_src = WGSL)]` | Full template source | [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs) |
 | Material that needs custom Rust-side resource logic | Manual `RenderableMaterialTrait` | Full Rust trait impl plus WGSL | Built-in materials in `myth_resources::material` |
 | Fullscreen post-processing pass | `RenderPassBuilder::fullscreen(...)` | Fullscreen WGSL + graph bindings | [examples/custom_post_fx.rs](../examples/custom_post_fx.rs) |
 | Compute utility or GPU data-generation pass | `ComputePassBuilder::new(...)` | Compute WGSL + graph bindings | [examples/gpu_driven_particle_lights.rs](../examples/gpu_driven_particle_lights.rs) |
@@ -212,6 +212,8 @@ Choose `shader_template_src` when:
 - you need to own the exact order of includes and declarations
 - you intentionally do not want the engine-managed material prelude
 
+For a complete example, see [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs).
+
 ## 4. Engine-Generated WGSL Surface for Standard Geometry Materials
 
 ### 4.1 Standard Binding Groups
@@ -361,6 +363,23 @@ let node = post_pass.build_node(
 
 See the full version in [examples/custom_post_fx.rs](../examples/custom_post_fx.rs).
 
+If you want the fullscreen pass to become a reusable feature module instead of a one-off post effect, package the compiled `TemplateFullscreenPass` plus its tracked resources into a helper type. The ocean examples show that pattern in two variants:
+
+- [examples/procedural_ocean.rs](../examples/procedural_ocean.rs) replaces `scene_color` with a standalone fullscreen ocean.
+- [examples/ocean_composite_scene.rs](../examples/ocean_composite_scene.rs) binds both `scene_color` and `scene_depth` so the ocean only fills background pixels behind normal 3D geometry.
+
+For depth-aware compositing, declare the extra binding at pipeline-build time:
+
+```rust
+let composite_pass = RenderPassBuilder::fullscreen("Ocean Composite Pipeline")
+    .inline_shader_template(OCEAN_SHADER_NAME, OCEAN_SHADER_TEMPLATE)
+    .bind_uniform_buffer(0, 0, wgpu::ShaderStages::FRAGMENT)
+    .bind_texture_2d(0, 1, wgpu::ShaderStages::FRAGMENT, true)
+    .bind_sampler(0, 2, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering)
+    .bind_depth_texture_2d(0, 3, wgpu::ShaderStages::FRAGMENT)
+    .build(&mut engine.renderer);
+```
+
 ### 6.3 Compute Example
 
 Declaration:
@@ -438,10 +457,13 @@ Do not use it for `shader_src` body-mode materials. Those embedded sources are a
 
 - [examples/custom_material_hologram.rs](../examples/custom_material_hologram.rs)
 - [examples/custom_material_dissolve.rs](../examples/custom_material_dissolve.rs)
+- [examples/custom_material_template_aurora_gate.rs](../examples/custom_material_template_aurora_gate.rs)
 - [examples/custom_material_texture_flow.rs](../examples/custom_material_texture_flow.rs)
 - [examples/custom_material_slope_blend.rs](../examples/custom_material_slope_blend.rs)
 - [examples/custom_material_triplanar.rs](../examples/custom_material_triplanar.rs)
 - [examples/custom_post_fx.rs](../examples/custom_post_fx.rs)
+- [examples/procedural_ocean.rs](../examples/procedural_ocean.rs)
+- [examples/ocean_composite_scene.rs](../examples/ocean_composite_scene.rs)
 - [examples/gpu_driven_particle_lights.rs](../examples/gpu_driven_particle_lights.rs)
 
 When in doubt, start from one of those examples and only drop to raw templates or manual trait implementations after the standard body-mode path becomes a real constraint.

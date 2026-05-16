@@ -193,7 +193,12 @@ pub struct AuroraGateMaterial {
     pub glow_intensity: f32,
 }
 
-fn build_portal_geometry(radius: f32, depth: f32, radial_segments: usize, depth_segments: usize) -> Geometry {
+fn build_portal_geometry(
+    radius: f32,
+    depth: f32,
+    radial_segments: usize,
+    depth_segments: usize,
+) -> Geometry {
     let stride = radial_segments + 1;
     let mut positions = Vec::with_capacity((radial_segments + 1) * (depth_segments + 1));
     let mut normals = Vec::with_capacity((radial_segments + 1) * (depth_segments + 1));
@@ -413,18 +418,13 @@ impl AppHandler for AuroraGateDemo {
             return;
         };
 
-        scene
-            .node(&self.outer_gate)
-            .set_rotation(
-                Quat::from_rotation_z(self.time * 0.28)
-                    * Quat::from_rotation_y(self.time * 0.10),
-            );
-        scene
-            .node(&self.inner_gate)
-            .set_rotation(
-                Quat::from_rotation_z(-self.time * 0.42)
-                    * Quat::from_rotation_x((self.time * 0.6).sin() * 0.08),
-            );
+        scene.node(&self.outer_gate).set_rotation(
+            Quat::from_rotation_z(self.time * 0.28) * Quat::from_rotation_y(self.time * 0.10),
+        );
+        scene.node(&self.inner_gate).set_rotation(
+            Quat::from_rotation_z(-self.time * 0.42)
+                * Quat::from_rotation_x((self.time * 0.6).sin() * 0.08),
+        );
         scene
             .node(&self.core_node)
             .set_position(0.0, 2.0 + (self.time * 1.8).sin() * 0.16, 0.0)

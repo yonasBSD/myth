@@ -15,6 +15,9 @@ myth_app = { workspace = true }
 myth_core = { workspace = true }
 myth_assets = { workspace = true }
 myth_render = { workspace = true }
+myth_scene = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
 
 egui = { workspace = true }
 rustc-hash = { workspace = true }

@@ -1,0 +1,1125 @@
+use bytemuck::{Pod, Zeroable};
+use glam::Vec3;
+use myth_render::{
+    HDR_TEXTURE_FORMAT, Renderer,
+    core::gpu::{CommonSampler, Tracked},
+    graph::core::{
+        GraphBlackboard, RenderGraph, RenderPassBuilder, RenderTargetOps, TemplateFullscreenPass,
+        TextureDesc, TextureNodeId,
+    },
+    pipeline::ShaderCompilationOptions,
+};
+use myth_scene::{LightKind, ProjectionType, Scene};
+
+const OCEAN_SHADER_NAME: &str = "myth_dev_utils/ocean_surface";
+const OCEAN_RESOLVE_SHADER_NAME: &str = "myth_dev_utils/ocean_resolve";
+
+const OCEAN_SHADER_TEMPLATE: &str = r#"
+{$ include 'core/full_screen_vertex' $}
+
+struct OceanUniforms {
+    resolution_time: vec4<f32>,
+    sea_height_base: vec4<f32>,
+    sea_choppy_water: vec4<f32>,
+    sea_speed_freq_output: vec4<f32>,
+    camera_position: vec4<f32>,
+    camera_right: vec4<f32>,
+    camera_up: vec4<f32>,
+    camera_forward: vec4<f32>,
+    camera_projection: vec4<f32>,
+    light_direction: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> u_ocean: OceanUniforms;
+$$ if OCEAN_COMPOSITE is defined
+@group(0) @binding(1) var t_scene_color: texture_2d<f32>;
+@group(0) @binding(2) var s_scene_color: sampler;
+@group(0) @binding(3) var t_scene_depth: texture_depth_2d;
+$$ endif
+
+const PI: f32 = 3.141592;
+const NUM_STEPS: i32 = 8;
+const ITER_GEOMETRY: i32 = 3;
+const ITER_FRAGMENT: i32 = 5;
+
+fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
+    let non_negative = max(color, vec3<f32>(0.0));
+    let low = non_negative / 12.92;
+    let high = pow((non_negative + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(low, high, non_negative > vec3<f32>(0.04045));
+}
+
+fn hash(p: vec2<f32>) -> f32 {
+    let h = dot(p, vec2<f32>(1.0, 113.0));
+    return fract(sin(h) * 43758.5453123);
+}
+
+fn noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+
+    let mix1 = mix(hash(i + vec2<f32>(0.0, 0.0)), hash(i + vec2<f32>(1.0, 0.0)), u.x);
+    let mix2 = mix(hash(i + vec2<f32>(0.0, 1.0)), hash(i + vec2<f32>(1.0, 1.0)), u.x);
+    let mix3 = mix(mix1, mix2, u.y);
+    return -1.0 + 2.0 * mix3;
+}
+
+fn diffuse(n: vec3<f32>, l: vec3<f32>, p: f32) -> f32 {
+    return pow(dot(n, l) * 0.4 + 0.6, p);
+}
+
+fn specular(n: vec3<f32>, l: vec3<f32>, e: vec3<f32>, s: f32) -> f32 {
+    let nrm = (s + 8.0) / (PI * 8.0);
+    return pow(max(dot(reflect(e, n), l), 0.0), s) * nrm;
+}
+
+fn get_sky_color(e_in: vec3<f32>) -> vec3<f32> {
+    var e = e_in;
+    e.y = (max(e.y, 0.0) * 0.8 + 0.2) * 0.8;
+    return vec3<f32>(pow(1.0 - e.y, 2.0), 1.0 - e.y, 0.6 + (1.0 - e.y) * 0.4) * 1.1;
+}
+
+fn sea_octave(uv_in: vec2<f32>, choppy: f32) -> f32 {
+    let uv = uv_in + vec2<f32>(noise(uv_in));
+    var wv = 1.0 - abs(sin(uv));
+    let swv = abs(cos(uv));
+    wv = mix(wv, swv, wv);
+    return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
+}
+
+fn map_internal(p: vec3<f32>, iterations: i32) -> f32 {
+    var freq = u_ocean.sea_speed_freq_output.y;
+    var amp = u_ocean.sea_height_base.x;
+    var choppy = u_ocean.sea_choppy_water.x;
+    let sea_time = 1.0 + u_ocean.resolution_time.z * u_ocean.sea_speed_freq_output.x;
+    var uv = p.xz;
+    uv.x *= 0.75;
+    var height = 0.0;
+
+    for (var i = 0; i < iterations; i += 1) {
+        var d = sea_octave((uv + vec2<f32>(sea_time)) * freq, choppy);
+        d += sea_octave((uv - vec2<f32>(sea_time)) * freq, choppy);
+        height += d * amp;
+        uv = vec2<f32>(uv.x * 1.6 + uv.y * 1.2, -uv.x * 1.2 + uv.y * 1.6);
+        freq *= 1.9;
+        amp *= 0.22;
+        choppy = mix(choppy, 1.0, 0.2);
+    }
+
+    return p.y - height;
+}
+
+fn map(p: vec3<f32>) -> f32 {
+    return map_internal(p, ITER_GEOMETRY);
+}
+
+fn map_detailed(p: vec3<f32>) -> f32 {
+    return map_internal(p, ITER_FRAGMENT);
+}
+
+fn get_sea_color(
+    p: vec3<f32>,
+    n: vec3<f32>,
+    l: vec3<f32>,
+    eye: vec3<f32>,
+    dist: vec3<f32>,
+) -> vec3<f32> {
+    var fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
+    fresnel = pow(fresnel, 3.0) * 0.5;
+    let reflected = get_sky_color(reflect(eye, n));
+    let refracted = u_ocean.sea_height_base.yzw
+        + diffuse(n, l, 80.0) * u_ocean.sea_choppy_water.yzw * 0.12;
+    var color = mix(refracted, reflected, fresnel);
+    let atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
+    color += u_ocean.sea_choppy_water.yzw * (p.y - u_ocean.sea_height_base.x) * 0.18 * atten;
+    color += vec3<f32>(specular(n, l, eye, 60.0));
+    return color;
+}
+
+fn get_normal(p: vec3<f32>, eps: f32) -> vec3<f32> {
+    var n: vec3<f32>;
+    n.y = map_detailed(p);
+    n.x = map_detailed(vec3<f32>(p.x + eps, p.y, p.z)) - n.y;
+    n.z = map_detailed(vec3<f32>(p.x, p.y, p.z + eps)) - n.y;
+    n.y = eps;
+    return normalize(n);
+}
+
+fn height_map_tracing(ori: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
+    var tm = 0.0;
+    var tx = 1000.0;
+    var hx = map(ori + dir * tx);
+    var p = ori + dir * tx;
+
+    if (hx > 0.0) {
+        return p;
+    }
+
+    var hm = map(ori + dir * tm);
+    var tmid = 0.0;
+
+    for (var i = 0; i < NUM_STEPS; i += 1) {
+        tmid = mix(tm, tx, hm / (hm - hx));
+        p = ori + dir * tmid;
+        let hmid = map(p);
+        if (hmid < 0.0) {
+            tx = tmid;
+            hx = hmid;
+        } else {
+            tm = tmid;
+            hm = hmid;
+        }
+    }
+
+    return p;
+}
+
+fn get_pixel(frag_coord: vec2<f32>) -> vec3<f32> {
+    var screen = frag_coord / u_ocean.resolution_time.xy;
+    screen = screen * 2.0 - 1.0;
+
+    let projection_mode = u_ocean.camera_projection.w;
+    var ori = u_ocean.camera_position.xyz;
+    var dir = normalize(u_ocean.camera_forward.xyz);
+
+    if (projection_mode > 0.5) {
+        ori += u_ocean.camera_right.xyz * screen.x * u_ocean.camera_projection.y;
+        ori += u_ocean.camera_up.xyz * screen.y * u_ocean.camera_projection.z;
+    } else {
+        screen.x *= u_ocean.resolution_time.x / u_ocean.resolution_time.y;
+        dir = normalize(
+            u_ocean.camera_right.xyz * screen.x
+                + u_ocean.camera_up.xyz * screen.y
+                + u_ocean.camera_forward.xyz * u_ocean.camera_projection.x
+        );
+    }
+
+    if (dir.y >= 0.0) {
+        return get_sky_color(dir);
+    }
+
+    let p = height_map_tracing(ori, dir);
+    let dist = p - ori;
+    let n = get_normal(p, dot(dist, dist) * (0.1 / u_ocean.resolution_time.x));
+    let light = normalize(u_ocean.light_direction.xyz);
+
+    return mix(
+        get_sky_color(dir),
+        get_sea_color(p, n, light, dir, dist),
+        pow(smoothstep(0.0, -0.02, dir.y), 0.2),
+    );
+}
+
+fn render_ocean(uv: vec2<f32>) -> vec3<f32> {
+    let frag_coord = vec2<f32>(uv.x, 1.0 - uv.y) * u_ocean.resolution_time.xy;
+
+    $$ if OCEAN_QUALITY_LOW is defined
+
+    return get_pixel(frag_coord);
+
+    $$ elif OCEAN_QUALITY_MEDIUM is defined
+
+    let offsets = array<vec2<f32>, 4>(
+        vec2<f32>(-0.25, -0.25),
+        vec2<f32>(0.25, -0.25),
+        vec2<f32>(-0.25, 0.25),
+        vec2<f32>(0.25, 0.25),
+    );
+    var medium_color = vec3<f32>(0.0);
+    for (var i = 0; i < 4; i += 1) {
+        medium_color += get_pixel(frag_coord + offsets[i]);
+    }
+    return medium_color / 4.0;
+
+    $$ else
+
+    var color = vec3<f32>(0.0);
+    for (var i = -1; i <= 1; i += 1) {
+        for (var j = -1; j <= 1; j += 1) {
+            let jittered = frag_coord + vec2<f32>(f32(i), f32(j)) / 3.0;
+            color += get_pixel(jittered);
+        }
+    }
+
+    return color / 9.0;
+
+    $$ endif
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    $$ if OCEAN_COMPOSITE is defined
+    let size = vec2<i32>(textureDimensions(t_scene_depth));
+    let pixel = clamp(vec2<i32>(in.uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    let scene_depth = textureLoad(t_scene_depth, pixel, 0);
+    if (scene_depth > 0.000001) {
+        let scene_color = textureLoad(t_scene_color, pixel, 0).rgb;
+        return vec4<f32>(scene_color, 1.0);
+    }
+    $$ endif
+
+    let raw_color = max(render_ocean(in.uv), vec3<f32>(0.0));
+
+    let display_color = pow(raw_color, vec3<f32>(u_ocean.sea_speed_freq_output.z));
+    let ocean = srgb_to_linear(display_color);
+
+    return vec4<f32>(ocean, 1.0);
+}
+"#;
+
+const OCEAN_RESOLVE_SHADER_TEMPLATE: &str = r#"
+{$ include 'core/full_screen_vertex' $}
+
+@group(0) @binding(0) var t_ocean: texture_2d<f32>;
+@group(0) @binding(1) var s_ocean: sampler;
+$$ if OCEAN_COMPOSITE_RESOLVE is defined
+@group(0) @binding(2) var t_scene_color: texture_2d<f32>;
+@group(0) @binding(3) var s_scene_color: sampler;
+@group(0) @binding(4) var t_scene_depth: texture_depth_2d;
+$$ endif
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    $$ if OCEAN_COMPOSITE_RESOLVE is defined
+    let size = vec2<i32>(textureDimensions(t_scene_depth));
+    let pixel = clamp(vec2<i32>(in.uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    let scene_depth = textureLoad(t_scene_depth, pixel, 0);
+    if (scene_depth > 0.000001) {
+        let scene_color = textureLoad(t_scene_color, pixel, 0).rgb;
+        return vec4<f32>(scene_color, 1.0);
+    }
+    $$ endif
+
+    let ocean = textureSample(t_ocean, s_ocean, in.uv).rgb;
+    return vec4<f32>(ocean, 1.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct OceanUniforms {
+    resolution_time: [f32; 4],
+    sea_height_base: [f32; 4],
+    sea_choppy_water: [f32; 4],
+    sea_speed_freq_output: [f32; 4],
+    camera_position: [f32; 4],
+    camera_right: [f32; 4],
+    camera_up: [f32; 4],
+    camera_forward: [f32; 4],
+    camera_projection: [f32; 4],
+    light_direction: [f32; 4],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OceanPreset {
+    Reference,
+    Cinematic,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OceanQuality {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OceanCameraSource {
+    Reference,
+    SceneMainCamera,
+}
+
+impl OceanCameraSource {
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Reference => "Reference",
+            Self::SceneMainCamera => "Scene Camera",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OceanLightSource {
+    Manual,
+    ProceduralSky,
+    SceneDirectional,
+    SceneAuto,
+}
+
+impl OceanLightSource {
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual",
+            Self::ProceduralSky => "Procedural Sky",
+            Self::SceneDirectional => "Directional Light",
+            Self::SceneAuto => "Scene Auto",
+        }
+    }
+}
+
+impl OceanQuality {
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+        }
+    }
+
+    fn apply_to_shader_options(self, options: &mut ShaderCompilationOptions) {
+        match self {
+            Self::Low => options.add_define("OCEAN_QUALITY_LOW", "1"),
+            Self::Medium => options.add_define("OCEAN_QUALITY_MEDIUM", "1"),
+            Self::High => options.add_define("OCEAN_QUALITY_HIGH", "1"),
+        }
+    }
+}
+
+struct OceanQualityPasses {
+    low: TemplateFullscreenPass,
+    medium: TemplateFullscreenPass,
+    high: TemplateFullscreenPass,
+}
+
+impl OceanQualityPasses {
+    fn get(&self, quality: OceanQuality) -> &TemplateFullscreenPass {
+        match quality {
+            OceanQuality::Low => &self.low,
+            OceanQuality::Medium => &self.medium,
+            OceanQuality::High => &self.high,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OceanCameraState {
+    position: [f32; 3],
+    right: [f32; 3],
+    up: [f32; 3],
+    forward: [f32; 3],
+    projection: [f32; 4],
+}
+
+impl OceanCameraState {
+    fn reference(time: f32) -> Self {
+        Self {
+            position: [0.0, 3.5, time * 1.5],
+            right: [1.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            forward: [0.0, 0.0, -1.0],
+            projection: [2.0, 0.0, 0.0, 0.0],
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct OceanSettings {
+    pub sea_height: f32,
+    pub sea_choppy: f32,
+    pub sea_speed: f32,
+    pub sea_frequency: f32,
+    pub output_curve: f32,
+    pub sea_base: [f32; 3],
+    pub sea_water_color: [f32; 3],
+    pub sun_direction: [f32; 3],
+}
+
+impl OceanSettings {
+    #[must_use]
+    pub fn reference() -> Self {
+        Self {
+            sea_height: 0.60,
+            sea_choppy: 4.0,
+            sea_speed: 0.80,
+            sea_frequency: 0.16,
+            output_curve: 0.65,
+            sea_base: [0.0, 0.09, 0.18],
+            sea_water_color: [0.48, 0.54, 0.36],
+            sun_direction: [0.0, 1.0, 0.8],
+        }
+    }
+
+    #[must_use]
+    pub fn cinematic() -> Self {
+        Self {
+            sea_height: 0.72,
+            sea_choppy: 4.8,
+            sea_speed: 0.72,
+            sea_frequency: 0.14,
+            output_curve: 0.65,
+            sea_base: [0.02, 0.07, 0.15],
+            sea_water_color: [0.44, 0.52, 0.34],
+            sun_direction: [0.0, 1.0, 0.8],
+        }
+    }
+
+    fn to_uniforms(
+        &self,
+        width: u32,
+        height: u32,
+        time: f32,
+        camera: OceanCameraState,
+        light_direction: [f32; 3],
+    ) -> OceanUniforms {
+        OceanUniforms {
+            resolution_time: [width as f32, height as f32, time, 0.0],
+            sea_height_base: [
+                self.sea_height,
+                self.sea_base[0],
+                self.sea_base[1],
+                self.sea_base[2],
+            ],
+            sea_choppy_water: [
+                self.sea_choppy,
+                self.sea_water_color[0],
+                self.sea_water_color[1],
+                self.sea_water_color[2],
+            ],
+            sea_speed_freq_output: [self.sea_speed, self.sea_frequency, self.output_curve, 0.0],
+            camera_position: [
+                camera.position[0],
+                camera.position[1],
+                camera.position[2],
+                0.0,
+            ],
+            camera_right: [camera.right[0], camera.right[1], camera.right[2], 0.0],
+            camera_up: [camera.up[0], camera.up[1], camera.up[2], 0.0],
+            camera_forward: [camera.forward[0], camera.forward[1], camera.forward[2], 0.0],
+            camera_projection: camera.projection,
+            light_direction: [
+                light_direction[0],
+                light_direction[1],
+                light_direction[2],
+                0.0,
+            ],
+        }
+    }
+}
+
+pub struct OceanRenderer {
+    surface_passes: OceanQualityPasses,
+    composite_passes: OceanQualityPasses,
+    resolve_pass: TemplateFullscreenPass,
+    composite_resolve_pass: TemplateFullscreenPass,
+    uniforms: Tracked<wgpu::Buffer>,
+    pub settings: OceanSettings,
+    time: f32,
+    preset: OceanPreset,
+    quality: OceanQuality,
+    render_scale: f32,
+    camera_source: OceanCameraSource,
+    light_source: OceanLightSource,
+}
+
+impl OceanRenderer {
+    #[must_use]
+    pub fn new(renderer: &mut Renderer) -> Self {
+        let surface_passes = Self::build_quality_passes(renderer, false);
+        let composite_passes = Self::build_quality_passes(renderer, true);
+
+        let resolve_pass = RenderPassBuilder::fullscreen("Ocean Resolve Pipeline")
+            .inline_shader_template(OCEAN_RESOLVE_SHADER_NAME, OCEAN_RESOLVE_SHADER_TEMPLATE)
+            .bind_texture_2d(0, 0, wgpu::ShaderStages::FRAGMENT, true)
+            .bind_sampler(
+                0,
+                1,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::SamplerBindingType::Filtering,
+            )
+            .color_target(wgpu::ColorTargetState {
+                format: HDR_TEXTURE_FORMAT,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })
+            .build(renderer);
+
+        let mut composite_resolve_shader_options = ShaderCompilationOptions::default();
+        composite_resolve_shader_options.add_define("OCEAN_COMPOSITE_RESOLVE", "1");
+        let composite_resolve_pass =
+            RenderPassBuilder::fullscreen("Ocean Composite Resolve Pipeline")
+                .inline_shader_template(OCEAN_RESOLVE_SHADER_NAME, OCEAN_RESOLVE_SHADER_TEMPLATE)
+                .shader_options(composite_resolve_shader_options)
+                .bind_texture_2d(0, 0, wgpu::ShaderStages::FRAGMENT, true)
+                .bind_sampler(
+                    0,
+                    1,
+                    wgpu::ShaderStages::FRAGMENT,
+                    wgpu::SamplerBindingType::Filtering,
+                )
+                .bind_texture_2d(0, 2, wgpu::ShaderStages::FRAGMENT, true)
+                .bind_sampler(
+                    0,
+                    3,
+                    wgpu::ShaderStages::FRAGMENT,
+                    wgpu::SamplerBindingType::Filtering,
+                )
+                .bind_depth_texture_2d(0, 4, wgpu::ShaderStages::FRAGMENT)
+                .color_target(wgpu::ColorTargetState {
+                    format: HDR_TEXTURE_FORMAT,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })
+                .build(renderer);
+
+        let wgpu_ctx = renderer
+            .wgpu_ctx()
+            .expect("renderer must be initialized before ocean helper setup");
+        let uniforms = Tracked::new(wgpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Ocean Surface Uniforms"),
+            size: std::mem::size_of::<OceanUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+
+        Self {
+            surface_passes,
+            composite_passes,
+            resolve_pass,
+            composite_resolve_pass,
+            uniforms,
+            settings: OceanSettings::reference(),
+            time: 0.0,
+            preset: OceanPreset::Reference,
+            quality: OceanQuality::High,
+            render_scale: 1.0,
+            camera_source: OceanCameraSource::SceneMainCamera,
+            light_source: OceanLightSource::SceneAuto,
+        }
+    }
+
+    #[must_use]
+    pub fn preset(&self) -> OceanPreset {
+        self.preset
+    }
+
+    pub fn apply_preset(&mut self, preset: OceanPreset) {
+        self.settings = match preset {
+            OceanPreset::Reference => OceanSettings::reference(),
+            OceanPreset::Cinematic => OceanSettings::cinematic(),
+        };
+        self.preset = preset;
+    }
+
+    #[must_use]
+    pub fn quality(&self) -> OceanQuality {
+        self.quality
+    }
+
+    pub fn set_quality(&mut self, quality: OceanQuality) {
+        self.quality = quality;
+    }
+
+    #[must_use]
+    pub fn camera_source(&self) -> OceanCameraSource {
+        self.camera_source
+    }
+
+    pub fn set_camera_source(&mut self, camera_source: OceanCameraSource) {
+        self.camera_source = camera_source;
+    }
+
+    #[must_use]
+    pub fn light_source(&self) -> OceanLightSource {
+        self.light_source
+    }
+
+    pub fn set_light_source(&mut self, light_source: OceanLightSource) {
+        self.light_source = light_source;
+    }
+
+    #[must_use]
+    pub fn render_scale(&self) -> f32 {
+        self.render_scale
+    }
+
+    pub fn set_render_scale(&mut self, render_scale: f32) {
+        self.render_scale = render_scale.clamp(0.5, 1.0);
+    }
+
+    pub fn advance_time(&mut self, dt: f32) {
+        self.time += dt;
+    }
+
+    pub fn sync_gpu(&self, renderer: &Renderer, width: u32, height: u32) {
+        let camera = OceanCameraState::reference(self.time);
+        let light_direction = self.manual_light_direction();
+        self.sync_gpu_with_state(renderer, width, height, camera, light_direction);
+    }
+
+    pub fn sync_gpu_with_scene(
+        &self,
+        renderer: &Renderer,
+        scene: &mut Scene,
+        width: u32,
+        height: u32,
+    ) {
+        let camera = self.resolve_camera_state(scene);
+        let light_direction = self.resolve_light_direction(scene);
+        self.sync_gpu_with_state(renderer, width, height, camera, light_direction);
+    }
+
+    fn sync_gpu_with_state(
+        &self,
+        renderer: &Renderer,
+        width: u32,
+        height: u32,
+        camera: OceanCameraState,
+        light_direction: [f32; 3],
+    ) {
+        let Some(wgpu_ctx) = renderer.wgpu_ctx() else {
+            return;
+        };
+
+        let (render_width, render_height) = self.render_dimensions(width, height);
+        let uniforms = self.settings.to_uniforms(
+            render_width,
+            render_height,
+            self.time,
+            camera,
+            light_direction,
+        );
+        wgpu_ctx
+            .queue
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Preset");
+            if ui
+                .selectable_label(self.preset == OceanPreset::Reference, "Reference")
+                .clicked()
+            {
+                self.apply_preset(OceanPreset::Reference);
+            }
+            if ui
+                .selectable_label(self.preset == OceanPreset::Cinematic, "Cinematic")
+                .clicked()
+            {
+                self.apply_preset(OceanPreset::Cinematic);
+            }
+        });
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Quality");
+            for quality in [OceanQuality::Low, OceanQuality::Medium, OceanQuality::High] {
+                if ui
+                    .selectable_label(self.quality == quality, quality.label())
+                    .clicked()
+                {
+                    self.quality = quality;
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Camera");
+            for source in [
+                OceanCameraSource::Reference,
+                OceanCameraSource::SceneMainCamera,
+            ] {
+                if ui
+                    .selectable_label(self.camera_source == source, source.label())
+                    .clicked()
+                {
+                    self.camera_source = source;
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Light");
+            for source in [
+                OceanLightSource::SceneAuto,
+                OceanLightSource::Manual,
+                OceanLightSource::ProceduralSky,
+                OceanLightSource::SceneDirectional,
+            ] {
+                if ui
+                    .selectable_label(self.light_source == source, source.label())
+                    .clicked()
+                {
+                    self.light_source = source;
+                }
+            }
+        });
+
+        let mut render_scale = self.render_scale;
+        if ui
+            .add(
+                egui::Slider::new(&mut render_scale, 0.5..=1.0)
+                    .step_by(0.05)
+                    .text("Render Scale"),
+            )
+            .changed()
+        {
+            self.set_render_scale(render_scale);
+        }
+
+        ui.separator();
+
+        ui.add(egui::Slider::new(&mut self.settings.sea_height, 0.08..=1.6).text("Height"));
+        ui.add(egui::Slider::new(&mut self.settings.sea_choppy, 0.8..=6.4).text("Choppiness"));
+        ui.add(egui::Slider::new(&mut self.settings.sea_speed, 0.1..=2.6).text("Speed"));
+        ui.add(egui::Slider::new(&mut self.settings.sea_frequency, 0.04..=0.35).text("Frequency"));
+        ui.add(
+            egui::Slider::new(&mut self.settings.output_curve, 0.45..=0.85).text("Output Curve"),
+        );
+
+        ui.horizontal(|ui| {
+            ui.label("Sea Base");
+            ui.color_edit_button_rgb(&mut self.settings.sea_base);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Water");
+            ui.color_edit_button_rgb(&mut self.settings.sea_water_color);
+        });
+
+        if self.light_source == OceanLightSource::Manual {
+            let (mut azimuth, mut elevation) =
+                Self::direction_to_angles(self.settings.sun_direction);
+            let azimuth_changed = ui
+                .add(egui::Slider::new(&mut azimuth, -180.0..=180.0).text("Sun Azimuth"))
+                .changed();
+            let elevation_changed = ui
+                .add(egui::Slider::new(&mut elevation, -85.0..=85.0).text("Sun Elevation"))
+                .changed();
+            if azimuth_changed || elevation_changed {
+                self.settings.sun_direction = Self::angles_to_direction(azimuth, elevation);
+            }
+        }
+    }
+
+    fn output_desc(width: u32, height: u32) -> TextureDesc {
+        TextureDesc::new_2d(
+            width.max(1),
+            height.max(1),
+            HDR_TEXTURE_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+        )
+    }
+
+    fn render_dimensions(&self, width: u32, height: u32) -> (u32, u32) {
+        let scale = self.render_scale.clamp(0.5, 1.0);
+        let scaled_width = ((width as f32) * scale).round() as u32;
+        let scaled_height = ((height as f32) * scale).round() as u32;
+        (scaled_width.max(1), scaled_height.max(1))
+    }
+
+    fn uses_scaled_surface(&self) -> bool {
+        self.render_scale < 0.999
+    }
+
+    fn manual_light_direction(&self) -> [f32; 3] {
+        Self::normalize_direction(self.settings.sun_direction)
+    }
+
+    fn resolve_light_direction(&self, scene: &Scene) -> [f32; 3] {
+        match self.light_source {
+            OceanLightSource::Manual => self.manual_light_direction(),
+            OceanLightSource::ProceduralSky => self
+                .procedural_sky_light_direction(scene)
+                .unwrap_or_else(|| self.manual_light_direction()),
+            OceanLightSource::SceneDirectional => self
+                .scene_directional_light_direction(scene)
+                .unwrap_or_else(|| self.manual_light_direction()),
+            OceanLightSource::SceneAuto => self
+                .procedural_sky_light_direction(scene)
+                .or_else(|| self.scene_directional_light_direction(scene))
+                .unwrap_or_else(|| self.manual_light_direction()),
+        }
+    }
+
+    fn resolve_camera_state(&self, scene: &mut Scene) -> OceanCameraState {
+        match self.camera_source {
+            OceanCameraSource::Reference => OceanCameraState::reference(self.time),
+            OceanCameraSource::SceneMainCamera => self
+                .scene_camera_state(scene)
+                .unwrap_or_else(|| OceanCameraState::reference(self.time)),
+        }
+    }
+
+    fn scene_camera_state(&self, scene: &mut Scene) -> Option<OceanCameraState> {
+        let (transform, camera) = scene.query_main_camera_bundle()?;
+        let (right, up, basis_forward) = transform.rotation_basis();
+        let forward = (-basis_forward).normalize_or_zero();
+
+        let projection = match camera.projection_type() {
+            ProjectionType::Perspective => {
+                let focal = 1.0 / (camera.fov() * 0.5).tan().max(1e-4);
+                [focal, 0.0, 0.0, 0.0]
+            }
+            ProjectionType::Orthographic => {
+                let half_height = camera.ortho_size();
+                let half_width = half_height * camera.aspect();
+                [0.0, half_width, half_height, 1.0]
+            }
+        };
+
+        Some(OceanCameraState {
+            position: transform.position.to_array(),
+            right: right.to_array(),
+            up: up.to_array(),
+            forward: forward.to_array(),
+            projection,
+        })
+    }
+
+    fn procedural_sky_light_direction(&self, scene: &Scene) -> Option<[f32; 3]> {
+        let params = scene.background.procedural_sky_params()?;
+        Some(Self::normalize_direction(params.sun_direction.to_array()))
+    }
+
+    fn scene_directional_light_direction(&self, scene: &Scene) -> Option<[f32; 3]> {
+        for (light, world_matrix) in scene.iter_active_lights() {
+            if matches!(light.kind, LightKind::Directional(_)) {
+                let direction = world_matrix
+                    .transform_vector3(Vec3::new(0.0, 0.0, -1.0))
+                    .normalize_or_zero();
+                return Some(direction.to_array());
+            }
+        }
+        None
+    }
+
+    fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
+        let normalized = Vec3::from_array(direction).normalize_or_zero();
+        if normalized.length_squared() > 0.0 {
+            normalized.to_array()
+        } else {
+            [0.0, 1.0, 0.8]
+        }
+    }
+
+    fn direction_to_angles(direction: [f32; 3]) -> (f32, f32) {
+        let dir = Vec3::from_array(Self::normalize_direction(direction));
+        let azimuth = dir.x.atan2(-dir.z).to_degrees();
+        let elevation = dir.y.asin().to_degrees();
+        (azimuth, elevation)
+    }
+
+    fn angles_to_direction(azimuth_degrees: f32, elevation_degrees: f32) -> [f32; 3] {
+        let azimuth = azimuth_degrees.to_radians();
+        let elevation = elevation_degrees.to_radians();
+        let dir = Vec3::new(
+            azimuth.sin() * elevation.cos(),
+            elevation.sin(),
+            -azimuth.cos() * elevation.cos(),
+        )
+        .normalize_or_zero();
+        dir.to_array()
+    }
+
+    fn build_quality_passes(renderer: &mut Renderer, composite: bool) -> OceanQualityPasses {
+        OceanQualityPasses {
+            low: Self::build_surface_pass(renderer, OceanQuality::Low, composite),
+            medium: Self::build_surface_pass(renderer, OceanQuality::Medium, composite),
+            high: Self::build_surface_pass(renderer, OceanQuality::High, composite),
+        }
+    }
+
+    fn build_surface_pass(
+        renderer: &mut Renderer,
+        quality: OceanQuality,
+        composite: bool,
+    ) -> TemplateFullscreenPass {
+        let mut shader_options = ShaderCompilationOptions::default();
+        quality.apply_to_shader_options(&mut shader_options);
+        if composite {
+            shader_options.add_define("OCEAN_COMPOSITE", "1");
+        }
+
+        let mut builder = RenderPassBuilder::fullscreen(if composite {
+            "Ocean Composite Pipeline"
+        } else {
+            "Ocean Surface Pipeline"
+        })
+        .inline_shader_template(OCEAN_SHADER_NAME, OCEAN_SHADER_TEMPLATE)
+        .shader_options(shader_options)
+        .bind_uniform_buffer(0, 0, wgpu::ShaderStages::FRAGMENT);
+
+        if composite {
+            builder = builder
+                .bind_texture_2d(0, 1, wgpu::ShaderStages::FRAGMENT, true)
+                .bind_sampler(
+                    0,
+                    2,
+                    wgpu::ShaderStages::FRAGMENT,
+                    wgpu::SamplerBindingType::Filtering,
+                )
+                .bind_depth_texture_2d(0, 3, wgpu::ShaderStages::FRAGMENT);
+        }
+
+        builder
+            .color_target(wgpu::ColorTargetState {
+                format: HDR_TEXTURE_FORMAT,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })
+            .build(renderer)
+    }
+
+    fn add_surface_pass<'a>(
+        &'a self,
+        graph: &mut RenderGraph<'a>,
+        width: u32,
+        height: u32,
+        pass_name: &'static str,
+        texture_name: &'static str,
+    ) -> TextureNodeId {
+        let out_desc = Self::output_desc(width, height);
+        let pass = self.surface_passes.get(self.quality);
+        let uniforms = &self.uniforms;
+
+        graph.add_pass(pass_name, |builder| {
+            let out = builder.create_texture(texture_name, out_desc);
+            let node = pass.build_node(
+                builder,
+                pass_name,
+                out,
+                RenderTargetOps::DontCare,
+                Some(pass_name),
+                |bindings| {
+                    bindings.bind_tracked_buffer(0, 0, uniforms);
+                },
+            );
+            (node, out)
+        })
+    }
+
+    pub fn apply_standalone<'a>(
+        &'a self,
+        graph: &mut RenderGraph<'a>,
+        blackboard: GraphBlackboard,
+        width: u32,
+        height: u32,
+    ) -> GraphBlackboard {
+        let ocean_color = if self.uses_scaled_surface() {
+            let (render_width, render_height) = self.render_dimensions(width, height);
+            let low_res_ocean = self.add_surface_pass(
+                graph,
+                render_width,
+                render_height,
+                "Ocean_Standalone_Scaled_Surface",
+                "Ocean_Surface_HDR_Scaled",
+            );
+            let out_desc = Self::output_desc(width, height);
+            let resolve_pass = &self.resolve_pass;
+
+            graph.add_pass("Ocean_Standalone_Resolve", |builder| {
+                builder.read_texture(low_res_ocean);
+                let out = builder.create_texture("Ocean_Surface_HDR", out_desc);
+                let node = resolve_pass.build_node(
+                    builder,
+                    "Ocean Standalone Resolve",
+                    out,
+                    RenderTargetOps::DontCare,
+                    Some("Ocean Resolve BG"),
+                    |bindings| {
+                        bindings.bind_texture(0, 0, low_res_ocean);
+                        bindings.bind_common_sampler(0, 1, CommonSampler::LinearClamp);
+                    },
+                );
+                (node, out)
+            })
+        } else {
+            self.add_surface_pass(
+                graph,
+                width,
+                height,
+                "Ocean_Standalone",
+                "Ocean_Surface_HDR",
+            )
+        };
+
+        GraphBlackboard {
+            scene_color: Some(ocean_color),
+            ..blackboard
+        }
+    }
+
+    pub fn apply_composite<'a>(
+        &'a self,
+        graph: &mut RenderGraph<'a>,
+        blackboard: GraphBlackboard,
+        width: u32,
+        height: u32,
+    ) -> GraphBlackboard {
+        let (Some(scene_color), Some(scene_depth)) =
+            (blackboard.scene_color, blackboard.scene_depth)
+        else {
+            return self.apply_standalone(graph, blackboard, width, height);
+        };
+
+        let composited_color = if self.uses_scaled_surface() {
+            let (render_width, render_height) = self.render_dimensions(width, height);
+            let low_res_ocean = self.add_surface_pass(
+                graph,
+                render_width,
+                render_height,
+                "Ocean_Composite_Scaled_Surface",
+                "Ocean_Composite_HDR_Scaled",
+            );
+            let out_desc = Self::output_desc(width, height);
+            let pass = &self.composite_resolve_pass;
+
+            graph.add_pass("Ocean_Composite_Resolve", |builder| {
+                builder.read_texture(low_res_ocean);
+                builder.read_texture(scene_color);
+                builder.read_texture(scene_depth);
+                let out = builder.create_texture("Ocean_Composite_HDR", out_desc);
+                let node = pass.build_node(
+                    builder,
+                    "Ocean Composite Resolve",
+                    out,
+                    RenderTargetOps::DontCare,
+                    Some("Ocean Composite Resolve BG"),
+                    |bindings| {
+                        bindings.bind_texture(0, 0, low_res_ocean);
+                        bindings.bind_common_sampler(0, 1, CommonSampler::LinearClamp);
+                        bindings.bind_texture(0, 2, scene_color);
+                        bindings.bind_common_sampler(0, 3, CommonSampler::LinearClamp);
+                        bindings.bind_texture(0, 4, scene_depth);
+                    },
+                );
+                (node, out)
+            })
+        } else {
+            let out_desc = Self::output_desc(width, height);
+            let pass = self.composite_passes.get(self.quality);
+            let uniforms = &self.uniforms;
+
+            graph.add_pass("Ocean_Composite", |builder| {
+                builder.read_texture(scene_color);
+                builder.read_texture(scene_depth);
+                let out = builder.create_texture("Ocean_Composite_HDR", out_desc);
+                let node = pass.build_node(
+                    builder,
+                    "Ocean Composite Pass",
+                    out,
+                    RenderTargetOps::DontCare,
+                    Some("Ocean Composite BG"),
+                    |bindings| {
+                        bindings.bind_tracked_buffer(0, 0, uniforms);
+                        bindings.bind_texture(0, 1, scene_color);
+                        bindings.bind_common_sampler(0, 2, CommonSampler::LinearClamp);
+                        bindings.bind_texture(0, 3, scene_depth);
+                    },
+                );
+                (node, out)
+            })
+        };
+
+        GraphBlackboard {
+            scene_color: Some(composited_color),
+            ..blackboard
+        }
+    }
+}

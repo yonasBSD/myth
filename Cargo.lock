@@ -2119,14 +2119,17 @@ dependencies = [
 name = "myth_dev_utils"
 version = "0.3.0"
 dependencies = [
+ "bytemuck",
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "glam",
  "half",
  "myth_app",
  "myth_assets",
  "myth_core",
  "myth_render",
+ "myth_scene",
  "rustc-hash 2.1.2",
  "web-time",
  "wgpu",

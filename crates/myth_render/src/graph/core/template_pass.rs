@@ -66,6 +66,20 @@ impl TemplateBindingLayoutDesc {
     }
 
     #[must_use]
+    pub fn depth_texture_2d(group: u32, binding: u32, visibility: wgpu::ShaderStages) -> Self {
+        Self {
+            group,
+            binding,
+            visibility,
+            binding_type: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        }
+    }
+
+    #[must_use]
     pub fn sampler(
         group: u32,
         binding: u32,
@@ -164,6 +178,17 @@ impl TemplatePassDescriptor {
     ) {
         self.add_binding_layout(TemplateBindingLayoutDesc::texture_2d(
             group, binding, visibility, filterable,
+        ));
+    }
+
+    pub fn add_depth_texture_2d(
+        &mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+    ) {
+        self.add_binding_layout(TemplateBindingLayoutDesc::depth_texture_2d(
+            group, binding, visibility,
         ));
     }
 
@@ -737,6 +762,16 @@ impl RenderPassBuilder {
         self
     }
 
+    pub fn bind_depth_texture_2d(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+    ) -> Self {
+        self.inner = self.inner.bind_depth_texture_2d(group, binding, visibility);
+        self
+    }
+
     pub fn bind_sampler(
         mut self,
         group: u32,
@@ -859,6 +894,16 @@ impl ComputePassBuilder {
         self
     }
 
+    pub fn bind_depth_texture_2d(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+    ) -> Self {
+        self.inner = self.inner.bind_depth_texture_2d(group, binding, visibility);
+        self
+    }
+
     pub fn bind_sampler(
         mut self,
         group: u32,
@@ -974,6 +1019,19 @@ impl FullscreenPassTemplateBuilder {
         self.binding_layouts
             .push(TemplateBindingLayoutDesc::texture_2d(
                 group, binding, visibility, filterable,
+            ));
+        self
+    }
+
+    fn bind_depth_texture_2d(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+    ) -> Self {
+        self.binding_layouts
+            .push(TemplateBindingLayoutDesc::depth_texture_2d(
+                group, binding, visibility,
             ));
         self
     }
@@ -1126,6 +1184,19 @@ impl ComputePassTemplateBuilder {
         self.binding_layouts
             .push(TemplateBindingLayoutDesc::texture_2d(
                 group, binding, visibility, filterable,
+            ));
+        self
+    }
+
+    fn bind_depth_texture_2d(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+    ) -> Self {
+        self.binding_layouts
+            .push(TemplateBindingLayoutDesc::depth_texture_2d(
+                group, binding, visibility,
             ));
         self
     }
