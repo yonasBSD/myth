@@ -21,6 +21,9 @@ Vec2Input = Sequence[float]
 Vec3Input = Sequence[float]
 """A 3-component vector: ``[x, y, z]``."""
 
+Vec4Input = Sequence[float]
+"""A 4-component vector: ``[x, y, z, w]``."""
+
 # ============================================================================
 # Enums
 # ============================================================================
@@ -215,6 +218,18 @@ class Renderer:
     def load_hdr_texture(self, path: str) -> TextureHandle: ...
     def load_gltf(self, path: str) -> Object3D: ...
 
+    def register_shader_template(self, name: str, source: str) -> None:
+        """Register a named WGSL shader template on this renderer."""
+        ...
+
+    def add_fullscreen_post_pass(self, post_pass: FullscreenPostPass) -> None:
+        """Add a reusable fullscreen post-process pass that runs every render."""
+        ...
+
+    def clear_fullscreen_post_passes(self) -> None:
+        """Remove all registered fullscreen post-process passes."""
+        ...
+
     # ---- Input injection ----
 
     def inject_key_down(self, key: str) -> None:
@@ -345,6 +360,38 @@ class Renderer:
 
     def __enter__(self) -> Renderer: ...
     def __exit__(self, *args: object) -> bool: ...
+
+# ============================================================================
+# FullscreenPostPass
+# ============================================================================
+
+class FullscreenPostPass:
+    """A reusable fullscreen post-process pass.
+
+    The pass samples the current HDR scene color as ``t_input`` / ``s_input``
+    and writes a new HDR scene color before the engine's built-in post-processing.
+
+    Args:
+        name: Debug/display label for the pass.
+        shader_name: Named shader template key.
+        shader_source: Optional inline WGSL template source. If omitted,
+            ``shader_name`` must already be registered via
+            :meth:`Engine.register_shader_template` or
+            :meth:`Renderer.register_shader_template`.
+        enabled: Whether the pass is active.
+    """
+
+    name: str
+    shader_name: str
+    enabled: bool
+
+    def __init__(
+        self,
+        name: str,
+        shader_name: str,
+        shader_source: Optional[str] = None,
+        enabled: bool = True,
+    ) -> None: ...
 
 # ============================================================================
 # ReadbackStream — Expert-mode non-blocking GPU→CPU readback
@@ -553,6 +600,18 @@ class Engine:
         """
         ...
 
+    def register_shader_template(self, name: str, source: str) -> None:
+        """Register a named WGSL shader template on the active renderer."""
+        ...
+
+    def add_fullscreen_post_pass(self, post_pass: FullscreenPostPass) -> None:
+        """Add a reusable fullscreen post-process pass to the ``App`` render loop."""
+        ...
+
+    def clear_fullscreen_post_passes(self) -> None:
+        """Remove all fullscreen post-process passes registered for the current ``App``."""
+        ...
+
     def load_gaussian_ply(self, path: str) -> GaussianCloud:
         """Load a ``.ply`` file containing 3D Gaussian Splatting data."""
         ...
@@ -581,7 +640,7 @@ class Scene:
     def add_mesh(
         self,
         geometry: Union[BoxGeometry, SphereGeometry, PlaneGeometry, Geometry],
-        material: Union[UnlitMaterial, PhongMaterial, PhysicalMaterial],
+        material: Union[UnlitMaterial, PhongMaterial, PhysicalMaterial, ShaderMaterial],
     ) -> Object3D:
         """Add a mesh to the scene.
 
@@ -1176,6 +1235,81 @@ class Geometry:
 # ============================================================================
 # Materials
 # ============================================================================
+
+class ShaderMaterial:
+    """A custom shader-driven material for advanced mesh effects.
+
+    In ``shader_mode='body'``, ``shader_source`` is interpreted as a material
+    body and runs inside the engine's standard geometry material template.
+    In ``shader_mode='template'``, ``shader_source`` is treated as a full WGSL
+    template. If ``shader_source`` is omitted, ``shader_name`` must refer to a
+    previously registered full template.
+
+    The generated material uniform block exposes these fields:
+
+    - ``u_material.base_color``
+    - ``u_material.accent_color``
+    - ``u_material.edge_color``
+    - ``u_material.emissive_color``
+    - ``u_material.opacity``
+    - ``u_material.alpha_test``
+    - ``u_material.params0`` .. ``u_material.params3``
+    - ``u_material.map_transform``
+
+    Optional texture bindings:
+
+    - ``t_map``
+    - ``s_map``
+
+    Args:
+        shader_name: Template key or logical shader name.
+        shader_source: Optional inline WGSL source.
+        shader_mode: ``'body'`` or ``'template'``.
+        base_color: Initial RGBA or RGB color.
+        opacity: Initial opacity.
+        side: Face culling mode.
+        alpha_mode: Transparency mode.
+        depth_write: Whether to write depth.
+        depth_test: Whether to test depth.
+    """
+
+    shader_name: str
+    shader_mode: str
+    base_color: list[float]
+    accent_color: list[float]
+    edge_color: list[float]
+    emissive_color: list[float]
+    opacity: float
+    alpha_test: float
+    params0: list[float]
+    params1: list[float]
+    params2: list[float]
+    params3: list[float]
+    side: str
+    alpha_mode: str
+    depth_write: bool
+    depth_test: bool
+
+    def __init__(
+        self,
+        shader_name: str,
+        shader_source: Optional[str] = None,
+        shader_mode: str = "body",
+        base_color: Optional[ColorInput] = None,
+        opacity: float = 1.0,
+        side: str = "front",
+        alpha_mode: str = "opaque",
+        depth_write: bool = True,
+        depth_test: bool = True,
+    ) -> None: ...
+
+    def set_map(self, tex: TextureHandle) -> None:
+        """Set the optional color texture used as ``t_map`` / ``s_map``."""
+        ...
+
+    def clear_map(self) -> None:
+        """Remove the optional ``map`` texture binding."""
+        ...
 
 class UnlitMaterial:
     """An unlit material with flat color.

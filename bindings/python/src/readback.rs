@@ -146,10 +146,8 @@ impl PyReadbackStream {
             .ok_or_else(|| rt_err("no headless texture — call init_headless() first"))?;
 
         let stream = &mut self.stream;
-        py.detach(move || {
-            stream.submit_blocking(device, queue, texture)
-        })
-        .map_err(|e: myth_engine::render::core::ReadbackError| rt_err(&e.to_string()))
+        py.detach(move || stream.submit_blocking(device, queue, texture))
+            .map_err(|e: myth_engine::render::core::ReadbackError| rt_err(&e.to_string()))
     }
 
     /// Return the next ready frame as ``dict``, or ``None`` if no frame
@@ -162,10 +160,7 @@ impl PyReadbackStream {
     ///
     /// This is the *allocating* receive path. For steady-state zero
     /// allocation, prefer :meth:`try_recv_into`.
-    fn try_recv<'py>(
-        &mut self,
-        py: Python<'py>,
-    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+    fn try_recv<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         match self.stream.try_recv() {
             Ok(Some(frame)) => {
                 let dict = PyDict::new(py);
@@ -197,10 +192,7 @@ impl PyReadbackStream {
     ///     idx = stream.try_recv_into(buf)
     ///     if idx is not None:
     ///         arr = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)
-    fn try_recv_into(
-        &mut self,
-        buffer: &Bound<'_, PyByteArray>,
-    ) -> PyResult<Option<u64>> {
+    fn try_recv_into(&mut self, buffer: &Bound<'_, PyByteArray>) -> PyResult<Option<u64>> {
         match self.stream.try_recv_into(&mut self.recv_buf) {
             Ok(Some(frame_index)) => {
                 let expected = self.recv_buf.len();
@@ -211,9 +203,7 @@ impl PyReadbackStream {
                 // matches. No other Python code can mutate the bytearray
                 // concurrently.
                 unsafe {
-                    buffer
-                        .as_bytes_mut()
-                        .copy_from_slice(&self.recv_buf);
+                    buffer.as_bytes_mut().copy_from_slice(&self.recv_buf);
                 }
                 Ok(Some(frame_index))
             }

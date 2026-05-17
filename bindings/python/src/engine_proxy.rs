@@ -2,6 +2,7 @@
 
 use pyo3::prelude::*;
 
+use crate::advanced::PyFullscreenPostPass;
 use crate::scene::PyScene;
 use crate::texture::{self, PyTextureHandle};
 use crate::with_engine;
@@ -118,6 +119,28 @@ impl PyEngine {
             let handle = scene.instantiate(&prefab);
             Ok(crate::scene::PyObject3D::from_handle(handle))
         })?
+    }
+
+    /// Register a named WGSL shader template on the active renderer.
+    fn register_shader_template(&self, name: &str, source: &str) -> PyResult<()> {
+        with_engine(|engine| {
+            engine.renderer.register_shader_template(name, source);
+        })?;
+        Ok(())
+    }
+
+    /// Add a reusable fullscreen post-process pass to the built-in App render loop.
+    fn add_fullscreen_post_pass(&self, pass: &PyFullscreenPostPass) -> PyResult<()> {
+        with_engine(|_| ())?;
+        crate::advanced::register_app_post_pass(pass);
+        Ok(())
+    }
+
+    /// Remove all fullscreen post-process passes registered for the current App.
+    fn clear_fullscreen_post_passes(&self) -> PyResult<()> {
+        with_engine(|_| ())?;
+        crate::advanced::clear_app_post_passes();
+        Ok(())
     }
 
     // ---- Timing ----

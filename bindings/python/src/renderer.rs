@@ -18,8 +18,10 @@
 //!
 //! Pass the integer handle to [`MythRenderer.init_with_handle`].
 
+use std::cell::RefCell;
 #[cfg(target_os = "windows")]
 use std::num::NonZero;
+use std::rc::Rc;
 
 use pyo3::prelude::*;
 
@@ -30,6 +32,7 @@ use raw_window_handle::{
 
 use myth_engine::{ClusteredShadingMode, Engine, RendererInitConfig, RendererSettings, SceneExt};
 
+use crate::advanced::{self, FullscreenPostPassState, PyFullscreenPostPass};
 use crate::{clear_engine_ptr, set_engine_ptr};
 
 // ---------------------------------------------------------------------------
@@ -346,6 +349,7 @@ pub struct PyMythRenderer {
     last_frame_time: std::time::Instant,
     /// Internal stream for the simple recording API.
     active_stream: Option<myth_engine::render::core::ReadbackStream>,
+    post_passes: Vec<Rc<RefCell<FullscreenPostPassState>>>,
 }
 
 #[pymethods]
@@ -374,6 +378,7 @@ impl PyMythRenderer {
             start_time: std::time::Instant::now(),
             last_frame_time: std::time::Instant::now(),
             active_stream: None,
+            post_passes: Vec::new(),
         })
     }
 
@@ -452,8 +457,9 @@ impl PyMythRenderer {
     /// This calls the engine's full render pipeline (extract → prepare →
     /// queue → render) and presents to the surface.
     fn render(&mut self) -> PyResult<()> {
+        let post_passes = self.post_passes.clone();
         let engine = self.engine_mut()?;
-        engine.render_active_scene();
+        advanced::render_engine_with_post_passes(engine, &post_passes);
         engine.renderer.maybe_prune();
         Ok(())
     }
@@ -560,6 +566,31 @@ impl PyMythRenderer {
         Ok(crate::scene::PyObject3D::from_handle(handle))
     }
 
+    /// Register a named WGSL shader template on this renderer.
+    fn register_shader_template(&mut self, name: &str, source: &str) -> PyResult<()> {
+        let engine = self.engine_mut()?;
+        engine.renderer.register_shader_template(name, source);
+        Ok(())
+    }
+
+    /// Add a reusable fullscreen post-process pass that runs every render.
+    fn add_fullscreen_post_pass(&mut self, pass: &PyFullscreenPostPass) {
+        let shared = pass.shared_state();
+        shared.borrow_mut().reset();
+        if !self
+            .post_passes
+            .iter()
+            .any(|existing| Rc::ptr_eq(existing, &shared))
+        {
+            self.post_passes.push(shared);
+        }
+    }
+
+    /// Remove all registered fullscreen post-process passes.
+    fn clear_fullscreen_post_passes(&mut self) {
+        self.post_passes.clear();
+    }
+
     // ----------------------------------------------------------------
     // Input forwarding
     // ----------------------------------------------------------------
@@ -652,12 +683,7 @@ impl PyMythRenderer {
     ///     format: Pixel format string (``"rgba8"`` or ``"rgba16float"``).
     ///         Defaults to ``"rgba8"``.
     #[pyo3(signature = (width, height, format=None))]
-    fn init_headless(
-        &mut self,
-        width: u32,
-        height: u32,
-        format: Option<&str>,
-    ) -> PyResult<()> {
+    fn init_headless(&mut self, width: u32, height: u32, format: Option<&str>) -> PyResult<()> {
         if self.engine.is_some() {
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 "Renderer already initialized",
@@ -699,7 +725,10 @@ impl PyMythRenderer {
     /// Returns:
     ///     ``bytes``: Tightly-packed pixel data (RGBA8 = 4 bytes/px,
     ///     RGBA16Float = 8 bytes/px). Row order is top-to-bottom.
-    fn readback_pixels<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    fn readback_pixels<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
         let engine = self.engine_mut()?;
         let pixels = engine.readback_pixels().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("readback failed: {e}"))
@@ -722,11 +751,14 @@ impl PyMythRenderer {
         max_stash_size: usize,
     ) -> PyResult<crate::readback::PyReadbackStream> {
         let engine = self.engine_ref()?;
-        let stream = engine.renderer.create_readback_stream(buffer_count, max_stash_size).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "failed to create readback stream: {e}"
-            ))
-        })?;
+        let stream = engine
+            .renderer
+            .create_readback_stream(buffer_count, max_stash_size)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "failed to create readback stream: {e}"
+                ))
+            })?;
         Ok(crate::readback::PyReadbackStream::new(stream))
     }
 
@@ -765,11 +797,14 @@ impl PyMythRenderer {
             ));
         }
         let engine = self.engine_ref()?;
-        let stream = engine.renderer.create_readback_stream(buffer_count, max_stash_size).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "failed to create readback stream: {e}"
-            ))
-        })?;
+        let stream = engine
+            .renderer
+            .create_readback_stream(buffer_count, max_stash_size)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "failed to create readback stream: {e}"
+                ))
+            })?;
         self.active_stream = Some(stream);
         Ok(())
     }
@@ -797,11 +832,12 @@ impl PyMythRenderer {
         let delta = dt.unwrap_or_else(|| now.duration_since(self.last_frame_time).as_secs_f32());
         self.last_frame_time = now;
 
+        let post_passes = self.post_passes.clone();
         let engine = self.engine.as_deref_mut().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Renderer not initialized")
         })?;
         engine.update(delta);
-        engine.render_active_scene();
+        advanced::render_engine_with_post_passes(engine, &post_passes);
 
         // ---- submit ----
         let device = engine.renderer.device().ok_or_else(|| {
@@ -836,7 +872,10 @@ impl PyMythRenderer {
     ///
     /// Raises:
     ///     RuntimeError: If no recording session is active.
-    fn try_pull_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+    fn try_pull_frame<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
         let stream = self.active_stream.as_mut().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 "no active recording — call start_recording() first",
@@ -861,7 +900,10 @@ impl PyMythRenderer {
     /// Returns:
     ///     ``list[dict]``: All remaining frames. Each dict has ``"pixels"``
     ///     (``bytes``) and ``"frame_index"`` (``int``).
-    fn flush_recording<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyList>> {
+    fn flush_recording<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyList>> {
         let mut stream = self.active_stream.take().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 "no active recording — call start_recording() first",
@@ -874,11 +916,9 @@ impl PyMythRenderer {
 
         let result = pyo3::types::PyList::empty(py);
 
-        let flush_result = stream
-            .flush(device)
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("flush failed: {e}"))
-            })?;
+        let flush_result = stream.flush(device).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("flush failed: {e}"))
+        })?;
 
         for frame in flush_result {
             let dict = pyo3::types::PyDict::new(py);
@@ -920,6 +960,7 @@ impl PyMythRenderer {
             clear_engine_ptr();
         }
         self.engine = None;
+        self.post_passes.clear();
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {

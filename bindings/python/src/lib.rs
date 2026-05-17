@@ -10,6 +10,7 @@
 use pyo3::prelude::*;
 use std::cell::Cell;
 
+mod advanced;
 mod animation;
 mod app;
 mod camera;
@@ -162,7 +163,7 @@ pub(crate) fn extract_material_handle(
         .and_then(|v| v.extract::<u64>())
         .map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err(
-                "Expected a Material object (UnlitMaterial, PhongMaterial, PhysicalMaterial)",
+                "Expected a Material object (UnlitMaterial, PhongMaterial, PhysicalMaterial, ShaderMaterial)",
             )
         })?;
     Ok(myth_engine::MaterialHandle::from(
@@ -198,6 +199,8 @@ fn myth_binding(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<material::PyUnlitMaterial>()?;
     m.add_class::<material::PyPhongMaterial>()?;
     m.add_class::<material::PyPhysicalMaterial>()?;
+    m.add_class::<advanced::PyShaderMaterial>()?;
+    m.add_class::<advanced::PyFullscreenPostPass>()?;
 
     // Camera & Light
     m.add_class::<camera::PyAntiAliasing>()?;

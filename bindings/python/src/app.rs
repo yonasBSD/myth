@@ -112,6 +112,10 @@ impl AppHandler for PythonHandler {
             }
         });
     }
+
+    fn render(&mut self, engine: &mut Engine, _window: &dyn Window) {
+        crate::advanced::render_engine_with_registered_post_passes(engine);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +209,8 @@ impl PyApp {
     fn run(&self, py: Python<'_>) -> PyResult<()> {
         let settings = build_settings(&self.render_path, self.vsync, self.clustered_shading);
 
+        crate::advanced::clear_app_post_passes();
+
         // Store callbacks in thread-locals so PythonHandler can access them.
         if let Some(ref f) = self.init_fn {
             INIT_FN.with(|cell| *cell.borrow_mut() = Some(f.clone_ref(py)));
@@ -225,6 +231,7 @@ impl PyApp {
         // Clean up thread-locals.
         INIT_FN.with(|cell| *cell.borrow_mut() = None);
         UPDATE_FN.with(|cell| *cell.borrow_mut() = None);
+        crate::advanced::clear_app_post_passes();
 
         result.map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Engine error: {e}"))

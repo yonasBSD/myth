@@ -174,6 +174,21 @@ node.rotation_euler = [90, 0, 0]
 
 The reference example is `examples/gaussian_splatting.py`, and it should run with `RenderPath.HIGH_FIDELITY`.
 
+### Advanced customization
+
+The Python bindings now expose a focused subset of the engine's advanced extension surface:
+
+- `Engine.register_shader_template(...)` / `Renderer.register_shader_template(...)` for named WGSL template registration.
+- `ShaderMaterial(...)` for custom mesh materials in either `shader_mode="body"` or `shader_mode="template"`.
+- `FullscreenPostPass(...)` plus `add_fullscreen_post_pass(...)` for reusable fullscreen HDR post-process passes.
+
+`ShaderMaterial` provides a stable uniform block with:
+
+- `u_material.base_color`, `accent_color`, `edge_color`, `emissive_color`
+- `u_material.opacity`, `alpha_test`
+- `u_material.params0` .. `u_material.params3`
+- optional `t_map` / `s_map`
+
 ---
 
 ## Examples
@@ -186,6 +201,8 @@ The examples directory reflects the current binding surface:
 | `examples/earth.py` | Textures and layered scene composition |
 | `examples/bloom_demo.py` | High-fidelity post-processing |
 | `examples/video_texture.py` | Dynamic texture updates |
+| `examples/custom_shader_material.py` | Custom mesh materials via `ShaderMaterial` |
+| `examples/custom_post_fx.py` | Named shader templates and reusable fullscreen post passes |
 | `examples/gaussian_splatting.py` | 3DGS pipeline and cloud metadata |
 | `examples/shadows.py` | Light setup and shadow toggles |
 | `examples/sponza.py` | Large glTF scene loading |

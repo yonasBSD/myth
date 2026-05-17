@@ -248,6 +248,7 @@ pub use myth_animation::{
 pub use myth_render::Renderer;
 pub use myth_render::graph::FrameComposer;
 pub use myth_render::settings::{RenderPath, RendererInitConfig, RendererSettings};
+pub use myth_render::wgpu;
 
 // Errors
 pub use myth_core::{AssetError, Error, PlatformError, RenderError, Result};
