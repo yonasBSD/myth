@@ -28,7 +28,7 @@ jobs:
       - name: Install wasm-bindgen-cli
         uses: jetli/wasm-bindgen-action@v0.2.0
         with:
-          version: 0.2.117
+          version: 0.2.121
 
       - name: Install LLVM Toolchain
         run: sudo apt-get update && sudo apt-get install -y llvm clang
