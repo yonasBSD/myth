@@ -154,10 +154,16 @@ impl DayNightCycle {
     }
 
     #[must_use]
+    fn moon_phase_fraction(sun_direction: Vec3, moon_direction: Vec3) -> f32 {
+        (1.0 - sun_direction.dot(moon_direction).clamp(-1.0, 1.0)) * 0.5
+    }
+
+    #[must_use]
     fn moon_light_intensity(&self, sun_direction: Vec3, moon_direction: Vec3) -> f32 {
+        let phase_fraction = Self::moon_phase_fraction(sun_direction, moon_direction);
         let moon_above_horizon = smoothstep(-0.08, 0.04, moon_direction.y);
         let night_factor = 1.0 - smoothstep(-0.12, 0.04, sun_direction.y);
-        self.moon_night_intensity * moon_above_horizon * night_factor
+        self.moon_night_intensity * phase_fraction * moon_above_horizon * night_factor
     }
 
     fn update_bound_light(
@@ -266,6 +272,21 @@ mod tests {
         let axis = cycle.compute_star_axis();
         assert!(axis.y > 0.999);
         assert!(axis.z.abs() < 1e-4);
+    }
+
+    #[test]
+    fn moon_phase_fraction_tracks_new_quarter_and_full_moon() {
+        let sun_direction = Vec3::Y;
+
+        let new_moon = DayNightCycle::moon_phase_fraction(sun_direction, sun_direction);
+        let quarter_moon =
+            DayNightCycle::moon_phase_fraction(sun_direction, Vec3::X);
+        let full_moon =
+            DayNightCycle::moon_phase_fraction(sun_direction, -sun_direction);
+
+        assert!(new_moon <= 1e-6);
+        assert!((quarter_moon - 0.5).abs() <= 1e-6);
+        assert!((full_moon - 1.0).abs() <= 1e-6);
     }
 
     #[test]
