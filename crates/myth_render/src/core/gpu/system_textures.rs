@@ -80,6 +80,9 @@ pub struct SystemTextures {
     /// Default scene-light storage buffer containing a single inert light.
     pub light_storage: Tracked<wgpu::Buffer>,
 
+    /// Default atmospheric bake parameters used when no procedural sky is bound.
+    pub atmosphere_bake_params: Tracked<wgpu::Buffer>,
+
     /// Default cluster record buffer containing a single empty record.
     pub clustered_records: Tracked<wgpu::Buffer>,
 
@@ -87,10 +90,10 @@ pub struct SystemTextures {
     pub clustered_light_indices: Tracked<wgpu::Buffer>,
 
     // ─── Screen BindGroup Infrastructure (Group 3) ─────────────────
-    /// `BindGroupLayout` for the base Group 3 screen-space resources (bindings 0-5).
+    /// `BindGroupLayout` for the base Group 3 screen-space resources.
     pub screen_layout: Tracked<wgpu::BindGroupLayout>,
 
-    /// `BindGroupLayout` for clustered Group 3 pipelines (bindings 0-8).
+    /// `BindGroupLayout` for clustered Group 3 pipelines.
     pub screen_layout_clustered: Tracked<wgpu::BindGroupLayout>,
 
     /// Linear-clamp sampler shared by transmission / SSAO sampling.
@@ -121,6 +124,7 @@ impl SystemTextures {
         let clustered_params = create_default_clustered_params(device, queue);
         let light_metadata = create_default_light_metadata(device, queue);
         let light_storage = create_default_light_storage(device, queue);
+        let atmosphere_bake_params = create_default_atmosphere_bake_params(device, queue);
         let clustered_records = create_default_clustered_records(device, queue);
         let clustered_light_indices = create_default_clustered_light_indices(device, queue);
 
@@ -166,6 +170,7 @@ impl SystemTextures {
             clustered_params,
             light_metadata,
             light_storage,
+            atmosphere_bake_params,
             clustered_records,
             clustered_light_indices,
             screen_layout,
@@ -184,7 +189,7 @@ fn create_screen_bind_group_layout(
     device: &wgpu::Device,
     clustered: bool,
 ) -> Tracked<wgpu::BindGroupLayout> {
-    let mut entries = Vec::with_capacity(if clustered { 11 } else { 8 });
+    let mut entries = Vec::with_capacity(if clustered { 13 } else { 10 });
 
     entries.push(wgpu::BindGroupLayoutEntry {
         binding: 0,
@@ -291,6 +296,27 @@ fn create_screen_bind_group_layout(
             count: None,
         });
     }
+
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 11,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 12,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    });
 
     Tracked::new(
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -498,6 +524,21 @@ fn create_default_light_storage(
         mapped_at_creation: false,
     }));
     queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&GpuLightStorage::default()));
+    buffer
+}
+
+fn create_default_atmosphere_bake_params(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::Buffer> {
+    let zero_words = [0.0_f32; 20];
+    let buffer = Tracked::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sys_atmosphere_bake_params"),
+        size: std::mem::size_of_val(&zero_words) as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&zero_words));
     buffer
 }
 

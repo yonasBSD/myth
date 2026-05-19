@@ -10,6 +10,7 @@ use glam::Vec3;
 use myth_core::NodeHandle;
 use myth_resources::Input;
 
+use crate::light::{LIGHT_FLAG_IS_MOON, LIGHT_FLAG_IS_SUN};
 use crate::scene::{Scene, SceneLogic};
 
 /// Scene logic that drives a procedural sky and optional sun/moon lights.
@@ -112,18 +113,12 @@ impl DayNightCycle {
     /// Computes the normalized world-space direction toward the moon.
     #[must_use]
     pub fn compute_moon_direction(&self) -> Vec3 {
-        // (-self.compute_sun_direction()).normalize_or_zero()
-
         let latitude = self.latitude.to_radians();
 
-        // The moon's phase progression relative to the sun (0.0 = new moon, 0.5 = full moon, 1.0 = new moon)
-        // Assuming a synodic month of 29.5 days
         let lunar_progress = self.day_count / 29.5;
 
-        // Moon's independent hour angle: solar hour angle minus the offset of the moon's orbit
         let moon_hour_angle = self.solar_hour_angle() - (lunar_progress * std::f32::consts::TAU);
 
-        // Calculates the moon's direction in the sky (using the corrected positive Z-axis logic)
         Vec3::new(
             -moon_hour_angle.sin(),
             latitude.cos() * moon_hour_angle.cos(),
@@ -142,10 +137,7 @@ impl DayNightCycle {
     /// Computes the star-field rotation angle in radians.
     #[must_use]
     pub fn compute_star_rotation_angle(&self) -> f32 {
-        // wrap_time_of_day(self.time_of_day) / 24.0 * TAU
-
         let solar_rotation = wrap_time_of_day(self.time_of_day) / 24.0 * TAU;
-        // Star drift: completes a full 360-degree (TAU) rotation every year (365.25 days)
         let sidereal_drift = (self.day_count / 365.25) * TAU;
 
         solar_rotation + sidereal_drift
@@ -174,6 +166,7 @@ impl DayNightCycle {
         direction_to_body: Vec3,
         distance: f32,
         intensity: f32,
+        celestial_flag: u32,
     ) {
         let Some(handle) = handle else {
             return;
@@ -188,6 +181,9 @@ impl DayNightCycle {
             };
             node.transform.look_at(Vec3::ZERO, up);
             light.intensity = intensity.max(0.0);
+            light.flags &= !(LIGHT_FLAG_IS_SUN | LIGHT_FLAG_IS_MOON);
+            light.flags |= celestial_flag;
+            light.cast_shadows = light.intensity > 0.001;
         }
     }
 }
@@ -195,7 +191,6 @@ impl DayNightCycle {
 impl SceneLogic for DayNightCycle {
     fn update(&mut self, scene: &mut Scene, _input: &Input, dt: f32) {
         if self.auto_tick {
-            // self.time_of_day = wrap_time_of_day(self.time_of_day + dt * self.time_speed);
             let delta_hours = dt * self.time_speed;
             self.day_count += delta_hours / 24.0;
 
@@ -220,6 +215,7 @@ impl SceneLogic for DayNightCycle {
             sun_direction,
             self.sun_distance,
             self.sun_light_intensity(sun_direction),
+            LIGHT_FLAG_IS_SUN,
         );
         Self::update_bound_light(
             scene,
@@ -227,6 +223,7 @@ impl SceneLogic for DayNightCycle {
             moon_direction,
             self.moon_distance,
             self.moon_light_intensity(sun_direction, moon_direction),
+            LIGHT_FLAG_IS_MOON,
         );
     }
 }
@@ -290,8 +287,34 @@ mod tests {
         assert!(params.sun_direction.length_squared() > 0.99);
         assert!(params.moon_direction.length_squared() > 0.99);
 
-        let (sun_light, sun_node) = scene.get_light_bundle(sun).expect("sun light missing");
-        assert!(sun_node.transform.position.length() > 0.0);
-        assert!(sun_light.intensity >= 0.0);
+        let (sun_position_len, sun_intensity, sun_flags, sun_cast_shadows) = {
+            let (sun_light, sun_node) = scene.get_light_bundle(sun).expect("sun light missing");
+            (
+                sun_node.transform.position.length(),
+                sun_light.intensity,
+                sun_light.flags,
+                sun_light.cast_shadows,
+            )
+        };
+        let (moon_position_len, moon_intensity, moon_flags, moon_cast_shadows) = {
+            let (moon_light, moon_node) = scene.get_light_bundle(moon).expect("moon light missing");
+            (
+                moon_node.transform.position.length(),
+                moon_light.intensity,
+                moon_light.flags,
+                moon_light.cast_shadows,
+            )
+        };
+
+        assert!(sun_position_len > 0.0);
+        assert!(moon_position_len > 0.0);
+        assert!(sun_intensity >= 0.0);
+        assert!(moon_intensity >= 0.0);
+        assert_ne!(sun_flags & LIGHT_FLAG_IS_SUN, 0);
+        assert_eq!(sun_flags & LIGHT_FLAG_IS_MOON, 0);
+        assert_ne!(moon_flags & LIGHT_FLAG_IS_MOON, 0);
+        assert_eq!(moon_flags & LIGHT_FLAG_IS_SUN, 0);
+        assert_eq!(sun_cast_shadows, sun_intensity > 0.001);
+        assert_eq!(moon_cast_shadows, moon_intensity > 0.001);
     }
 }

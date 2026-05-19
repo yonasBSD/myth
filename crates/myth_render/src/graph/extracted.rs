@@ -67,6 +67,7 @@ pub struct ExtractedLight {
     pub id: u64,
     pub color: Vec3,
     pub intensity: f32,
+    pub flags: u32,
     pub cast_shadows: bool,
     pub kind: LightKind,
     pub position: Vec3,
@@ -321,6 +322,10 @@ impl ExtractedScene {
             self.scene_variants.insert(SceneFeatures::USE_SSR);
         }
 
+        if matches!(scene.background.mode, BackgroundMode::Procedural(_)) {
+            self.scene_defines.set("USE_ATMOSPHERE_TRANSMITTANCE", "1");
+        }
+
         // Material-override debug view — inject shader defines so the PBR
         // fragment shader short-circuits lighting and outputs raw attributes.
         #[cfg(feature = "debug_view")]
@@ -357,6 +362,7 @@ impl ExtractedScene {
                 id: light.id(),
                 color: light.color,
                 intensity: light.intensity,
+                flags: light.flags,
                 cast_shadows: light.cast_shadows,
                 kind: light.kind.clone(),
                 position,
@@ -663,6 +669,7 @@ fn extracted_light_to_gpu(light: &ExtractedLight) -> GpuLightStorage {
         intensity: light.intensity,
         position: light.position,
         direction: light.direction,
+        flags: light.flags,
         shadow_layer_index: -1,
         ..Default::default()
     };
@@ -771,6 +778,7 @@ mod tests {
             id,
             color: Vec3::ONE,
             intensity: 1.0,
+            flags: 0,
             cast_shadows: false,
             kind: LightKind::Directional(DirectionalLight {}),
             position: Vec3::ZERO,
@@ -784,6 +792,7 @@ mod tests {
             id,
             color: Vec3::ONE,
             intensity,
+            flags: 0,
             cast_shadows: false,
             kind: LightKind::Point(PointLight { range }),
             position,
@@ -797,6 +806,7 @@ mod tests {
             id,
             color: Vec3::ONE,
             intensity,
+            flags: 0,
             cast_shadows: false,
             kind: LightKind::Spot(SpotLight {
                 range,

@@ -8,6 +8,7 @@
 //! - Multiple geometry types (box, sphere, plane)
 use myth::prelude::*;
 use myth::render::core::ReadbackStream;
+use myth::scene::light::LIGHT_FLAG_IS_SUN;
 
 // Integration tests for synchronous headless readback.
 //
@@ -258,6 +259,42 @@ fn physical_material_sphere() {
     let pixels = render_and_capture(&mut engine, 2);
     assert_eq!(pixels.len(), expected);
     assert_not_black(&pixels, "physical_material_sphere");
+}
+
+/// A procedural-sky scene with a sun-flagged directional light must render
+/// through the atmosphere-enabled PBR lighting path without going black.
+#[test]
+fn physical_material_sphere_with_procedural_sun_transmittance() {
+    let (mut engine, expected) = setup_headless(128, 128);
+    let scene = engine.scene_manager.create_active();
+    scene.background.set_mode(BackgroundMode::procedural());
+
+    let mat = PhysicalMaterial::new(Vec4::new(0.82, 0.78, 0.72, 1.0))
+        .with_roughness(0.35)
+        .with_metalness(0.0);
+    scene.spawn_sphere(1.0, mat, &engine.assets);
+
+    let sun = scene.add_light(Light::new_directional(Vec3::ONE, 3.0));
+    scene
+        .node(&sun)
+        .set_position(0.0, 3.0, -10.0)
+        .look_at(Vec3::ZERO);
+    let light = scene.get_light_mut(sun).expect("sun light missing");
+    light.flags |= LIGHT_FLAG_IS_SUN;
+
+    let cam = scene.add_camera(Camera::new_perspective(45.0, 1.0, 0.1));
+    scene
+        .node(&cam)
+        .set_position(0.0, 0.0, 4.0)
+        .look_at(Vec3::ZERO);
+    scene.active_camera = Some(cam);
+
+    let pixels = render_and_capture(&mut engine, 2);
+    assert_eq!(pixels.len(), expected);
+    assert_not_black(
+        &pixels,
+        "physical_material_sphere_with_procedural_sun_transmittance",
+    );
 }
 
 /// A metallic PhysicalMaterial box should produce different colours than

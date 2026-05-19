@@ -204,6 +204,7 @@ pub(crate) struct ProceduralSkyboxResources<'a> {
 pub(crate) struct AtmosphereGraphOutput {
     pub sky_view: TextureNodeId,
     pub transmittance: TextureNodeId,
+    pub bake_params: BufferNodeId,
     pub baked_base_cube: Option<TextureNodeId>,
 }
 
@@ -545,6 +546,7 @@ impl AtmosphereFeature {
             AtmosphereGraphOutput {
                 sky_view,
                 transmittance,
+                bake_params: bake_params_buf,
                 baked_base_cube: bake_environment.then_some(base_cube),
             }
         })

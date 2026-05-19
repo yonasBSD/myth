@@ -6,17 +6,7 @@ const PI: f32 = 3.14159265358979323846;
 const TAU: f32 = 6.28318530717958647692;
 const INV_ATAN: vec2<f32> = vec2<f32>(0.15915494, 0.31830989);
 
-fn ray_sphere_intersect(o: vec3<f32>, d: vec3<f32>, radius: f32) -> vec2<f32> {
-    let a = dot(d, d);
-    let b = 2.0 * dot(d, o);
-    let c = dot(o, o) - radius * radius;
-    let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 {
-        return vec2<f32>(-1.0, -1.0);
-    }
-    let sq = sqrt(discriminant);
-    return vec2<f32>((-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a));
-}
+{$ include "entry/utility/atmosphere/transmittance_math" $}
 
 fn direction_to_sky_view_uv(dir: vec3<f32>) -> vec2<f32> {
     let theta = asin(clamp(dir.y, -1.0, 1.0));
@@ -56,38 +46,6 @@ fn sky_view_uv_to_direction(uv: vec2<f32>) -> vec3<f32> {
         sin_theta,
         cos_theta * cos(phi)
     );
-}
-
-fn transmittance_lut_uv(
-    altitude: f32,
-    cos_zenith: f32,
-    planet_radius: f32,
-    atmosphere_radius: f32,
-) -> vec2<f32> {
-    let safe_cos_zenith = clamp(cos_zenith, -1.0, 1.0);
-    let H = sqrt(max(
-        0.0,
-        atmosphere_radius * atmosphere_radius - planet_radius * planet_radius
-    ));
-    let rho = sqrt(max(
-        0.0,
-        (planet_radius + altitude) * (planet_radius + altitude)
-            - planet_radius * planet_radius
-    ));
-    let d = ray_sphere_intersect(
-        vec3<f32>(0.0, planet_radius + altitude, 0.0),
-        vec3<f32>(
-            0.0,
-            safe_cos_zenith,
-            sqrt(max(0.0, 1.0 - safe_cos_zenith * safe_cos_zenith))
-        ),
-        atmosphere_radius
-    ).y;
-    let d_min = atmosphere_radius - planet_radius - altitude;
-    let d_max = rho + H;
-    let x_mu = (d - d_min) / max(d_max - d_min, 1e-6);
-    let x_r = rho / max(H, 1e-6);
-    return vec2<f32>(x_mu, x_r);
 }
 
 fn transmittance_lut_inv(

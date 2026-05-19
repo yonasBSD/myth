@@ -88,6 +88,8 @@ pub struct ClusteredScreenBindings {
     pub params: Option<BufferNodeId>,
     pub records: Option<BufferNodeId>,
     pub light_indices: Option<BufferNodeId>,
+    pub atmosphere_transmittance: Option<TextureNodeId>,
+    pub atmosphere_bake_params: Option<BufferNodeId>,
 }
 
 impl ClusteredScreenBindings {
@@ -795,6 +797,9 @@ pub fn build_screen_bind_group<'a>(
             .get_sub_view(id, &cube_key)
             .expect("Group 3 cube-array shadow view must exist")
     });
+    let atmosphere_transmittance_view = clustered
+        .atmosphere_transmittance
+        .map_or(&sys.white_2d, |id| views.get_texture_view(id));
 
     let use_clustered_layout = clustered.is_complete();
     let layout = if use_clustered_layout {
@@ -823,6 +828,17 @@ pub fn build_screen_bind_group<'a>(
             sys.light_storage.as_entire_binding(),
         ),
     };
+    let (atmosphere_bake_params_id, atmosphere_bake_params_binding) =
+        match clustered.atmosphere_bake_params {
+            Some(id) => (
+                views.get_physical_buffer_uid(id),
+                wgpu::BindingResource::Buffer(views.get_buffer_binding(id)),
+            ),
+            None => (
+                sys.atmosphere_bake_params.id(),
+                sys.atmosphere_bake_params.as_entire_binding(),
+            ),
+        };
 
     let base_key = BindGroupKey::new(layout.id())
         .with_resource(transmission_view.id())
@@ -832,7 +848,9 @@ pub fn build_screen_bind_group<'a>(
         .with_resource(shadow_cube_view.id())
         .with_resource(sys.shadow_compare_sampler.id())
         .with_resource(light_metadata_id)
-        .with_resource(light_storage_id);
+        .with_resource(light_storage_id)
+        .with_resource(atmosphere_transmittance_view.id())
+        .with_resource(atmosphere_bake_params_id);
 
     if !use_clustered_layout {
         return cache.get_or_create_bg(base_key, || {
@@ -871,6 +889,14 @@ pub fn build_screen_bind_group<'a>(
                     wgpu::BindGroupEntry {
                         binding: 7,
                         resource: light_storage_binding,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::TextureView(atmosphere_transmittance_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: atmosphere_bake_params_binding,
                     },
                 ],
             })
@@ -961,6 +987,14 @@ pub fn build_screen_bind_group<'a>(
                 wgpu::BindGroupEntry {
                     binding: 10,
                     resource: cluster_light_indices_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(atmosphere_transmittance_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: atmosphere_bake_params_binding,
                 },
             ],
         })

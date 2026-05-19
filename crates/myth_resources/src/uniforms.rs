@@ -366,6 +366,8 @@ pub struct GpuLightStorage {
     pub outer_cone_cos: f32,
 
     pub light_type: u32,
+    /// Bit flags for renderer-side light specialization.
+    pub flags: u32,
     /// Base layer index into the 2D shadow array (−1 if no 2D shadow).
     pub shadow_layer_index: i32,
 
@@ -459,6 +461,11 @@ mod tests {
             mem::size_of::<ClusterRecord>() % 16,
             0,
             "ClusterRecord not aligned to 16 bytes"
+        );
+        assert_eq!(
+            mem::size_of::<GpuLightStorage>() % 16,
+            0,
+            "GpuLightStorage not aligned to 16 bytes"
         );
         assert_eq!(
             mem::size_of::<LightBufferMetadata>() % 16,

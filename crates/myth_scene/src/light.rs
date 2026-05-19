@@ -2,6 +2,11 @@ use glam::Vec3;
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
+/// Light flag marking a directional light as the sun.
+pub const LIGHT_FLAG_IS_SUN: u32 = 1 << 0;
+/// Light flag marking a directional light as the moon.
+pub const LIGHT_FLAG_IS_MOON: u32 = 1 << 1;
+
 #[derive(Debug, Clone)]
 pub struct ShadowConfig {
     pub bias: f32,
@@ -59,6 +64,8 @@ pub enum LightKind {
 pub struct Light {
     uuid: Uuid,
     id: u64,
+    /// Bit flags used by renderer-side specialization paths.
+    pub flags: u32,
     pub color: Vec3,
     pub intensity: f32, // Suggestion: specify units, e.g. in PBR: Point uses Candela, Directional uses Lux
     pub kind: LightKind,
@@ -94,6 +101,7 @@ impl Light {
         Self {
             uuid,
             id: Self::generate_id_from_uuid(&uuid),
+            flags: 0,
             color,
             intensity,
             kind: LightKind::Directional(DirectionalLight {
@@ -110,6 +118,7 @@ impl Light {
         Self {
             uuid,
             id: Self::generate_id_from_uuid(&uuid),
+            flags: 0,
             color,
             intensity,
             kind: LightKind::Point(PointLight { range }),
@@ -130,6 +139,7 @@ impl Light {
         Self {
             uuid,
             id: Self::generate_id_from_uuid(&uuid),
+            flags: 0,
             color,
             intensity,
             kind: LightKind::Spot(SpotLight {

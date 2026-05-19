@@ -102,6 +102,12 @@ impl SimpleForwardFeature {
             if let Some(indices) = scene_lighting.light_indices {
                 builder.read_buffer(indices);
             }
+            if let Some(transmittance) = scene_lighting.atmosphere_transmittance {
+                builder.read_texture(transmittance);
+            }
+            if let Some(bake_params) = scene_lighting.atmosphere_bake_params {
+                builder.read_buffer(bake_params);
+            }
             if let Some(skybox) = prepared_skybox {
                 for dependency in skybox.sampled_textures.into_iter().flatten() {
                     builder.read_texture(dependency);

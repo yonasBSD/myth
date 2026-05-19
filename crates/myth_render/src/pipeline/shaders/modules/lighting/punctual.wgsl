@@ -10,6 +10,61 @@
 
 {$ include 'modules/lighting/shadow' $}
 
+$$ if USE_ATMOSPHERE_TRANSMITTANCE is defined
+{$ include 'entry/utility/atmosphere/transmittance_math' $}
+
+struct AtmosphereBakeParams {
+    sun_direction: vec3<f32>,
+    sun_intensity: f32,
+    moon_direction: vec3<f32>,
+    moon_intensity: f32,
+    star_axis: vec3<f32>,
+    sun_disk_size: f32,
+    moon_disk_size: f32,
+    planet_radius: f32,
+    atmosphere_radius: f32,
+    star_intensity: f32,
+    star_rotation: f32,
+};
+
+@group(3) @binding(11) var t_atmosphere_transmittance: texture_2d<f32>;
+@group(3) @binding(12) var<uniform> u_atmosphere_bake_params: AtmosphereBakeParams;
+
+fn sample_celestial_light_transmittance(
+    world_position: vec3<f32>,
+    direction_to_light: vec3<f32>,
+) -> vec3<f32> {
+    let planet_radius = u_atmosphere_bake_params.planet_radius;
+    let atmosphere_radius = max(
+        u_atmosphere_bake_params.atmosphere_radius,
+        planet_radius + 1.0,
+    );
+    if (planet_radius <= 0.0) {
+        return vec3<f32>(1.0);
+    }
+
+    let max_altitude = max(atmosphere_radius - planet_radius, 1.0);
+    let planet_center = vec3<f32>(0.0, -planet_radius, 0.0);
+    let altitude = clamp(
+        length(world_position - planet_center) - planet_radius,
+        0.0,
+        max_altitude,
+    );
+    let trans_uv = transmittance_lut_uv(
+        altitude,
+        clamp(direction_to_light.y, -1.0, 1.0),
+        planet_radius,
+        atmosphere_radius,
+    );
+    return textureSampleLevel(
+        t_atmosphere_transmittance,
+        s_screen_sampler,
+        trans_uv,
+        0.0,
+    ).rgb;
+}
+$$ endif
+
 fn get_light_info( light: Struct_lights, geometry: GeometricContext ) -> IncidentLight {
     let light_type = light.light_type;
     var light_info: IncidentLight;
@@ -42,6 +97,17 @@ fn get_light_info( light: Struct_lights, geometry: GeometricContext ) -> Inciden
         }
 
     }
+
+    $$ if USE_ATMOSPHERE_TRANSMITTANCE is defined
+    if (light_info.visible && (light.flags & 3u) != 0u) {
+        light_info.color *= sample_celestial_light_transmittance(
+            geometry.position,
+            light_info.direction,
+        );
+        light_info.visible = any(light_info.color != vec3<f32>(0.0));
+    }
+    $$ endif
+
     return light_info;
 }
 

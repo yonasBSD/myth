@@ -554,6 +554,8 @@ impl<'a> FrameComposer<'a> {
             let mut env_dependency_base = None;
             let mut env_dependency_pmrem = None;
             let mut procedural_skybox_dependencies = [None, None];
+            let mut atmosphere_transmittance = None;
+            let mut atmosphere_bake_params = None;
 
             // ── 2c. Wire Compute + Shadow Passes ───────────────────────────
             graph_ctx.with_group("Compute", |c| {
@@ -579,6 +581,8 @@ impl<'a> FrameComposer<'a> {
                                 );
                                 procedural_skybox_dependencies =
                                     atmosphere_output.skybox_dependencies();
+                                atmosphere_transmittance = Some(atmosphere_output.transmittance);
+                                atmosphere_bake_params = Some(atmosphere_output.bake_params);
                                 env_dependency_base = atmosphere_output.baked_base_cube;
                                 env_dependency_pmrem = self
                                     .ctx
@@ -704,6 +708,8 @@ impl<'a> FrameComposer<'a> {
                         } else {
                             None
                         },
+                        atmosphere_transmittance,
+                        atmosphere_bake_params,
                     };
 
                     #[cfg(feature = "debug_view")]
@@ -953,6 +959,8 @@ impl<'a> FrameComposer<'a> {
                                 params: dbg_clustered_params,
                                 records: dbg_clustered_records,
                                 light_indices: None,
+                                atmosphere_transmittance: None,
+                                atmosphere_bake_params: None,
                             }
                         } else {
                             ClusteredScreenBindings::default()
@@ -1021,6 +1029,8 @@ impl<'a> FrameComposer<'a> {
                         } else {
                             None
                         },
+                        atmosphere_transmittance,
+                        atmosphere_bake_params,
                     };
                     self.ctx.simple_forward_pass.add_to_graph(
                         c,
