@@ -880,6 +880,11 @@ impl Renderer {
         self.context.as_ref().map(|s| &s.wgpu_ctx)
     }
 
+    /// Returns a reference to the GPU resource manager.
+    pub fn resource_manager(&self) -> Option<&ResourceManager> {
+        self.context.as_ref().map(|s| &s.resource_manager)
+    }
+
     pub fn dump_graph_mermaid(&self) -> Option<String> {
         self.context
             .as_ref()

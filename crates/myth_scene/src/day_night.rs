@@ -279,10 +279,8 @@ mod tests {
         let sun_direction = Vec3::Y;
 
         let new_moon = DayNightCycle::moon_phase_fraction(sun_direction, sun_direction);
-        let quarter_moon =
-            DayNightCycle::moon_phase_fraction(sun_direction, Vec3::X);
-        let full_moon =
-            DayNightCycle::moon_phase_fraction(sun_direction, -sun_direction);
+        let quarter_moon = DayNightCycle::moon_phase_fraction(sun_direction, Vec3::X);
+        let full_moon = DayNightCycle::moon_phase_fraction(sun_direction, -sun_direction);
 
         assert!(new_moon <= 1e-6);
         assert!((quarter_moon - 0.5).abs() <= 1e-6);

@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Affine3A, Vec3};
 use myth_render::{
     HDR_TEXTURE_FORMAT, Renderer,
     core::gpu::{CommonSampler, Tracked},
@@ -9,7 +9,7 @@ use myth_render::{
     },
     pipeline::ShaderCompilationOptions,
 };
-use myth_scene::{LightKind, ProjectionType, Scene};
+use myth_scene::{LightKind, ProceduralSkyParams, ProjectionType, Scene};
 
 const OCEAN_SHADER_NAME: &str = "myth_dev_utils/ocean_surface";
 const OCEAN_RESOLVE_SHADER_NAME: &str = "myth_dev_utils/ocean_resolve";
@@ -28,6 +28,8 @@ struct OceanUniforms {
     camera_forward: vec4<f32>,
     camera_projection: vec4<f32>,
     light_direction: vec4<f32>,
+    light_color_energy: vec4<f32>,
+    ambient_color: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u_ocean: OceanUniforms;
@@ -36,6 +38,9 @@ $$ if OCEAN_COMPOSITE is defined
 @group(0) @binding(2) var s_scene_color: sampler;
 @group(0) @binding(3) var t_scene_depth: texture_depth_2d;
 $$ endif
+@group(0) @binding(4) var t_environment_cube: texture_cube<f32>;
+@group(0) @binding(5) var s_environment_cube: sampler;
+@group(0) @binding(6) var t_environment_pmrem: texture_cube<f32>;
 
 const PI: f32 = 3.141592;
 const NUM_STEPS: i32 = 8;
@@ -78,6 +83,142 @@ fn get_sky_color(e_in: vec3<f32>) -> vec3<f32> {
     var e = e_in;
     e.y = (max(e.y, 0.0) * 0.8 + 0.2) * 0.8;
     return vec3<f32>(pow(1.0 - e.y, 2.0), 1.0 - e.y, 0.6 + (1.0 - e.y) * 0.4) * 1.1;
+}
+
+fn environment_max_mip_level() -> f32 {
+    return max(u_ocean.ambient_color.w, 0.0);
+}
+
+fn use_scene_environment_reflections() -> bool {
+    return u_ocean.light_direction.w > 0.5 && environment_max_mip_level() > 0.0;
+}
+
+fn sample_environment_cube(direction: vec3<f32>) -> vec3<f32> {
+    let dir = normalize(direction);
+    return textureSampleLevel(
+        t_environment_cube,
+        s_environment_cube,
+        vec3<f32>(-dir.x, dir.y, dir.z),
+        0.0,
+    ).rgb;
+}
+
+fn sample_environment_pmrem(direction: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let max_mip = environment_max_mip_level();
+    if (max_mip <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+
+    let dir = normalize(direction);
+    let lod = clamp(roughness * max_mip, 0.0, max_mip);
+    return textureSampleLevel(
+        t_environment_pmrem,
+        s_environment_cube,
+        vec3<f32>(-dir.x, dir.y, dir.z),
+        lod,
+    ).rgb;
+}
+
+fn ray_direction_from_frag_coord(frag_coord: vec2<f32>) -> vec3<f32> {
+    var screen = frag_coord / u_ocean.resolution_time.xy;
+    screen = screen * 2.0 - 1.0;
+
+    if (u_ocean.camera_projection.w > 0.5) {
+        return normalize(u_ocean.camera_forward.xyz);
+    }
+
+    screen.x *= u_ocean.resolution_time.x / u_ocean.resolution_time.y;
+    return normalize(
+        u_ocean.camera_right.xyz * screen.x
+            + u_ocean.camera_up.xyz * screen.y
+            + u_ocean.camera_forward.xyz * u_ocean.camera_projection.x
+    );
+}
+
+$$ if OCEAN_COMPOSITE is defined
+fn sample_scene_color_uv(scene_uv: vec2<f32>) -> vec3<f32> {
+    let scene_size = vec2<i32>(textureDimensions(t_scene_color));
+    let clamped_uv = clamp(scene_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let pixel = clamp(
+        vec2<i32>(clamped_uv * vec2<f32>(scene_size)),
+        vec2<i32>(0),
+        scene_size - vec2<i32>(1),
+    );
+    return textureLoad(t_scene_color, pixel, 0).rgb;
+}
+
+fn scene_uv_from_frag_coord(frag_coord: vec2<f32>) -> vec2<f32> {
+    let uv = frag_coord / max(u_ocean.resolution_time.xy, vec2<f32>(1.0));
+    return clamp(vec2<f32>(uv.x, 1.0 - uv.y), vec2<f32>(0.0), vec2<f32>(1.0));
+}
+
+fn sample_scene_color(frag_coord: vec2<f32>) -> vec3<f32> {
+    return sample_scene_color_uv(scene_uv_from_frag_coord(frag_coord));
+}
+
+fn scene_uv_from_direction(direction: vec3<f32>) -> vec2<f32> {
+    if (u_ocean.camera_projection.w > 0.5) {
+        return vec2<f32>(-1.0, -1.0);
+    }
+
+    let local_x = dot(direction, u_ocean.camera_right.xyz);
+    let local_y = dot(direction, u_ocean.camera_up.xyz);
+    let local_z = dot(direction, u_ocean.camera_forward.xyz);
+    if (local_z <= 0.0001) {
+        return vec2<f32>(-1.0, -1.0);
+    }
+
+    let aspect = u_ocean.resolution_time.x / max(u_ocean.resolution_time.y, 1.0);
+    let focal = max(u_ocean.camera_projection.x, 0.0001);
+    let ndc = vec2<f32>(
+        (focal * local_x / local_z) / max(aspect, 0.0001),
+        focal * local_y / local_z,
+    );
+    return vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+}
+
+fn sample_scene_reflection(reflected_dir: vec3<f32>, fallback_coord: vec2<f32>) -> vec3<f32> {
+    if (reflected_dir.y <= 0.0) {
+        return sample_scene_color(fallback_coord);
+    }
+
+    let scene_uv = scene_uv_from_direction(normalize(reflected_dir));
+    if (
+        scene_uv.x < 0.0 || scene_uv.x > 1.0 || scene_uv.y < 0.0 || scene_uv.y > 1.0
+    ) {
+        return sample_scene_color(fallback_coord);
+    }
+
+    return sample_scene_color_uv(scene_uv);
+}
+
+fn sample_ocean_reflection(
+    reflected_dir: vec3<f32>,
+    roughness: f32,
+    fallback_coord: vec2<f32>,
+) -> vec3<f32> {
+    if (use_scene_environment_reflections()) {
+        let sharp = sample_environment_cube(reflected_dir);
+        let prefiltered = sample_environment_pmrem(reflected_dir, roughness);
+        return mix(prefiltered, sharp, 1.0 - roughness);
+    }
+
+    return sample_scene_reflection(reflected_dir, fallback_coord);
+}
+$$ endif
+
+fn sample_fallback_reflection(reflected_dir: vec3<f32>, fallback_coord: vec2<f32>) -> vec3<f32> {
+    if (use_scene_environment_reflections()) {
+        let sharp = sample_environment_cube(reflected_dir);
+        let prefiltered = sample_environment_pmrem(reflected_dir, 0.18);
+        return mix(prefiltered, sharp, 0.82);
+    }
+
+    $$ if OCEAN_COMPOSITE is defined
+    return sample_scene_reflection(reflected_dir, fallback_coord);
+    $$ else
+    return get_sky_color(reflected_dir);
+    $$ endif
 }
 
 fn sea_octave(uv_in: vec2<f32>, choppy: f32) -> f32 {
@@ -124,16 +265,49 @@ fn get_sea_color(
     l: vec3<f32>,
     eye: vec3<f32>,
     dist: vec3<f32>,
+    frag_coord: vec2<f32>,
 ) -> vec3<f32> {
     var fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
     fresnel = pow(fresnel, 3.0) * 0.5;
-    let reflected = get_sky_color(reflect(eye, n));
+    let direct_light_color = max(u_ocean.light_color_energy.xyz, vec3<f32>(0.0));
+    let direct_light_energy = clamp(u_ocean.light_color_energy.w, 0.0, 1.0);
+    let ambient_color = max(u_ocean.ambient_color.xyz, vec3<f32>(0.0));
+    let roughness = clamp(0.08 + u_ocean.sea_choppy_water.x * 0.075, 0.08, 0.55);
+    let reflected_dir = reflect(eye, n);
+    let atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
+
+    $$ if OCEAN_COMPOSITE is defined
+    if (use_scene_environment_reflections()) {
+        let ambient_strength = clamp(
+            max(max(ambient_color.x, ambient_color.y), ambient_color.z) * 8.0,
+            0.0,
+            1.0,
+        );
+        let daylight_boost = 0.82 + 0.28 * direct_light_energy + 0.08 * ambient_strength;
+        let ambient_environment = sample_environment_pmrem(n, 1.0);
+        let reflected = sample_ocean_reflection(reflected_dir, roughness, frag_coord);
+        let refracted = u_ocean.sea_height_base.yzw
+            + ambient_environment * u_ocean.sea_choppy_water.yzw
+                * (0.16 + 0.26 * ambient_strength + 0.22 * direct_light_energy)
+            + diffuse(n, l, 80.0) * u_ocean.sea_choppy_water.yzw * direct_light_color
+                * (0.12 + 0.14 * direct_light_energy);
+        var color = mix(refracted, reflected, fresnel);
+        color += u_ocean.sea_choppy_water.yzw
+            * (p.y - u_ocean.sea_height_base.x)
+            * 0.18
+            * atten
+            * (0.06 + 0.45 * ambient_strength + 0.32 * direct_light_energy);
+        color += direct_light_color * (specular(n, l, eye, 60.0) * (0.03 + 0.97 * direct_light_energy));
+        return color * daylight_boost;
+    }
+    $$ endif
+
+    let reflected = get_sky_color(reflected_dir);
     let refracted = u_ocean.sea_height_base.yzw
         + diffuse(n, l, 80.0) * u_ocean.sea_choppy_water.yzw * 0.12;
     var color = mix(refracted, reflected, fresnel);
-    let atten = max(1.0 - dot(dist, dist) * 0.001, 0.0);
     color += u_ocean.sea_choppy_water.yzw * (p.y - u_ocean.sea_height_base.x) * 0.18 * atten;
-    color += vec3<f32>(specular(n, l, eye, 60.0));
+    color += direct_light_color * (specular(n, l, eye, 60.0) * max(direct_light_energy, 0.2));
     return color;
 }
 
@@ -146,14 +320,29 @@ fn get_normal(p: vec3<f32>, eps: f32) -> vec3<f32> {
     return normalize(n);
 }
 
-fn height_map_tracing(ori: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
+struct OceanHit {
+    position: vec3<f32>,
+    hit: bool,
+};
+
+fn trace_distance_limit(ori: vec3<f32>, dir: vec3<f32>) -> f32 {
+    if (dir.y >= -0.0001) {
+        return 4000.0;
+    }
+
+    let sea_band_height = max(u_ocean.sea_height_base.x * 6.0, 1.0);
+    let plane_distance = max((ori.y + sea_band_height) / -dir.y, 1.0);
+    return clamp(plane_distance, 200.0, 20000.0);
+}
+
+fn height_map_tracing(ori: vec3<f32>, dir: vec3<f32>) -> OceanHit {
     var tm = 0.0;
-    var tx = 1000.0;
+    var tx = trace_distance_limit(ori, dir);
     var hx = map(ori + dir * tx);
     var p = ori + dir * tx;
 
     if (hx > 0.0) {
-        return p;
+        return OceanHit(p, false);
     }
 
     var hm = map(ori + dir * tm);
@@ -172,42 +361,62 @@ fn height_map_tracing(ori: vec3<f32>, dir: vec3<f32>) -> vec3<f32> {
         }
     }
 
-    return p;
+    return OceanHit(p, true);
 }
 
 fn get_pixel(frag_coord: vec2<f32>) -> vec3<f32> {
-    var screen = frag_coord / u_ocean.resolution_time.xy;
-    screen = screen * 2.0 - 1.0;
-
     let projection_mode = u_ocean.camera_projection.w;
     var ori = u_ocean.camera_position.xyz;
-    var dir = normalize(u_ocean.camera_forward.xyz);
+    let mut_dir = ray_direction_from_frag_coord(frag_coord);
+    var dir = mut_dir;
+
+    var screen = frag_coord / u_ocean.resolution_time.xy;
+    screen = screen * 2.0 - 1.0;
 
     if (projection_mode > 0.5) {
         ori += u_ocean.camera_right.xyz * screen.x * u_ocean.camera_projection.y;
         ori += u_ocean.camera_up.xyz * screen.y * u_ocean.camera_projection.z;
-    } else {
-        screen.x *= u_ocean.resolution_time.x / u_ocean.resolution_time.y;
-        dir = normalize(
-            u_ocean.camera_right.xyz * screen.x
-                + u_ocean.camera_up.xyz * screen.y
-                + u_ocean.camera_forward.xyz * u_ocean.camera_projection.x
-        );
     }
 
     if (dir.y >= 0.0) {
+        $$ if OCEAN_COMPOSITE is defined
+        return sample_scene_color(frag_coord);
+        $$ else
         return get_sky_color(dir);
+        $$ endif
     }
 
-    let p = height_map_tracing(ori, dir);
+    let hit = height_map_tracing(ori, dir);
+    if (!hit.hit) {
+        $$ if OCEAN_COMPOSITE is defined
+        return sample_scene_color(frag_coord);
+        $$ else
+        return get_sky_color(dir);
+        $$ endif
+    }
+
+    let p = hit.position;
     let dist = p - ori;
-    let n = get_normal(p, dot(dist, dist) * (0.1 / u_ocean.resolution_time.x));
+    let distance_to_hit = length(dist);
+    let normal_eps = clamp(length(dist) * (0.002 / u_ocean.resolution_time.y), 0.0008, 0.08);
+    let n = get_normal(p, normal_eps);
     let light = normalize(u_ocean.light_direction.xyz);
 
+    $$ if OCEAN_COMPOSITE is defined
+    let horizon_color = sample_scene_color(frag_coord);
+    let horizon_angle = smoothstep(0.025, -0.12, dir.y);
+    let horizon_distance = smoothstep(250.0, 6000.0, distance_to_hit);
+    let horizon_sea_mix = mix(pow(horizon_angle, 0.85), pow(horizon_angle, 1.75), horizon_distance);
+    $$ else
+    let horizon_color = get_sky_color(dir);
+    let horizon_angle = smoothstep(0.0, -0.02, dir.y);
+    let horizon_sea_mix = pow(horizon_angle, 0.2);
+    $$ endif
+
     return mix(
-        get_sky_color(dir),
-        get_sea_color(p, n, light, dir, dist),
-        pow(smoothstep(0.0, -0.02, dir.y), 0.2),
+        horizon_color,
+        get_sea_color(p, n, light, dir, dist, frag_coord),
+        horizon_sea_mix,
     );
 }
 
@@ -254,8 +463,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel = clamp(vec2<i32>(in.uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
     let scene_depth = textureLoad(t_scene_depth, pixel, 0);
     if (scene_depth > 0.000001) {
-        let scene_color = textureLoad(t_scene_color, pixel, 0).rgb;
-        return vec4<f32>(scene_color, 1.0);
+        return vec4<f32>(textureLoad(t_scene_color, pixel, 0).rgb, 1.0);
+    }
+
+    let frag_coord = vec2<f32>(in.uv.x, 1.0 - in.uv.y) * u_ocean.resolution_time.xy;
+    let dir = ray_direction_from_frag_coord(frag_coord);
+    if (dir.y >= 0.0) {
+        return vec4<f32>(sample_scene_color(frag_coord), 1.0);
     }
     $$ endif
 
@@ -309,6 +523,15 @@ struct OceanUniforms {
     camera_forward: [f32; 4],
     camera_projection: [f32; 4],
     light_direction: [f32; 4],
+    light_color_energy: [f32; 4],
+    ambient_color: [f32; 4],
+}
+
+#[derive(Clone)]
+struct OceanEnvironmentState {
+    base_cube_view: Tracked<wgpu::TextureView>,
+    pmrem_view: Tracked<wgpu::TextureView>,
+    max_mip_level: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -416,6 +639,14 @@ impl OceanCameraState {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OceanLightingState {
+    direction: [f32; 3],
+    color: [f32; 3],
+    energy: f32,
+    ambient: [f32; 3],
+}
+
 #[derive(Clone)]
 pub struct OceanSettings {
     pub sea_height: f32,
@@ -463,7 +694,9 @@ impl OceanSettings {
         height: u32,
         time: f32,
         camera: OceanCameraState,
-        light_direction: [f32; 3],
+        lighting: OceanLightingState,
+        environment_max_mip_level: f32,
+        environment_reflections_enabled: f32,
     ) -> OceanUniforms {
         OceanUniforms {
             resolution_time: [width as f32, height as f32, time, 0.0],
@@ -491,10 +724,22 @@ impl OceanSettings {
             camera_forward: [camera.forward[0], camera.forward[1], camera.forward[2], 0.0],
             camera_projection: camera.projection,
             light_direction: [
-                light_direction[0],
-                light_direction[1],
-                light_direction[2],
-                0.0,
+                lighting.direction[0],
+                lighting.direction[1],
+                lighting.direction[2],
+                environment_reflections_enabled,
+            ],
+            light_color_energy: [
+                lighting.color[0],
+                lighting.color[1],
+                lighting.color[2],
+                lighting.energy,
+            ],
+            ambient_color: [
+                lighting.ambient[0],
+                lighting.ambient[1],
+                lighting.ambient[2],
+                environment_max_mip_level,
             ],
         }
     }
@@ -513,6 +758,8 @@ pub struct OceanRenderer {
     render_scale: f32,
     camera_source: OceanCameraSource,
     light_source: OceanLightSource,
+    fallback_cube_view: Tracked<wgpu::TextureView>,
+    environment: Option<OceanEnvironmentState>,
 }
 
 impl OceanRenderer {
@@ -568,6 +815,12 @@ impl OceanRenderer {
         let wgpu_ctx = renderer
             .wgpu_ctx()
             .expect("renderer must be initialized before ocean helper setup");
+        let fallback_cube_view = renderer
+            .resource_manager()
+            .expect("renderer must expose resource manager before ocean helper setup")
+            .system_textures
+            .black_cube
+            .clone();
         let uniforms = Tracked::new(wgpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Ocean Surface Uniforms"),
             size: std::mem::size_of::<OceanUniforms>() as u64,
@@ -588,6 +841,8 @@ impl OceanRenderer {
             render_scale: 1.0,
             camera_source: OceanCameraSource::SceneMainCamera,
             light_source: OceanLightSource::SceneAuto,
+            fallback_cube_view,
+            environment: None,
         }
     }
 
@@ -644,22 +899,24 @@ impl OceanRenderer {
         self.time += dt;
     }
 
-    pub fn sync_gpu(&self, renderer: &Renderer, width: u32, height: u32) {
+    pub fn sync_gpu(&mut self, renderer: &Renderer, width: u32, height: u32) {
         let camera = OceanCameraState::reference(self.time);
-        let light_direction = self.manual_light_direction();
-        self.sync_gpu_with_state(renderer, width, height, camera, light_direction);
+        let lighting = self.reference_lighting_state();
+        self.environment = None;
+        self.sync_gpu_with_state(renderer, width, height, camera, lighting);
     }
 
     pub fn sync_gpu_with_scene(
-        &self,
+        &mut self,
         renderer: &Renderer,
         scene: &mut Scene,
         width: u32,
         height: u32,
     ) {
         let camera = self.resolve_camera_state(scene);
-        let light_direction = self.resolve_light_direction(scene);
-        self.sync_gpu_with_state(renderer, width, height, camera, light_direction);
+        let lighting = self.resolve_lighting_state(scene);
+        self.environment = Self::resolve_environment_state(renderer, scene.id());
+        self.sync_gpu_with_state(renderer, width, height, camera, lighting);
     }
 
     fn sync_gpu_with_state(
@@ -668,19 +925,33 @@ impl OceanRenderer {
         width: u32,
         height: u32,
         camera: OceanCameraState,
-        light_direction: [f32; 3],
+        lighting: OceanLightingState,
     ) {
         let Some(wgpu_ctx) = renderer.wgpu_ctx() else {
             return;
         };
 
         let (render_width, render_height) = self.render_dimensions(width, height);
+        let environment_max_mip_level = self
+            .environment
+            .as_ref()
+            .map_or(0.0, |environment| environment.max_mip_level);
+        let environment_reflections_enabled = if self.light_source
+            == OceanLightSource::ProceduralSky
+            && environment_max_mip_level > 0.0
+        {
+            1.0
+        } else {
+            0.0
+        };
         let uniforms = self.settings.to_uniforms(
             render_width,
             render_height,
             self.time,
             camera,
-            light_direction,
+            lighting,
+            environment_max_mip_level,
+            environment_reflections_enabled,
         );
         wgpu_ctx
             .queue
@@ -821,19 +1092,35 @@ impl OceanRenderer {
         Self::normalize_direction(self.settings.sun_direction)
     }
 
-    fn resolve_light_direction(&self, scene: &Scene) -> [f32; 3] {
+    fn reference_lighting_state(&self) -> OceanLightingState {
+        OceanLightingState {
+            direction: self.manual_light_direction(),
+            color: [1.0, 0.95, 0.85],
+            energy: 1.0,
+            ambient: [0.06, 0.08, 0.10],
+        }
+    }
+
+    fn resolve_lighting_state(&self, scene: &Scene) -> OceanLightingState {
+        let ambient = Self::scene_ambient_color(scene);
+        let manual = OceanLightingState {
+            ambient,
+            ..self.reference_lighting_state()
+        };
+
         match self.light_source {
-            OceanLightSource::Manual => self.manual_light_direction(),
+            OceanLightSource::Manual => manual,
             OceanLightSource::ProceduralSky => self
-                .procedural_sky_light_direction(scene)
-                .unwrap_or_else(|| self.manual_light_direction()),
+                .procedural_sky_lighting_state(scene)
+                .or_else(|| self.scene_directional_lighting_state(scene))
+                .unwrap_or(manual),
             OceanLightSource::SceneDirectional => self
-                .scene_directional_light_direction(scene)
-                .unwrap_or_else(|| self.manual_light_direction()),
+                .scene_directional_lighting_state(scene)
+                .unwrap_or(manual),
             OceanLightSource::SceneAuto => self
-                .procedural_sky_light_direction(scene)
-                .or_else(|| self.scene_directional_light_direction(scene))
-                .unwrap_or_else(|| self.manual_light_direction()),
+                .procedural_sky_lighting_state(scene)
+                .or_else(|| self.scene_directional_lighting_state(scene))
+                .unwrap_or(manual),
         }
     }
 
@@ -872,21 +1159,52 @@ impl OceanRenderer {
         })
     }
 
-    fn procedural_sky_light_direction(&self, scene: &Scene) -> Option<[f32; 3]> {
+    fn procedural_sky_lighting_state(&self, scene: &Scene) -> Option<OceanLightingState> {
         let params = scene.background.procedural_sky_params()?;
-        Some(Self::normalize_direction(params.sun_direction.to_array()))
+        let (direction, color, energy) = Self::dominant_procedural_sky_light(params);
+        Some(OceanLightingState {
+            direction,
+            color,
+            energy,
+            ambient: Self::scene_ambient_color(scene),
+        })
     }
 
-    fn scene_directional_light_direction(&self, scene: &Scene) -> Option<[f32; 3]> {
+    fn scene_directional_lighting_state(&self, scene: &Scene) -> Option<OceanLightingState> {
+        let ambient = Self::scene_ambient_color(scene);
+        let mut best_state = None;
+        let mut best_energy = -1.0_f32;
+
         for (light, world_matrix) in scene.iter_active_lights() {
-            if matches!(light.kind, LightKind::Directional(_)) {
-                let direction = world_matrix
-                    .transform_vector3(Vec3::new(0.0, 0.0, -1.0))
-                    .normalize_or_zero();
-                return Some(direction.to_array());
+            if !matches!(light.kind, LightKind::Directional(_)) {
+                continue;
+            }
+
+            let state = Self::directional_light_state(light, world_matrix, ambient);
+            if state.energy > best_energy {
+                best_energy = state.energy;
+                best_state = Some(state);
             }
         }
-        None
+
+        best_state
+    }
+
+    fn directional_light_state(
+        light: &myth_scene::Light,
+        world_matrix: &Affine3A,
+        ambient: [f32; 3],
+    ) -> OceanLightingState {
+        let direction = -world_matrix
+            .transform_vector3(Vec3::new(0.0, 0.0, -1.0))
+            .normalize_or_zero();
+
+        OceanLightingState {
+            direction: Self::normalize_direction(direction.to_array()),
+            color: Self::normalize_color(light.color),
+            energy: Self::light_intensity_to_energy(light.intensity),
+            ambient,
+        }
     }
 
     fn normalize_direction(direction: [f32; 3]) -> [f32; 3] {
@@ -896,6 +1214,75 @@ impl OceanRenderer {
         } else {
             [0.0, 1.0, 0.8]
         }
+    }
+
+    fn normalize_color(color: Vec3) -> [f32; 3] {
+        let clamped = color.max(Vec3::ZERO);
+        if clamped.length_squared() > 0.0 {
+            clamped.to_array()
+        } else {
+            [1.0, 1.0, 1.0]
+        }
+    }
+
+    fn scene_ambient_color(scene: &Scene) -> [f32; 3] {
+        let ambient = scene.environment.ambient.max(Vec3::ZERO);
+        if ambient.length_squared() > 0.0 {
+            ambient.to_array()
+        } else {
+            [0.006, 0.008, 0.012]
+        }
+    }
+
+    fn resolve_environment_state(
+        renderer: &Renderer,
+        scene_id: u32,
+    ) -> Option<OceanEnvironmentState> {
+        let resource_manager = renderer.resource_manager()?;
+        let gpu_environment = resource_manager.gpu_environment(scene_id)?;
+        Some(OceanEnvironmentState {
+            base_cube_view: gpu_environment.base_cube_view.clone(),
+            pmrem_view: gpu_environment.pmrem_view.clone(),
+            max_mip_level: resource_manager.get_env_map_max_mip_level(scene_id),
+        })
+    }
+
+    fn dominant_procedural_sky_light(params: &ProceduralSkyParams) -> ([f32; 3], [f32; 3], f32) {
+        let sun_direction = params.sun_direction.normalize_or_zero();
+        let moon_direction = params.moon_direction.normalize_or_zero();
+        let sun_weight =
+            params.sun_intensity.max(0.0) * Self::smoothstep(-0.08, 0.04, sun_direction.y);
+        let moon_weight = params.moon_intensity.max(0.0)
+            * Self::moon_phase_fraction(sun_direction, moon_direction)
+            * Self::smoothstep(-0.08, 0.04, moon_direction.y)
+            * (1.0 - Self::smoothstep(-0.12, 0.04, sun_direction.y));
+
+        if moon_weight > sun_weight {
+            (
+                Self::normalize_direction(moon_direction.to_array()),
+                [0.62, 0.72, 1.0],
+                Self::light_intensity_to_energy(moon_weight / 10.0),
+            )
+        } else {
+            (
+                Self::normalize_direction(sun_direction.to_array()),
+                [1.0, 0.95, 0.8],
+                Self::light_intensity_to_energy(sun_weight / 10.0),
+            )
+        }
+    }
+
+    fn moon_phase_fraction(sun_direction: Vec3, moon_direction: Vec3) -> f32 {
+        (1.0 - sun_direction.dot(moon_direction).clamp(-1.0, 1.0)) * 0.5
+    }
+
+    fn light_intensity_to_energy(intensity: f32) -> f32 {
+        1.0 - (-intensity.max(0.0) * 2.0).exp()
+    }
+
+    fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 
     fn direction_to_angles(direction: [f32; 3]) -> (f32, f32) {
@@ -943,7 +1330,15 @@ impl OceanRenderer {
         })
         .inline_shader_template(OCEAN_SHADER_NAME, OCEAN_SHADER_TEMPLATE)
         .shader_options(shader_options)
-        .bind_uniform_buffer(0, 0, wgpu::ShaderStages::FRAGMENT);
+        .bind_uniform_buffer(0, 0, wgpu::ShaderStages::FRAGMENT)
+        .bind_texture_cube(0, 4, wgpu::ShaderStages::FRAGMENT, true)
+        .bind_sampler(
+            0,
+            5,
+            wgpu::ShaderStages::FRAGMENT,
+            wgpu::SamplerBindingType::Filtering,
+        )
+        .bind_texture_cube(0, 6, wgpu::ShaderStages::FRAGMENT, true);
 
         if composite {
             builder = builder
@@ -977,6 +1372,14 @@ impl OceanRenderer {
         let out_desc = Self::output_desc(width, height);
         let pass = self.surface_passes.get(self.quality);
         let uniforms = &self.uniforms;
+        let fallback_cube_view = &self.fallback_cube_view;
+        let environment = self.environment.as_ref();
+        let environment_cube_view = environment
+            .map(|environment| &environment.base_cube_view)
+            .unwrap_or(fallback_cube_view);
+        let environment_pmrem_view = environment
+            .map(|environment| &environment.pmrem_view)
+            .unwrap_or(fallback_cube_view);
 
         graph.add_pass(pass_name, |builder| {
             let out = builder.create_texture(texture_name, out_desc);
@@ -988,6 +1391,9 @@ impl OceanRenderer {
                 Some(pass_name),
                 |bindings| {
                     bindings.bind_tracked_buffer(0, 0, uniforms);
+                    bindings.bind_tracked_texture_view(0, 4, environment_cube_view);
+                    bindings.bind_common_sampler(0, 5, CommonSampler::LinearClamp);
+                    bindings.bind_tracked_texture_view(0, 6, environment_pmrem_view);
                 },
             );
             (node, out)
@@ -1095,6 +1501,14 @@ impl OceanRenderer {
             let out_desc = Self::output_desc(width, height);
             let pass = self.composite_passes.get(self.quality);
             let uniforms = &self.uniforms;
+            let fallback_cube_view = &self.fallback_cube_view;
+            let environment = self.environment.as_ref();
+            let environment_cube_view = environment
+                .map(|environment| &environment.base_cube_view)
+                .unwrap_or(fallback_cube_view);
+            let environment_pmrem_view = environment
+                .map(|environment| &environment.pmrem_view)
+                .unwrap_or(fallback_cube_view);
 
             graph.add_pass("Ocean_Composite", |builder| {
                 builder.read_texture(scene_color);
@@ -1111,6 +1525,9 @@ impl OceanRenderer {
                         bindings.bind_texture(0, 1, scene_color);
                         bindings.bind_common_sampler(0, 2, CommonSampler::LinearClamp);
                         bindings.bind_texture(0, 3, scene_depth);
+                        bindings.bind_tracked_texture_view(0, 4, environment_cube_view);
+                        bindings.bind_common_sampler(0, 5, CommonSampler::LinearClamp);
+                        bindings.bind_tracked_texture_view(0, 6, environment_pmrem_view);
                     },
                 );
                 (node, out)

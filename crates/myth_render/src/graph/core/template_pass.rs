@@ -47,11 +47,12 @@ pub struct TemplateBindingLayoutDesc {
 
 impl TemplateBindingLayoutDesc {
     #[must_use]
-    pub fn texture_2d(
+    pub fn texture(
         group: u32,
         binding: u32,
         visibility: wgpu::ShaderStages,
         filterable: bool,
+        view_dimension: wgpu::TextureViewDimension,
     ) -> Self {
         Self {
             group,
@@ -59,10 +60,42 @@ impl TemplateBindingLayoutDesc {
             visibility,
             binding_type: wgpu::BindingType::Texture {
                 sample_type: wgpu::TextureSampleType::Float { filterable },
-                view_dimension: wgpu::TextureViewDimension::D2,
+                view_dimension,
                 multisampled: false,
             },
         }
+    }
+
+    #[must_use]
+    pub fn texture_2d(
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        Self::texture(
+            group,
+            binding,
+            visibility,
+            filterable,
+            wgpu::TextureViewDimension::D2,
+        )
+    }
+
+    #[must_use]
+    pub fn texture_cube(
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        Self::texture(
+            group,
+            binding,
+            visibility,
+            filterable,
+            wgpu::TextureViewDimension::Cube,
+        )
     }
 
     #[must_use]
@@ -177,6 +210,18 @@ impl TemplatePassDescriptor {
         filterable: bool,
     ) {
         self.add_binding_layout(TemplateBindingLayoutDesc::texture_2d(
+            group, binding, visibility, filterable,
+        ));
+    }
+
+    pub fn add_texture_cube(
+        &mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) {
+        self.add_binding_layout(TemplateBindingLayoutDesc::texture_cube(
             group, binding, visibility, filterable,
         ));
     }
@@ -762,6 +807,19 @@ impl RenderPassBuilder {
         self
     }
 
+    pub fn bind_texture_cube(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        self.inner = self
+            .inner
+            .bind_texture_cube(group, binding, visibility, filterable);
+        self
+    }
+
     pub fn bind_depth_texture_2d(
         mut self,
         group: u32,
@@ -894,6 +952,19 @@ impl ComputePassBuilder {
         self
     }
 
+    pub fn bind_texture_cube(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        self.inner = self
+            .inner
+            .bind_texture_cube(group, binding, visibility, filterable);
+        self
+    }
+
     pub fn bind_depth_texture_2d(
         mut self,
         group: u32,
@@ -1018,6 +1089,20 @@ impl FullscreenPassTemplateBuilder {
     ) -> Self {
         self.binding_layouts
             .push(TemplateBindingLayoutDesc::texture_2d(
+                group, binding, visibility, filterable,
+            ));
+        self
+    }
+
+    fn bind_texture_cube(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        self.binding_layouts
+            .push(TemplateBindingLayoutDesc::texture_cube(
                 group, binding, visibility, filterable,
             ));
         self
@@ -1183,6 +1268,20 @@ impl ComputePassTemplateBuilder {
     ) -> Self {
         self.binding_layouts
             .push(TemplateBindingLayoutDesc::texture_2d(
+                group, binding, visibility, filterable,
+            ));
+        self
+    }
+
+    fn bind_texture_cube(
+        mut self,
+        group: u32,
+        binding: u32,
+        visibility: wgpu::ShaderStages,
+        filterable: bool,
+    ) -> Self {
+        self.binding_layouts
+            .push(TemplateBindingLayoutDesc::texture_cube(
                 group, binding, visibility, filterable,
             ));
         self
