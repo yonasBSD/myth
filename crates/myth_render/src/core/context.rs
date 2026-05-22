@@ -78,6 +78,9 @@ impl WgpuContext {
             adapter.limits().max_storage_buffers_per_shader_stage;
         required_limits.max_compute_workgroup_storage_size =
             adapter.limits().max_compute_workgroup_storage_size;
+        required_limits.max_storage_buffer_binding_size =
+            adapter.limits().max_storage_buffer_binding_size;
+        required_limits.max_buffer_size = adapter.limits().max_buffer_size;
         required_limits
     }
 
