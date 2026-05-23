@@ -50,6 +50,7 @@
 use crate::core::binding::GlobalBindGroupCache;
 use crate::core::gpu::{CubeSourceType, Tracked};
 use crate::core::{ResourceManager, WgpuContext};
+use crate::graph::extracted::SceneFeatures;
 use crate::graph::ExtractedScene;
 use crate::graph::RenderState;
 use crate::graph::core::ClusteredScreenBindings;
@@ -67,7 +68,7 @@ use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, IblComputeFeature,
     MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature,
-    SkyboxFeature, SsaoFeature, SsssFeature, TaaFeature, ToneMappingFeature,
+    SkyboxFeature, SsaoFeature, SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature,
     TransmissionCopyFeature, TransparentFeature,
 };
 use crate::pipeline::PipelineCache;
@@ -114,6 +115,7 @@ pub struct ComposerContext<'a> {
     pub tone_map_pass: &'a mut ToneMappingFeature,
     pub bloom_pass: &'a mut BloomFeature,
     pub ssao_pass: &'a mut SsaoFeature,
+    pub ssgi_pass: &'a mut SsgiFeature,
     // Scene rendering
     pub prepass: &'a mut PrepassFeature,
     pub opaque_pass: &'a mut OpaqueFeature,
@@ -494,6 +496,12 @@ impl<'a> FrameComposer<'a> {
 
         // ── 2b. Scene Configuration ────────────────────────────────────
         let ssao_enabled = self.ctx.scene.ssao.enabled && is_high_fidelity;
+        let ssgi_enabled = is_high_fidelity
+            && self
+                .ctx
+                .extracted_scene
+                .scene_variants
+                .contains(SceneFeatures::USE_SSGI);
 
         let needs_feature_id = is_high_fidelity
             && (self.ctx.scene.screen_space.enable_sss || self.ctx.scene.screen_space.enable_ssr);
@@ -512,8 +520,8 @@ impl<'a> FrameComposer<'a> {
         let (dbg_needs_normal, dbg_needs_velocity) = (false, false);
 
         let taa_enabled = self.ctx.camera.aa_mode.is_taa();
-        let needs_normal = ssao_enabled || needs_feature_id || dbg_needs_normal;
-        let needs_velocity = taa_enabled || dbg_needs_velocity;
+        let needs_normal = ssao_enabled || ssgi_enabled || needs_feature_id || dbg_needs_normal;
+        let needs_velocity = taa_enabled || ssgi_enabled || dbg_needs_velocity;
 
         // let needs_normal = ssao_enabled || needs_feature_id;
         let needs_skybox = self.ctx.scene.background.needs_skybox_pass();
@@ -651,6 +659,10 @@ impl<'a> FrameComposer<'a> {
             #[cfg(feature = "debug_view")]
             let mut dbg_ssao: Option<crate::graph::core::TextureNodeId> = None;
             #[cfg(feature = "debug_view")]
+            let mut dbg_ssgi_raw: Option<crate::graph::core::TextureNodeId> = None;
+            #[cfg(feature = "debug_view")]
+            let mut dbg_ssgi_denoised: Option<crate::graph::core::TextureNodeId> = None;
+            #[cfg(feature = "debug_view")]
             let mut dbg_clustered_params: Option<crate::graph::core::BufferNodeId> = None;
             #[cfg(feature = "debug_view")]
             let mut dbg_clustered_records: Option<crate::graph::core::BufferNodeId> = None;
@@ -749,6 +761,7 @@ impl<'a> FrameComposer<'a> {
                         scene_depth,
                         self.ctx.extracted_scene.background.clear_color(),
                         ssss_enabled,
+                        ssgi_enabled,
                         ssao_output,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
@@ -798,6 +811,39 @@ impl<'a> FrameComposer<'a> {
                             opaque_out.active_depth,
                             procedural_skybox_dependencies,
                         );
+                    }
+
+                    if ssgi_enabled {
+                        let taa_history_view = if taa_enabled {
+                            self.ctx.taa_pass.history_color_view()
+                        } else {
+                            None
+                        };
+
+                        let ssgi_out = self.ctx.ssgi_pass.add_to_graph(
+                            c,
+                            active_color,
+                            scene_depth,
+                            prepass_out
+                                .scene_normals
+                                .expect("SSGI requires scene normals from Prepass"),
+                            prepass_out
+                                .velocity_buffer
+                                .expect("SSGI requires motion vectors from Prepass"),
+                            opaque_out
+                                .albedo_mrt
+                                .expect("SSGI requires opaque albedo MRT"),
+                            env_dependency_pmrem.or(env_dependency_base),
+                            taa_history_view,
+                        );
+
+                        #[cfg(feature = "debug_view")]
+                        {
+                            dbg_ssgi_raw = Some(ssgi_out.raw_indirect);
+                            dbg_ssgi_denoised = Some(ssgi_out.clean_indirect);
+                        }
+
+                        active_color = ssgi_out.merged_color;
                     }
 
                     // ── 6. TAA Resolve ────────────────────────────────────────────
@@ -945,6 +991,8 @@ impl<'a> FrameComposer<'a> {
                         DebugViewTarget::SsaoRaw => dbg_ssao,
                         DebugViewTarget::SceneDepth => Some(scene_depth),
                         DebugViewTarget::ClusterHeatmap => Some(scene_depth),
+                        DebugViewTarget::SsgiRaw => dbg_ssgi_raw,
+                        DebugViewTarget::SsgiDenoised => dbg_ssgi_denoised,
                         _ => None,
                     };
 

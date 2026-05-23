@@ -422,5 +422,9 @@ fn fs_main(
         out.color = vec4<f32>(out_color, opacity);
     $$ endif
 
+    $$ if HAS_MRT_SSGI_ALBEDO is defined
+    out.albedo = vec4<f32>(material.diffuse_color, opacity);
+    $$ endif
+
     return out;
 }

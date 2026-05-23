@@ -460,6 +460,16 @@ impl TaaFeature {
     pub fn has_history(&self) -> bool {
         self.history_view.is_some()
     }
+
+    #[must_use]
+    pub fn history_color_view(&self) -> Option<Tracked<wgpu::TextureView>> {
+        self.history_view.clone()
+    }
+
+    #[must_use]
+    pub fn history_depth_view(&self) -> Option<Tracked<wgpu::TextureView>> {
+        self.history_depth_view.clone()
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

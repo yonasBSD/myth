@@ -340,6 +340,14 @@ impl PipelineCache {
             }));
         }
 
+        if canonical_key.flags.contains(PipelineFlags::ALBEDO_SPLIT) {
+            color_targets.push(Some(wgpu::ColorTargetState {
+                format: canonical_key.color_format,
+                blend: blend_state,
+                write_mask: wgpu::ColorWrites::ALL,
+            }));
+        }
+
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Scene Render Pipeline"),
             layout: Some(&layout),

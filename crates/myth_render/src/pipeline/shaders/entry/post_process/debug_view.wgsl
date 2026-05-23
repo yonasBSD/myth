@@ -42,6 +42,12 @@ fn heatmap_color(t: f32) -> vec3<f32> {
     return mix(vec3<f32>(0.98, 0.86, 0.18), vec3<f32>(0.96, 0.18, 0.12), local);
 }
 
+fn tonemap_debug(color: vec3<f32>, exposure: f32) -> vec3<f32> {
+    let hdr = max(color * max(exposure, 0.001), vec3<f32>(0.0));
+    let mapped = hdr / (vec3<f32>(1.0) + hdr);
+    return pow(mapped, vec3<f32>(1.0 / 2.2));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     $$ if IS_DEPTH
@@ -145,6 +151,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             $$ else
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
             $$ endif
+        }
+        // Mode 6: SSGI raw indirect radiance
+        case 6u: {
+            return vec4<f32>(tonemap_debug(tex_color.rgb, uniforms.custom_scale), 1.0);
+        }
+        // Mode 7: SSGI denoised indirect radiance + accumulation hint
+        case 7u: {
+            let mapped = tonemap_debug(tex_color.rgb, uniforms.custom_scale);
+            let confidence = clamp(tex_color.a / 8.0, 0.0, 1.0);
+            let overlay = mix(vec3<f32>(0.08, 0.16, 0.44), vec3<f32>(0.28, 0.96, 0.36), confidence);
+            return vec4<f32>(mix(mapped, overlay, 0.18), 1.0);
         }
         // Default: colour pass-through
         default: {

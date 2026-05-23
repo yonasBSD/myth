@@ -107,6 +107,7 @@ bitflags! {
         const USE_SSS = 1 << 2;
         const USE_SSR = 1 << 3;
         const USE_CLUSTERED_SHADING = 1 << 4;
+        const USE_SSGI = 1 << 5;
 
 
         const USE_SCREEN_SPACE_FEATURES = Self::USE_SSS.bits() | Self::USE_SSR.bits();
@@ -308,6 +309,11 @@ impl ExtractedScene {
         if scene.ssao.enabled {
             self.scene_defines.set("USE_SSAO", "1");
             self.scene_variants.insert(SceneFeatures::USE_SSAO);
+        }
+
+        if scene.ssgi.enabled {
+            self.scene_defines.set("USE_SSGI", "1");
+            self.scene_variants.insert(SceneFeatures::USE_SSGI);
         }
 
         if scene.screen_space.enable_sss {

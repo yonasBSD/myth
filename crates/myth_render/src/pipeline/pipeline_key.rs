@@ -181,6 +181,8 @@ bitflags! {
         const ALPHA_TO_COVERAGE   = 1 << 1;
         /// Indicates if specular is split into a separate buffer.
         const SPECULAR_SPLIT      = 1 << 2;
+        /// Indicates if diffuse albedo is split into a separate buffer.
+        const ALBEDO_SPLIT        = 1 << 3;
     }
 }
 

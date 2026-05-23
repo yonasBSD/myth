@@ -277,14 +277,32 @@ fn prepare_main_camera_commands(
                     RenderPath::BasicForward => false,
                 };
 
+                let is_albedo_split = match wgpu_ctx.render_path {
+                    RenderPath::HighFidelity => {
+                        is_opaque_item
+                            && extracted_scene
+                                .scene_variants
+                                .contains(SceneFeatures::USE_SSGI)
+                    }
+                    RenderPath::BasicForward => false,
+                };
+
                 if is_specular_split {
                     options.add_define("HAS_MRT_SSSS", "1");
+                }
+
+                if is_albedo_split {
+                    options.add_define("HAS_MRT_SSGI_ALBEDO", "1");
                 }
 
                 let shader_hash = shader_manager.pipeline_shader_hash(shader_source, &options);
 
                 if is_specular_split {
                     flags |= PipelineFlags::SPECULAR_SPLIT;
+                }
+
+                if is_albedo_split {
+                    flags |= PipelineFlags::ALBEDO_SPLIT;
                 }
 
                 let depth_write = if is_opaque_item && use_depth_pre {

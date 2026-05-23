@@ -35,6 +35,7 @@ pub mod primitives;
 pub mod screen_space;
 pub mod shader_defines;
 pub mod ssao;
+pub mod ssgi;
 pub mod taa;
 pub mod texture;
 pub mod tone_mapping;
@@ -75,6 +76,7 @@ pub use image::{ColorSpace, DynamicImageError, ImageDataRef, ImageDimension, Pix
 pub use input::{ButtonState, Input, Key, MouseButton};
 pub use shader_defines::ShaderDefines;
 pub use ssao::SsaoSettings;
+pub use ssgi::{SsgiQuality, SsgiSettings};
 pub use taa::TaaSettings;
 pub use texture::{Texture, TextureSampler};
 pub use tone_mapping::{AgxLook, ToneMappingMode, ToneMappingSettings};

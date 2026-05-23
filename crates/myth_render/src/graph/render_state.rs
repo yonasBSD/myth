@@ -32,6 +32,8 @@ pub enum DebugViewTarget {
     Velocity,
     SsaoRaw,
     ClusterHeatmap,
+    SsgiRaw,
+    SsgiDenoised,
 }
 
 #[cfg(feature = "debug_view")]
@@ -49,6 +51,8 @@ impl DebugViewTarget {
             DebugViewMode::Velocity => Self::Velocity,
             DebugViewMode::Depth => Self::SceneDepth,
             DebugViewMode::ClusterHeatmap => Self::ClusterHeatmap,
+            DebugViewMode::SsgiRaw => Self::SsgiRaw,
+            DebugViewMode::SsgiDenoised => Self::SsgiDenoised,
             _ => Self::None,
         }
     }
@@ -61,6 +65,8 @@ impl DebugViewTarget {
     /// | 3    | Velocity → directional colour |
     /// | 4    | Depth → linearised reverse-Z |
     /// | 5    | Cluster heatmap |
+    /// | 6    | SSGI raw indirect |
+    /// | 7    | SSGI denoised indirect |
     #[must_use]
     pub const fn view_mode(self) -> u32 {
         match self {
@@ -70,6 +76,8 @@ impl DebugViewTarget {
             Self::Velocity => 3,
             Self::SceneDepth => 4,
             Self::ClusterHeatmap => 5,
+            Self::SsgiRaw => 6,
+            Self::SsgiDenoised => 7,
         }
     }
 }

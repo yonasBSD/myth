@@ -24,6 +24,8 @@ pub enum DebugViewMode {
     Velocity = 3,
     Depth = 4,
     ClusterHeatmap = 5,
+    SsgiRaw = 6,
+    SsgiDenoised = 7,
     // Material attribute modes (shader override)
     Albedo = 10,
     Roughness = 11,
@@ -42,6 +44,8 @@ impl DebugViewMode {
             Self::Velocity => "Velocity Buffer",
             Self::Depth => "Scene Depth",
             Self::ClusterHeatmap => "Cluster Heatmap",
+            Self::SsgiRaw => "SSGI Raw Indirect",
+            Self::SsgiDenoised => "SSGI Denoised Indirect",
             Self::Albedo => "Albedo (Material)",
             Self::Roughness => "Roughness (Material)",
             Self::Metalness => "Metalness (Material)",
@@ -52,7 +56,7 @@ impl DebugViewMode {
     #[inline]
     #[must_use]
     pub const fn is_post_process(self) -> bool {
-        (self as u32) >= 1 && (self as u32) <= 5
+        (self as u32) >= 1 && (self as u32) <= 7
     }
 
     /// Returns `true` for modes that use shader-override (material attribute) visualisation.
@@ -70,6 +74,8 @@ impl DebugViewMode {
         Self::Velocity,
         Self::Depth,
         Self::ClusterHeatmap,
+        Self::SsgiRaw,
+        Self::SsgiDenoised,
         Self::Albedo,
         Self::Roughness,
         Self::Metalness,

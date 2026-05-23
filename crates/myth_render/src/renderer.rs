@@ -19,8 +19,9 @@ use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
-    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsssFeature,
-    TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
+    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
+    SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
+    TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -115,6 +116,7 @@ struct RendererState {
     pub(crate) tone_map_pass: ToneMappingFeature,
     pub(crate) bloom_pass: BloomFeature,
     pub(crate) ssao_pass: SsaoFeature,
+    pub(crate) ssgi_pass: SsgiFeature,
 
     // Scene rendering passes
     pub(crate) prepass: PrepassFeature,
@@ -290,6 +292,7 @@ impl Renderer {
             tone_map_pass: ToneMappingFeature::new(),
             bloom_pass: BloomFeature::new(),
             ssao_pass: SsaoFeature::new(),
+            ssgi_pass: SsgiFeature::new(),
 
             prepass: PrepassFeature::new(),
             opaque_pass: OpaqueFeature::new(),
@@ -419,6 +422,33 @@ impl Renderer {
                 .remove(SceneFeatures::USE_CLUSTERED_SHADING);
         }
 
+        let ssgi_supported = state.wgpu_ctx.render_path.supports_post_processing()
+            && state.wgpu_ctx.msaa_samples <= 1;
+        let ssgi_enabled = scene.ssgi.enabled && ssgi_supported;
+        if ssgi_enabled {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .insert(SceneFeatures::USE_SSGI);
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .set("USE_SSGI", "1");
+        } else {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .remove(SceneFeatures::USE_SSGI);
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .remove("USE_SSGI");
+        }
+
         // ── Phase 2: Cull + sort + command generation ───────────────────
         crate::graph::culling::cull_and_sort(
             &state.render_frame.extracted_scene,
@@ -450,6 +480,11 @@ impl Renderer {
             let ssao_enabled = scene.ssao.enabled && is_hf;
             let needs_feature_id =
                 is_hf && (scene.screen_space.enable_sss || scene.screen_space.enable_ssr);
+            let ssgi_enabled = state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .contains(SceneFeatures::USE_SSGI);
 
             // Sync camera debug settings → RenderState before borrowing it.
             #[cfg(feature = "debug_view")]
@@ -473,8 +508,8 @@ impl Renderer {
             #[cfg(not(feature = "debug_view"))]
             let (dbg_needs_normal, dbg_needs_velocity) = (false, false);
 
-            let needs_normal = ssao_enabled || needs_feature_id || dbg_needs_normal;
-            let needs_velocity = camera.aa_mode.is_taa() || dbg_needs_velocity;
+            let needs_normal = ssao_enabled || ssgi_enabled || needs_feature_id || dbg_needs_normal;
+            let needs_velocity = camera.aa_mode.is_taa() || ssgi_enabled || dbg_needs_velocity;
 
             // let needs_normal = ssao_enabled || needs_feature_id;
             let needs_skybox = scene.background.needs_skybox_pass();
@@ -599,6 +634,18 @@ impl Renderer {
                         .extract_and_prepare(&mut extract_ctx, &scene.ssao.uniforms);
                 }
 
+                if ssgi_enabled {
+                    scene.ssgi.update_resolution(self.size.0, self.size.1);
+                    scene.ssgi.set_frame_index(frame_time.frame_count as u32);
+                    scene.ssgi.set_history_flags(state.ssgi_pass.history_flags());
+                    state
+                        .ssgi_pass
+                        .extract_and_prepare(&mut extract_ctx, &scene.ssgi.uniforms, self.size);
+                } else {
+                    state.ssgi_pass.invalidate_history();
+                    scene.ssgi.set_history_flags(0);
+                }
+
                 state.ssss_pass.extract_and_prepare(&mut extract_ctx);
 
                 // MSAA Sync — needed when SSSS modifies the resolved HDR
@@ -694,6 +741,7 @@ impl Renderer {
             tone_map_pass: &mut state.tone_map_pass,
             bloom_pass: &mut state.bloom_pass,
             ssao_pass: &mut state.ssao_pass,
+            ssgi_pass: &mut state.ssgi_pass,
 
             prepass: &mut state.prepass,
             opaque_pass: &mut state.opaque_pass,

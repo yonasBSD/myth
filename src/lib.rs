@@ -151,7 +151,8 @@ pub mod prelude {
     pub use myth_resources::{
         AlphaMode, BloomSettings, FxaaQuality, FxaaSettings, Geometry, Image, Material,
         MaterialType, Mesh, PhongMaterial, PhysicalMaterial, RenderableMaterialTrait, Side,
-        SsaoSettings, TaaSettings, Texture, TextureSlot, UnlitMaterial,
+        SsaoSettings, SsgiQuality, SsgiSettings, TaaSettings, Texture, TextureSlot,
+        UnlitMaterial,
     };
 
     // Assets
@@ -213,9 +214,9 @@ pub use myth_resources::primitives::{
 pub use myth_resources::{
     AgxLook, AlphaMode, AntiAliasingMode, Attribute, FxaaQuality, FxaaSettings, Geometry, Image,
     IndexFormat, Material, MaterialTrait, MaterialType, Mesh, PhongMaterial, PhysicalMaterial,
-    RenderableMaterialTrait, ShaderDefines, ShaderTemplateMode, Side, TaaSettings, Texture,
-    TextureSlot, TextureTransform, ToneMappingMode, ToneMappingSettings, UnlitMaterial,
-    VertexFormat,
+    RenderableMaterialTrait, ShaderDefines, ShaderTemplateMode, Side, SsaoSettings,
+    SsgiQuality, SsgiSettings, TaaSettings, Texture, TextureSlot, TextureTransform,
+    ToneMappingMode, ToneMappingSettings, UnlitMaterial, VertexFormat,
 };
 
 // Assets

@@ -25,6 +25,7 @@
 //! - `has_prepass`: Whether depth was already written by RdgPrepass
 //! - `clear_color`: Background clear color
 //! - `needs_specular`: Whether to output a specular MRT attachment
+//! - `needs_albedo`: Whether to output an albedo MRT attachment
 
 use crate::HDR_TEXTURE_FORMAT;
 use crate::graph::composer::GraphBuilderContext;
@@ -46,6 +47,8 @@ pub struct OpaqueOutputs {
     /// Resolved specular texture for SSSS (`None` when specular is
     /// not enabled).
     pub specular_mrt: Option<TextureNodeId>,
+    /// Resolved albedo texture for SSGI (`None` when not enabled).
+    pub albedo_mrt: Option<TextureNodeId>,
 }
 
 // ─── Feature ───────────────────────────────────────────────────────────
@@ -70,6 +73,7 @@ impl OpaqueFeature {
         scene_depth_ss: TextureNodeId,
         clear_color: wgpu::Color,
         needs_specular: bool,
+        needs_albedo: bool,
         ssao_tex: Option<TextureNodeId>,
         shadow_tex: Option<TextureNodeId>,
         shadow_cube_tex: Option<TextureNodeId>,
@@ -156,6 +160,38 @@ impl OpaqueFeature {
                 (TextureNodeId::from_index(0), None)
             };
 
+            let (albedo_tex, albedo_resolved) = if needs_albedo {
+                let albedo_desc = TextureDesc::new_2d(
+                    fc.width,
+                    fc.height,
+                    HDR_TEXTURE_FORMAT,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
+                );
+                let albedo_single = builder.create_texture("Albedo_MRT", albedo_desc);
+
+                if is_msaa {
+                    let msaa_albedo_desc = TextureDesc::new(
+                        fc.width,
+                        fc.height,
+                        1,
+                        1,
+                        fc.msaa_samples,
+                        wgpu::TextureDimension::D2,
+                        HDR_TEXTURE_FORMAT,
+                        wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                    );
+                    let albedo_msaa = builder.create_texture("Albedo_MRT_MSAA", msaa_albedo_desc);
+                    (albedo_msaa, Some(albedo_single))
+                } else {
+                    (albedo_single, None)
+                }
+            } else {
+                (TextureNodeId::from_index(0), None)
+            };
+
             // ── Read dependencies ──────────────────────────────────────
             if let Some(ssao) = ssao_tex {
                 builder.read_texture(ssao);
@@ -199,16 +235,25 @@ impl OpaqueFeature {
                 depth_target,
                 clear_color,
                 needs_specular,
+                needs_albedo,
                 ssao_tex,
                 shadow_tex,
                 shadow_cube_tex,
                 specular_tex,
                 specular_resolved,
+                albedo_tex,
+                albedo_resolved,
                 scene_lighting,
             );
 
             let specular_mrt = if needs_specular {
                 Some(specular_resolved.unwrap_or(specular_tex))
+            } else {
+                None
+            };
+
+            let albedo_mrt = if needs_albedo {
+                Some(albedo_resolved.unwrap_or(albedo_tex))
             } else {
                 None
             };
@@ -219,6 +264,7 @@ impl OpaqueFeature {
                     active_color: color_target,
                     active_depth: depth_target,
                     specular_mrt,
+                    albedo_mrt,
                 },
             )
         })
@@ -240,10 +286,13 @@ pub struct OpaquePassNode<'a> {
     pub depth_target: TextureNodeId,
     pub specular_tex: TextureNodeId,
     pub specular_resolve_target: Option<TextureNodeId>,
+    pub albedo_tex: TextureNodeId,
+    pub albedo_resolve_target: Option<TextureNodeId>,
 
     // ─── Push Parameters ───────────────────────────────────────────
     pub clear_color: wgpu::Color,
     pub needs_specular: bool,
+    pub needs_albedo: bool,
     pub ssao_input: Option<TextureNodeId>,
     pub shadow_input: Option<TextureNodeId>,
     pub shadow_cube_input: Option<TextureNodeId>,
@@ -260,11 +309,14 @@ impl OpaquePassNode<'_> {
         depth_target: TextureNodeId,
         clear_color: wgpu::Color,
         needs_specular: bool,
+        needs_albedo: bool,
         ssao_input: Option<TextureNodeId>,
         shadow_input: Option<TextureNodeId>,
         shadow_cube_input: Option<TextureNodeId>,
         specular_tex: TextureNodeId,
         specular_resolve_target: Option<TextureNodeId>,
+        albedo_tex: TextureNodeId,
+        albedo_resolve_target: Option<TextureNodeId>,
         scene_lighting: ClusteredScreenBindings,
     ) -> Self {
         Self {
@@ -272,8 +324,11 @@ impl OpaquePassNode<'_> {
             depth_target,
             specular_tex,
             specular_resolve_target,
+            albedo_tex,
+            albedo_resolve_target,
             clear_color,
             needs_specular,
+            needs_albedo,
             ssao_input,
             shadow_input,
             shadow_cube_input,
@@ -301,7 +356,7 @@ impl<'a> PassNode<'a> for OpaquePassNode<'a> {
 
         // ── Color attachments (auto-deduced LoadOp / StoreOp) ───────────
         let mut color_attachments: smallvec::SmallVec<
-            [Option<wgpu::RenderPassColorAttachment>; 2],
+            [Option<wgpu::RenderPassColorAttachment>; 3],
         > = smallvec::smallvec![ctx.get_color_attachment(
             self.color_target,
             RenderTargetOps::Clear(self.clear_color),
@@ -316,6 +371,16 @@ impl<'a> PassNode<'a> for OpaquePassNode<'a> {
                 self.specular_tex,
                 RenderTargetOps::Clear(wgpu::Color::TRANSPARENT),
                 self.specular_resolve_target,
+            )
+        {
+            color_attachments.push(Some(att));
+        }
+
+        if self.needs_albedo
+            && let Some(att) = ctx.get_color_attachment(
+                self.albedo_tex,
+                RenderTargetOps::Clear(wgpu::Color::TRANSPARENT),
+                self.albedo_resolve_target,
             )
         {
             color_attachments.push(Some(att));

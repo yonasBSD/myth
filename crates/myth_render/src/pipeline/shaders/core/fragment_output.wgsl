@@ -7,13 +7,20 @@
 //
 // When `HAS_MRT_SSSS` is defined the struct contains an additional
 // `@location(1)` target for SSSS specular data.  Materials that do not
-// perform their own specular split should call `pack_fragment_output`
+// perform their own specular split should call `pack_fragment_output`.
+// When `HAS_MRT_SSGI_ALBEDO` is defined an additional albedo attachment is
+// appended after the optional specular MRT.
 // which fills extra MRT targets with safe default values.
 
 struct FragmentOutput {
     @location(0) color: vec4<f32>,
 $$ if HAS_MRT_SSSS is defined
     @location(1) specular: vec4<f32>,
+$$ endif
+$$ if HAS_MRT_SSGI_ALBEDO is defined and HAS_MRT_SSSS is defined
+    @location(2) albedo: vec4<f32>,
+$$ elif HAS_MRT_SSGI_ALBEDO is defined
+    @location(1) albedo: vec4<f32>,
 $$ endif
 };
 
@@ -26,6 +33,9 @@ fn pack_fragment_output(main_color: vec4<f32>) -> FragmentOutput {
     out.color = main_color;
 $$ if HAS_MRT_SSSS is defined
     out.specular = vec4<f32>(0.0);
+$$ endif
+$$ if HAS_MRT_SSGI_ALBEDO is defined
+    out.albedo = main_color;
 $$ endif
     return out;
 }
