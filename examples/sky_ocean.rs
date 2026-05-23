@@ -19,9 +19,9 @@ const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
     Some(path) => path,
     None => "examples/assets/",
 };
+const SCENE_CAMERA_FOV_DEGREES: f32 = 45.0;
 
 struct SkyOceanDemo {
-    cam_node_id: NodeHandle,
     controls: OrbitControls,
     cycle: DayNightCycle,
     fps_counter: FpsCounter,
@@ -89,7 +89,7 @@ impl AppHandler for SkyOceanDemo {
             .with_moon(moon_light_node)
             .with_time_speed(0.1);
 
-        let mut camera = Camera::new_perspective(45.0, 16.0 / 9.0, 0.1);
+        let mut camera = Camera::new_perspective(SCENE_CAMERA_FOV_DEGREES, 16.0 / 9.0, 0.1);
         camera.set_aa_mode(AntiAliasingMode::msaa());
 
         let cam_node_id = scene.add_camera(camera);
@@ -100,7 +100,6 @@ impl AppHandler for SkyOceanDemo {
         scene.active_camera = Some(cam_node_id);
 
         Self {
-            cam_node_id,
             controls: OrbitControls::new(Vec3::new(0.0, 2.0, 7.5), Vec3::new(0.0, 0.9, -18.0)),
             cycle,
             fps_counter: FpsCounter::new(),
@@ -167,9 +166,19 @@ impl AppHandler for SkyOceanDemo {
             return;
         };
 
-        if let Some(cam_node) = scene.get_node_mut(self.cam_node_id) {
+        if self.ocean.camera_source() == OceanCameraSource::Reference {
+            let (position, target, fov_radians) = self.ocean.reference_camera_view();
+            if let Some((transform, camera)) = scene.query_main_camera_bundle() {
+                transform.position = position;
+                transform.look_at(target, Vec3::Y);
+                camera.set_fov(fov_radians);
+            }
+            self.controls.set_target(target);
+            self.controls.set_position(position);
+        } else if let Some((transform, camera)) = scene.query_main_camera_bundle() {
+            camera.set_fov_degrees(SCENE_CAMERA_FOV_DEGREES);
             self.controls
-                .update(&mut cam_node.transform, &engine.input, 45.0, frame.dt);
+                .update(transform, &engine.input, camera.fov(), frame.dt);
         }
 
         self.cycle.update(scene, &engine.input, frame.dt);

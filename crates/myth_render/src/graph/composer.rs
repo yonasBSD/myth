@@ -872,6 +872,8 @@ impl<'a> FrameComposer<'a> {
                     let mut blackboard = GraphBlackboard {
                         scene_color: Some(active_color),
                         scene_depth: Some(scene_depth),
+                        atmosphere_transmittance,
+                        atmosphere_bake_params,
                         surface_out,
                     };
                     for (stage, hook_opt) in &mut self.hooks {
@@ -1053,6 +1055,8 @@ impl<'a> FrameComposer<'a> {
                 let mut blackboard = GraphBlackboard {
                     scene_color: bb_scene_color,
                     scene_depth: bb_scene_depth,
+                    atmosphere_transmittance,
+                    atmosphere_bake_params,
                     surface_out: current_surface,
                 };
                 for (stage, hook_opt) in &mut self.hooks {

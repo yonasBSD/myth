@@ -8,7 +8,7 @@
 //! [`CustomPassHook`] is a builder-time callback that lets external code
 //! inject arbitrary [`PassNode`]s into the graph at a chosen stage.
 
-use super::types::TextureNodeId;
+use super::types::{BufferNodeId, TextureNodeId};
 
 /// Well-known resource slots published by the engine's graph builder.
 ///
@@ -23,6 +23,8 @@ use super::types::TextureNodeId;
 /// |------|----------|------------------|
 /// | `scene_color` | HDR scene colour buffer | Custom post-FX |
 /// | `scene_depth` | Main depth buffer (reverse-Z) | Depth-aware FX |
+/// | `atmosphere_transmittance` | Atmosphere transmittance LUT | Custom lit composites |
+/// | `atmosphere_bake_params` | Atmosphere bake uniform buffer | Custom lit composites |
 /// | `surface_out` | Final swap-chain output | UI overlay |
 #[derive(Clone, Copy)]
 pub struct GraphBlackboard {
@@ -30,6 +32,12 @@ pub struct GraphBlackboard {
     pub scene_color: Option<TextureNodeId>,
     /// Main depth buffer (reverse-Z, written by scene passes).
     pub scene_depth: Option<TextureNodeId>,
+    /// Optional atmosphere transmittance LUT for custom passes that need the
+    /// same celestial-light attenuation as the main lighting path.
+    pub atmosphere_transmittance: Option<TextureNodeId>,
+    /// Optional procedural-sky bake parameters paired with the transmittance
+    /// LUT. Falls back to the renderer default when unavailable.
+    pub atmosphere_bake_params: Option<BufferNodeId>,
     /// Final swap-chain output target.  UI and overlays should write here.
     pub surface_out: TextureNodeId,
 }

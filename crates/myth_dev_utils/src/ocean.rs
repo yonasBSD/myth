@@ -4,8 +4,8 @@ use myth_render::{
     HDR_TEXTURE_FORMAT, Renderer,
     core::gpu::{CommonSampler, Tracked},
     graph::core::{
-        GraphBlackboard, RenderGraph, RenderPassBuilder, RenderTargetOps, TemplateFullscreenPass,
-        TextureDesc, TextureNodeId,
+        BufferNodeId, GraphBlackboard, RenderGraph, RenderPassBuilder, RenderTargetOps,
+        TemplateFullscreenPass, TextureDesc, TextureNodeId,
     },
     pipeline::ShaderCompilationOptions,
 };
@@ -16,6 +16,7 @@ const OCEAN_RESOLVE_SHADER_NAME: &str = "myth_dev_utils/ocean_resolve";
 
 const OCEAN_SHADER_TEMPLATE: &str = r#"
 {$ include 'core/full_screen_vertex' $}
+{$ include 'entry/utility/atmosphere/transmittance_math' $}
 
 struct OceanUniforms {
     resolution_time: vec4<f32>,
@@ -32,6 +33,20 @@ struct OceanUniforms {
     ambient_color: vec4<f32>,
 };
 
+struct AtmosphereBakeParams {
+    sun_direction: vec3<f32>,
+    sun_intensity: f32,
+    moon_direction: vec3<f32>,
+    moon_intensity: f32,
+    star_axis: vec3<f32>,
+    sun_disk_size: f32,
+    moon_disk_size: f32,
+    planet_radius: f32,
+    atmosphere_radius: f32,
+    star_intensity: f32,
+    star_rotation: f32,
+};
+
 @group(0) @binding(0) var<uniform> u_ocean: OceanUniforms;
 $$ if OCEAN_COMPOSITE is defined
 @group(0) @binding(1) var t_scene_color: texture_2d<f32>;
@@ -41,6 +56,8 @@ $$ endif
 @group(0) @binding(4) var t_environment_cube: texture_cube<f32>;
 @group(0) @binding(5) var s_environment_cube: sampler;
 @group(0) @binding(6) var t_environment_pmrem: texture_cube<f32>;
+@group(1) @binding(0) var t_atmosphere_transmittance: texture_2d<f32>;
+@group(1) @binding(1) var<uniform> u_atmosphere_bake_params: AtmosphereBakeParams;
 
 const PI: f32 = 3.141592;
 const NUM_STEPS: i32 = 8;
@@ -119,6 +136,46 @@ fn sample_environment_pmrem(direction: vec3<f32>, roughness: f32) -> vec3<f32> {
     ).rgb;
 }
 
+fn sample_atmosphere_transmittance_uv(trans_uv: vec2<f32>) -> vec3<f32> {
+    let lut_size = vec2<i32>(textureDimensions(t_atmosphere_transmittance));
+    let clamped_uv = clamp(trans_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let pixel = clamp(
+        vec2<i32>(clamped_uv * vec2<f32>(lut_size)),
+        vec2<i32>(0),
+        lut_size - vec2<i32>(1),
+    );
+    return textureLoad(t_atmosphere_transmittance, pixel, 0).rgb;
+}
+
+fn sample_celestial_light_transmittance(
+    world_position: vec3<f32>,
+    direction_to_light: vec3<f32>,
+) -> vec3<f32> {
+    let planet_radius = u_atmosphere_bake_params.planet_radius;
+    let atmosphere_radius = max(
+        u_atmosphere_bake_params.atmosphere_radius,
+        planet_radius + 1.0,
+    );
+    if (planet_radius <= 0.0) {
+        return vec3<f32>(1.0);
+    }
+
+    let max_altitude = max(atmosphere_radius - planet_radius, 1.0);
+    let planet_center = vec3<f32>(0.0, -planet_radius, 0.0);
+    let altitude = clamp(
+        length(world_position - planet_center) - planet_radius,
+        0.0,
+        max_altitude,
+    );
+    let trans_uv = transmittance_lut_uv(
+        altitude,
+        clamp(direction_to_light.y, -1.0, 1.0),
+        planet_radius,
+        atmosphere_radius,
+    );
+    return sample_atmosphere_transmittance_uv(trans_uv);
+}
+
 fn ray_direction_from_frag_coord(frag_coord: vec2<f32>) -> vec3<f32> {
     var screen = frag_coord / u_ocean.resolution_time.xy;
     screen = screen * 2.0 - 1.0;
@@ -175,6 +232,18 @@ fn scene_uv_from_direction(direction: vec3<f32>) -> vec2<f32> {
         focal * local_y / local_z,
     );
     return vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+}
+
+fn sample_scene_horizon_color(direction: vec3<f32>, fallback_coord: vec2<f32>) -> vec3<f32> {
+    let horizon_dir = normalize(vec3<f32>(direction.x, max(direction.y, 0.02), direction.z));
+    let scene_uv = scene_uv_from_direction(horizon_dir);
+    if (
+        scene_uv.x < 0.0 || scene_uv.x > 1.0 || scene_uv.y < 0.0 || scene_uv.y > 1.0
+    ) {
+        return sample_scene_color(fallback_coord);
+    }
+
+    return sample_scene_color_uv(scene_uv);
 }
 
 fn sample_scene_reflection(reflected_dir: vec3<f32>, fallback_coord: vec2<f32>) -> vec3<f32> {
@@ -269,8 +338,16 @@ fn get_sea_color(
 ) -> vec3<f32> {
     var fresnel = clamp(1.0 - dot(n, -eye), 0.0, 1.0);
     fresnel = pow(fresnel, 3.0) * 0.5;
-    let direct_light_color = max(u_ocean.light_color_energy.xyz, vec3<f32>(0.0));
-    let direct_light_energy = clamp(u_ocean.light_color_energy.w, 0.0, 1.0);
+    let base_direct_light_color = max(u_ocean.light_color_energy.xyz, vec3<f32>(0.0));
+    let base_direct_light_energy = clamp(u_ocean.light_color_energy.w, 0.0, 1.0);
+    let direct_light_transmittance = sample_celestial_light_transmittance(p, l);
+    let direct_light_color = base_direct_light_color * direct_light_transmittance;
+    let direct_light_energy = clamp(
+        base_direct_light_energy
+            * dot(direct_light_transmittance, vec3<f32>(0.2126, 0.7152, 0.0722)),
+        0.0,
+        1.0,
+    );
     let ambient_color = max(u_ocean.ambient_color.xyz, vec3<f32>(0.0));
     let roughness = clamp(0.08 + u_ocean.sea_choppy_water.x * 0.075, 0.08, 0.55);
     let reflected_dir = reflect(eye, n);
@@ -403,15 +480,15 @@ fn get_pixel(frag_coord: vec2<f32>) -> vec3<f32> {
     let light = normalize(u_ocean.light_direction.xyz);
 
     $$ if OCEAN_COMPOSITE is defined
-    let horizon_color = sample_scene_color(frag_coord);
-    let horizon_angle = smoothstep(0.025, -0.12, dir.y);
-    let horizon_distance = smoothstep(250.0, 6000.0, distance_to_hit);
-    let horizon_sea_mix = mix(pow(horizon_angle, 0.85), pow(horizon_angle, 1.75), horizon_distance);
+    let horizon_color = sample_scene_horizon_color(dir, frag_coord);
+    // let horizon_angle = smoothstep(0.025, -0.12, dir.y);
+    // let horizon_distance = smoothstep(250.0, 6000.0, distance_to_hit);
+    // let horizon_sea_mix = mix(pow(horizon_angle, 0.85), pow(horizon_angle, 1.75), horizon_distance);
     $$ else
     let horizon_color = get_sky_color(dir);
+    $$ endif
     let horizon_angle = smoothstep(0.0, -0.02, dir.y);
     let horizon_sea_mix = pow(horizon_angle, 0.2);
-    $$ endif
 
     return mix(
         horizon_color,
@@ -759,6 +836,8 @@ pub struct OceanRenderer {
     camera_source: OceanCameraSource,
     light_source: OceanLightSource,
     fallback_cube_view: Tracked<wgpu::TextureView>,
+    fallback_atmosphere_transmittance_view: Tracked<wgpu::TextureView>,
+    fallback_atmosphere_bake_params: Tracked<wgpu::Buffer>,
     environment: Option<OceanEnvironmentState>,
 }
 
@@ -821,6 +900,18 @@ impl OceanRenderer {
             .system_textures
             .black_cube
             .clone();
+        let fallback_atmosphere_transmittance_view = renderer
+            .resource_manager()
+            .expect("renderer must expose resource manager before ocean helper setup")
+            .system_textures
+            .white_2d
+            .clone();
+        let fallback_atmosphere_bake_params = renderer
+            .resource_manager()
+            .expect("renderer must expose resource manager before ocean helper setup")
+            .system_textures
+            .atmosphere_bake_params
+            .clone();
         let uniforms = Tracked::new(wgpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Ocean Surface Uniforms"),
             size: std::mem::size_of::<OceanUniforms>() as u64,
@@ -842,6 +933,8 @@ impl OceanRenderer {
             camera_source: OceanCameraSource::SceneMainCamera,
             light_source: OceanLightSource::SceneAuto,
             fallback_cube_view,
+            fallback_atmosphere_transmittance_view,
+            fallback_atmosphere_bake_params,
             environment: None,
         }
     }
@@ -871,6 +964,16 @@ impl OceanRenderer {
     #[must_use]
     pub fn camera_source(&self) -> OceanCameraSource {
         self.camera_source
+    }
+
+    #[must_use]
+    pub fn reference_camera_view(&self) -> (Vec3, Vec3, f32) {
+        let camera = OceanCameraState::reference(self.time);
+        let position = Vec3::from_array(camera.position);
+        let forward = Vec3::from_array(camera.forward).normalize_or_zero();
+        let focal = camera.projection[0].max(0.0001);
+        let fov_radians = 2.0 * (1.0 / focal).atan();
+        (position, position + forward, fov_radians)
     }
 
     pub fn set_camera_source(&mut self, camera_source: OceanCameraSource) {
@@ -1338,7 +1441,9 @@ impl OceanRenderer {
             wgpu::ShaderStages::FRAGMENT,
             wgpu::SamplerBindingType::Filtering,
         )
-        .bind_texture_cube(0, 6, wgpu::ShaderStages::FRAGMENT, true);
+        .bind_texture_cube(0, 6, wgpu::ShaderStages::FRAGMENT, true)
+        .bind_texture_2d(1, 0, wgpu::ShaderStages::FRAGMENT, false)
+        .bind_uniform_buffer(1, 1, wgpu::ShaderStages::FRAGMENT);
 
         if composite {
             builder = builder
@@ -1368,11 +1473,15 @@ impl OceanRenderer {
         height: u32,
         pass_name: &'static str,
         texture_name: &'static str,
+        atmosphere_transmittance: Option<TextureNodeId>,
+        atmosphere_bake_params: Option<BufferNodeId>,
     ) -> TextureNodeId {
         let out_desc = Self::output_desc(width, height);
         let pass = self.surface_passes.get(self.quality);
         let uniforms = &self.uniforms;
         let fallback_cube_view = &self.fallback_cube_view;
+        let fallback_atmosphere_transmittance_view = &self.fallback_atmosphere_transmittance_view;
+        let fallback_atmosphere_bake_params = &self.fallback_atmosphere_bake_params;
         let environment = self.environment.as_ref();
         let environment_cube_view = environment
             .map(|environment| &environment.base_cube_view)
@@ -1382,6 +1491,12 @@ impl OceanRenderer {
             .unwrap_or(fallback_cube_view);
 
         graph.add_pass(pass_name, |builder| {
+            if let Some(transmittance) = atmosphere_transmittance {
+                builder.read_texture(transmittance);
+            }
+            if let Some(bake_params) = atmosphere_bake_params {
+                builder.read_buffer(bake_params);
+            }
             let out = builder.create_texture(texture_name, out_desc);
             let node = pass.build_node(
                 builder,
@@ -1394,6 +1509,20 @@ impl OceanRenderer {
                     bindings.bind_tracked_texture_view(0, 4, environment_cube_view);
                     bindings.bind_common_sampler(0, 5, CommonSampler::LinearClamp);
                     bindings.bind_tracked_texture_view(0, 6, environment_pmrem_view);
+                    if let Some(transmittance) = atmosphere_transmittance {
+                        bindings.bind_texture(1, 0, transmittance);
+                    } else {
+                        bindings.bind_tracked_texture_view(
+                            1,
+                            0,
+                            fallback_atmosphere_transmittance_view,
+                        );
+                    }
+                    if let Some(bake_params) = atmosphere_bake_params {
+                        bindings.bind_buffer(1, 1, bake_params);
+                    } else {
+                        bindings.bind_tracked_buffer(1, 1, fallback_atmosphere_bake_params);
+                    }
                 },
             );
             (node, out)
@@ -1415,6 +1544,8 @@ impl OceanRenderer {
                 render_height,
                 "Ocean_Standalone_Scaled_Surface",
                 "Ocean_Surface_HDR_Scaled",
+                None,
+                None,
             );
             let out_desc = Self::output_desc(width, height);
             let resolve_pass = &self.resolve_pass;
@@ -1442,6 +1573,8 @@ impl OceanRenderer {
                 height,
                 "Ocean_Standalone",
                 "Ocean_Surface_HDR",
+                None,
+                None,
             )
         };
 
@@ -1458,6 +1591,8 @@ impl OceanRenderer {
         width: u32,
         height: u32,
     ) -> GraphBlackboard {
+        let atmosphere_transmittance = blackboard.atmosphere_transmittance;
+        let atmosphere_bake_params = blackboard.atmosphere_bake_params;
         let (Some(scene_color), Some(scene_depth)) =
             (blackboard.scene_color, blackboard.scene_depth)
         else {
@@ -1472,6 +1607,8 @@ impl OceanRenderer {
                 render_height,
                 "Ocean_Composite_Scaled_Surface",
                 "Ocean_Composite_HDR_Scaled",
+                atmosphere_transmittance,
+                atmosphere_bake_params,
             );
             let out_desc = Self::output_desc(width, height);
             let pass = &self.composite_resolve_pass;
@@ -1502,6 +1639,9 @@ impl OceanRenderer {
             let pass = self.composite_passes.get(self.quality);
             let uniforms = &self.uniforms;
             let fallback_cube_view = &self.fallback_cube_view;
+            let fallback_atmosphere_transmittance_view =
+                &self.fallback_atmosphere_transmittance_view;
+            let fallback_atmosphere_bake_params = &self.fallback_atmosphere_bake_params;
             let environment = self.environment.as_ref();
             let environment_cube_view = environment
                 .map(|environment| &environment.base_cube_view)
@@ -1513,6 +1653,12 @@ impl OceanRenderer {
             graph.add_pass("Ocean_Composite", |builder| {
                 builder.read_texture(scene_color);
                 builder.read_texture(scene_depth);
+                if let Some(transmittance) = atmosphere_transmittance {
+                    builder.read_texture(transmittance);
+                }
+                if let Some(bake_params) = atmosphere_bake_params {
+                    builder.read_buffer(bake_params);
+                }
                 let out = builder.create_texture("Ocean_Composite_HDR", out_desc);
                 let node = pass.build_node(
                     builder,
@@ -1528,6 +1674,20 @@ impl OceanRenderer {
                         bindings.bind_tracked_texture_view(0, 4, environment_cube_view);
                         bindings.bind_common_sampler(0, 5, CommonSampler::LinearClamp);
                         bindings.bind_tracked_texture_view(0, 6, environment_pmrem_view);
+                        if let Some(transmittance) = atmosphere_transmittance {
+                            bindings.bind_texture(1, 0, transmittance);
+                        } else {
+                            bindings.bind_tracked_texture_view(
+                                1,
+                                0,
+                                fallback_atmosphere_transmittance_view,
+                            );
+                        }
+                        if let Some(bake_params) = atmosphere_bake_params {
+                            bindings.bind_buffer(1, 1, bake_params);
+                        } else {
+                            bindings.bind_tracked_buffer(1, 1, fallback_atmosphere_bake_params);
+                        }
                     },
                 );
                 (node, out)
