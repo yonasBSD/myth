@@ -2156,6 +2156,7 @@ dependencies = [
  "flume",
  "glam",
  "half",
+ "image",
  "log",
  "minijinja",
  "myth_animation",

@@ -6,12 +6,18 @@
 
 @group(1) @binding(0) var t_depth: texture_depth_2d;
 @group(1) @binding(1) var t_normal: texture_2d<f32>;
-@group(1) @binding(2) var t_noise: texture_2d<f32>;
+$$ if HIGH_END_NOISE is defined
+@group(1) @binding(2) var t_blue_noise: texture_2d_array<f32>;
+$$ else
+@group(1) @binding(2) var t_blue_noise: texture_2d<f32>;
+$$ endif
 @group(1) @binding(3) var s_linear: sampler;
-@group(1) @binding(4) var s_noise: sampler;
+@group(1) @binding(4) var s_blue_noise: sampler;
 @group(1) @binding(5) var s_point: sampler;
 
 @group(2) @binding(0) var<uniform> u_ssao: SsaoUniforms;
+
+{$ include 'entry/utility/blue_noise' $}
 
 fn reconstruct_view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     let ndc_x = uv.x * 2.0 - 1.0;
@@ -58,8 +64,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let safe_ndotv = max(dot(view_normal, view_dir), 0.05);
 
+    let pixel_coord = vec2<u32>(uv * u_ssao.noise_scale);
     let random_vec = normalize(
-        textureSampleLevel(t_noise, s_noise, uv * u_ssao.noise_scale, 0.0).xyz * 2.0 - 1.0
+        get_blue_noise(pixel_coord, u_ssao.frame_index).xyz * 2.0 - 1.0
     );
     
     var tangent_unnormalized = random_vec - view_normal * dot(random_vec, view_normal);

@@ -23,6 +23,7 @@
 //! | `white_r8`       | `[255]` R8Unorm    | SSAO fallback (fully lit)        |
 //! | `black_hdr`      | Rgba16Float zero   | Transmission HDR fallback        |
 //! | `depth_d2array`  | Depth32Float 1×1   | Shadow map D2Array fallback      |
+//! | `blue_noise`     | 64×64 RGBA8        | Stochastic sampling source       |
 //!
 //! # Screen Bind Group (Group 3)
 //!
@@ -36,11 +37,27 @@ use myth_resources::uniforms::{
     ClusterRecord, ClusteredLightingParams, GpuLightStorage, LightBufferMetadata,
 };
 
+const BLUE_NOISE_SIZE: u32 = 64;
+
+#[cfg(feature = "advanced_noise")]
+const BLUE_NOISE_LAYER_COUNT: u32 = 64;
+
+#[cfg(not(feature = "advanced_noise"))]
+const BLUE_NOISE_LAYER_COUNT: u32 = 1;
+
+#[cfg(feature = "advanced_noise")]
+const BLUE_NOISE_BYTES: &[u8] =
+    include_bytes!("../../../assets/internal/blue_noise_array_64_rgba.png");
+
+#[cfg(not(feature = "advanced_noise"))]
+const BLUE_NOISE_BYTES: &[u8] =
+    include_bytes!("../../../assets/internal/blue_noise_single_64_rgba.png");
+
 /// Global system fallback texture pool and Group 3 bind-group infrastructure.
 ///
 /// Created once during renderer initialisation and shared (by reference)
-/// with all render-graph contexts.  All textures are 1×1 (or 1×1×6 for
-/// cubes) and never mutated after creation.
+/// with all render-graph contexts. Fallback textures are 1×1 (or 1×1×6 for
+/// cubes); the only larger resident assets are the feature-gated packed blue-noise PNGs.
 pub struct SystemTextures {
     // ─── Data-Semantic Fallback Textures ───────────────────────────
     /// 1×1 RGBA8 `[255,255,255,255]` — multiplicative identity.
@@ -63,6 +80,9 @@ pub struct SystemTextures {
 
     /// 1×1 Rgba16Float zero — HDR transmission fallback.
     pub black_hdr: Tracked<wgpu::TextureView>,
+
+    /// Feature-gated system blue-noise texture used by stochastic passes.
+    pub blue_noise: Tracked<wgpu::TextureView>,
 
     /// 1×1 Depth32Float D2Array — shadow map fallback.
     pub depth_d2array: Tracked<wgpu::TextureView>,
@@ -101,13 +121,17 @@ pub struct SystemTextures {
 
     /// `LessEqual` comparison sampler for PCF shadow sampling.
     pub shadow_compare_sampler: Tracked<wgpu::Sampler>,
+
+    /// Repeat + nearest sampler for blue-noise lookups.
+    pub blue_noise_sampler: Tracked<wgpu::Sampler>,
 }
 
 impl SystemTextures {
     /// Creates all system textures and Group 3 infrastructure.
     ///
-    /// This is called once during renderer initialisation.  The total GPU
-    /// memory footprint is negligible (a handful of 1×1 textures).
+    /// This is called once during renderer initialisation. The GPU footprint is
+    /// dominated by the optional blue-noise texture set; all fallback textures
+    /// remain tiny.
     #[must_use]
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         // ── Data-Semantic Textures ─────────────────────────────────────
@@ -119,6 +143,7 @@ impl SystemTextures {
         let black_cube = create_1x1_cube(device, queue, [0, 0, 0, 255], "sys_black_cube");
         let white_r8 = create_1x1_r8(device, queue, 255, "sys_white_r8");
         let black_hdr = create_1x1_hdr(device, "sys_black_hdr");
+        let blue_noise = create_blue_noise_texture(device, queue);
         let depth_d2array = create_1x1_depth_d2array(device, "sys_depth_d2array");
         let depth_cube_array = create_1x1_depth_cube_array(device, "sys_depth_cube_array");
         let clustered_params = create_default_clustered_params(device, queue);
@@ -157,6 +182,17 @@ impl SystemTextures {
                 ..Default::default()
             }));
 
+        let blue_noise_sampler = Tracked::new(device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("System Blue Noise Sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        }));
+
         Self {
             white_2d,
             black_2d,
@@ -165,6 +201,7 @@ impl SystemTextures {
             black_cube,
             white_r8,
             black_hdr,
+            blue_noise,
             depth_d2array,
             depth_cube_array,
             clustered_params,
@@ -177,6 +214,7 @@ impl SystemTextures {
             screen_layout_clustered,
             screen_sampler,
             shadow_compare_sampler,
+            blue_noise_sampler,
         }
     }
 }
@@ -189,7 +227,7 @@ fn create_screen_bind_group_layout(
     device: &wgpu::Device,
     clustered: bool,
 ) -> Tracked<wgpu::BindGroupLayout> {
-    let mut entries = Vec::with_capacity(if clustered { 13 } else { 10 });
+    let mut entries = Vec::with_capacity(if clustered { 15 } else { 12 });
 
     entries.push(wgpu::BindGroupLayoutEntry {
         binding: 0,
@@ -317,6 +355,22 @@ fn create_screen_bind_group_layout(
         },
         count: None,
     });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 13,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: blue_noise_view_dimension(),
+            multisampled: false,
+        },
+        count: None,
+    });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 14,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    });
 
     Tracked::new(
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -328,6 +382,80 @@ fn create_screen_bind_group_layout(
             entries: &entries,
         }),
     )
+}
+
+fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
+    if cfg!(feature = "advanced_noise") {
+        wgpu::TextureViewDimension::D2Array
+    } else {
+        wgpu::TextureViewDimension::D2
+    }
+}
+
+fn create_blue_noise_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Tracked<wgpu::TextureView> {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sys_blue_noise"),
+        size: wgpu::Extent3d {
+            width: BLUE_NOISE_SIZE,
+            height: BLUE_NOISE_SIZE,
+            depth_or_array_layers: BLUE_NOISE_LAYER_COUNT,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    let rgba = decode_blue_noise_image(BLUE_NOISE_BYTES);
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(BLUE_NOISE_SIZE * 4),
+            rows_per_image: Some(BLUE_NOISE_SIZE),
+        },
+        wgpu::Extent3d {
+            width: BLUE_NOISE_SIZE,
+            height: BLUE_NOISE_SIZE,
+            depth_or_array_layers: BLUE_NOISE_LAYER_COUNT,
+        },
+    );
+
+    Tracked::new(texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("sys_blue_noise_view"),
+        dimension: Some(blue_noise_view_dimension()),
+        ..Default::default()
+    }))
+}
+
+fn decode_blue_noise_image(png_bytes: &[u8]) -> Vec<u8> {
+    let rgba = image::load_from_memory(png_bytes)
+        .unwrap_or_else(|error| panic!("failed to decode packed blue-noise image: {error}"))
+        .to_rgba8();
+
+    assert_eq!(
+        rgba.width(),
+        BLUE_NOISE_SIZE,
+        "packed blue-noise image has invalid width"
+    );
+    assert_eq!(
+        rgba.height(),
+        BLUE_NOISE_SIZE * BLUE_NOISE_LAYER_COUNT,
+        "packed blue-noise image has invalid height"
+    );
+
+    rgba.into_raw()
 }
 
 fn create_1x1_rgba8(

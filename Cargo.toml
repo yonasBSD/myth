@@ -49,7 +49,7 @@ myth_resources = { path = "crates/myth_resources", version = "0.3.0" }
 myth_animation = { path = "crates/myth_animation", version = "0.3.0" }
 myth_scene     = { path = "crates/myth_scene", version = "0.3.0" }
 myth_assets    = { path = "crates/myth_assets", version = "0.3.0" }
-myth_render    = { path = "crates/myth_render", version = "0.3.0" }
+myth_render    = { path = "crates/myth_render", version = "0.3.0", default-features = false }
 myth_app       = { path = "crates/myth_app", version = "0.3.0" }
 
 # Graphics and Math
@@ -238,7 +238,7 @@ name = "gaussian_splatting_mixed"
 required-features = ["3dgs", "gaussian-npz"]
 
 [features]
-default = ["winit", "gltf", "http"]
+default = ["winit", "gltf", "http", "advanced_noise"]
 winit = ["myth_app/winit"]
 gltf = ["myth_assets/gltf"]
 3dgs = ["myth_resources/3dgs", "myth_scene/3dgs", "myth_assets/3dgs", "myth_render/3dgs"]
@@ -247,6 +247,7 @@ rdg_inspector = ["myth_render/rdg_inspector"]
 debug_view = ["myth_render/debug_view", "myth_scene/debug_view"]
 gltf-meshopt = ["gltf", "myth_assets/gltf-meshopt"]
 http = ["myth_assets/http"]
+advanced_noise = ["myth_render/advanced_noise", "myth_app/advanced_noise"]
 
 [lints]
 workspace = true

@@ -14,6 +14,14 @@ const SSGI_MAX_STEPS: u32 = {{ ssgi_max_steps }}u;
 @group(1) @binding(5) var s_linear: sampler;
 @group(1) @binding(6) var s_point: sampler;
 @group(1) @binding(7) var<uniform> u_ssgi: SsgiUniforms;
+$$ if HIGH_END_NOISE is defined
+@group(1) @binding(8) var t_blue_noise: texture_2d_array<f32>;
+$$ else
+@group(1) @binding(8) var t_blue_noise: texture_2d<f32>;
+$$ endif
+@group(1) @binding(9) var s_blue_noise: sampler;
+
+{$ include 'entry/utility/blue_noise' $}
 
 struct ProjectedSample {
     uv: vec2<f32>,
@@ -23,18 +31,6 @@ struct ProjectedSample {
 
 fn saturate(v: f32) -> f32 {
     return clamp(v, 0.0, 1.0);
-}
-
-fn hash12(p: vec2<f32>) -> f32 {
-    let h = dot(p, vec2<f32>(127.1, 311.7));
-    return fract(sin(h) * 43758.5453123);
-}
-
-fn hash22(p: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(
-        hash12(p + vec2<f32>(17.0, 59.4)),
-        hash12(p + vec2<f32>(91.7, 13.3))
-    );
 }
 
 fn unpack_view_normal(packed: vec4<f32>) -> vec3<f32> {
@@ -150,12 +146,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let view_pos = reconstruct_view_position(full_uv, depth);
     let view_normal = unpack_view_normal(normal_packed);
-    // let frame_jitter = f32(u_ssgi.frame_params.x & 1023u);
-    // let random = hash22(vec2<f32>(half_pixel) + vec2<f32>(frame_jitter, 31.0));
-    let random_base = hash22(vec2<f32>(half_pixel));
-    let frame_index = f32(u_ssgi.frame_params.x % 1024u);
-    let golden_offset = vec2<f32>(0.61803398875, 0.75487766624) * frame_index;
-    let random = fract(random_base + golden_offset);
+    let noise_vec4 = get_blue_noise(half_pixel, u_ssgi.frame_params.x);
+    let random = noise_vec4.rg;
 
     let ray_dir = normalize(make_tangent_basis(view_normal) * cosine_hemisphere(random));
 

@@ -134,8 +134,12 @@ impl ShaderGenerator {
     /// Builds a [`ShaderContext`] from the compilation options.
     fn build_context(options: &ShaderCompilationOptions) -> ShaderContext<'_> {
         let allocator = LocationAllocator::new();
+        let mut defines = options.to_template_map();
+        if cfg!(feature = "advanced_noise") {
+            defines.insert("HIGH_END_NOISE".to_string(), "1".to_string());
+        }
         ShaderContext {
-            defines: options.to_template_map(),
+            defines,
             code_blocks: &options.code_blocks,
             loc: Value::from_object(allocator),
         }

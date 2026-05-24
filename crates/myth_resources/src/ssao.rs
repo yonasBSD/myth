@@ -21,8 +21,8 @@
 //! The SSAO implementation uses:
 //! 1. A hemisphere sample kernel (up to 64 samples) with importance-weighted
 //!    distribution concentrated near the origin
-//! 2. A 4×4 tiled rotation noise texture that randomizes the kernel orientation
-//!    per-pixel, breaking banding artifacts while keeping sample count low
+//! 2. A system blue-noise texture that randomizes the kernel orientation
+//!    per-pixel while preserving high-frequency spatial distribution
 //! 3. Range-checked occlusion with smooth distance falloff
 //! 4. A cross-bilateral blur pass (depth-aware + normal-aware) that smooths
 //!    the noisy raw AO while preserving geometric edges
@@ -45,7 +45,9 @@ pub struct SsaoUniforms {
     pub bias: f32,
     pub intensity: f32,
     pub sample_count: u32,
-    pub(crate) noise_scale: Vec2,
+    pub noise_scale: Vec2,
+    pub frame_index: u32,
+    pub(crate) _padding: u32,
 }
 
 // ============================================================================
@@ -100,7 +102,9 @@ impl Default for SsaoSettings {
             bias: 0.025,
             intensity: 1.0,
             sample_count: 32,
-            noise_scale: glam::Vec2::new(1.0, 1.0), // Will be updated at runtime from screen size
+            noise_scale: glam::Vec2::new(1.0, 1.0),
+            frame_index: 0,
+            _padding: 0,
             ..Default::default()
         };
 
@@ -202,12 +206,13 @@ impl SsaoSettings {
         self.uniforms.read().sample_count
     }
 
-    /// Updates the noise tiling scale based on screen resolution.
+    /// Updates the pixel-space scale used to recover absolute blue-noise coordinates.
     ///
-    /// Called by the render pass during `prepare()` when the screen
-    /// size changes. `noise_scale = (width / 4.0, height / 4.0)`.
+    /// Called by the render pass during extract/prepare using the current SSAO
+    /// render-target size. The shader converts fullscreen UVs back into pixel
+    /// coordinates before indexing the system blue-noise texture.
     pub fn update_noise_scale(&mut self, width: u32, height: u32) {
-        let scale = glam::Vec2::new(width as f32 / 4.0, height as f32 / 4.0);
+        let scale = glam::Vec2::new(width as f32, height as f32);
         let current = self.uniforms.read().noise_scale;
         if (current - scale).length_squared() > f32::EPSILON {
             self.uniforms.write().noise_scale = scale;
@@ -254,35 +259,6 @@ pub fn generate_ssao_kernel(samples: u32) -> Vec<Vec4> {
         kernel.push(Vec4::new(sample.x, sample.y, sample.z, 0.0));
     }
     kernel
-}
-
-/// Generates a 4×4 rotation noise texture (16 RGBA8 pixels).
-///
-/// Each pixel encodes a random 2D rotation vector in XY (Z = 0).
-/// Used to rotate the sample kernel per-pixel, breaking regular
-/// banding patterns while keeping the sample count low.
-///
-/// The noise texture should use `Repeat` addressing and `Nearest` filtering.
-#[must_use]
-pub fn generate_ssao_noise() -> Vec<[u8; 4]> {
-    let mut rng = StdRng::seed_from_u64(12345);
-    let mut noise = Vec::with_capacity(16);
-    for _ in 0..16 {
-        let xy = Vec3::new(
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
-            0.0,
-        )
-        .normalize();
-
-        noise.push([
-            ((xy.x * 0.5 + 0.5) * 255.0) as u8,
-            ((xy.y * 0.5 + 0.5) * 255.0) as u8,
-            127,
-            255,
-        ]);
-    }
-    noise
 }
 
 fn lerp(a: f32, b: f32, f: f32) -> f32 {

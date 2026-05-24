@@ -45,6 +45,7 @@ getrandom = { workspace = true }
 [features]
 default = []
 winit = ["dep:winit"]
+advanced_noise = ["myth_render/advanced_noise"]
 
 [lints]
 workspace = true

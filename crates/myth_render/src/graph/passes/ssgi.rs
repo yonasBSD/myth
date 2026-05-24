@@ -27,6 +27,14 @@ const SSGI_WORKGROUP_SIZE: u32 = 8;
 const HISTORY_FLAG_INDIRECT_VALID: u32 = 1 << 0;
 const HISTORY_FLAG_SOURCE_VALID: u32 = 1 << 1;
 
+fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
+    if cfg!(feature = "advanced_noise") {
+        wgpu::TextureViewDimension::D2Array
+    } else {
+        wgpu::TextureViewDimension::D2
+    }
+}
+
 #[must_use = "SSA Graph: consume the merged color output from SSGI"]
 pub struct SsgiOutputs {
     pub merged_color: TextureNodeId,
@@ -51,6 +59,8 @@ pub struct SsgiFeature {
 
     uniforms_buffer: Option<Tracked<wgpu::Buffer>>,
     black_cube_view: Option<Tracked<wgpu::TextureView>>,
+    blue_noise_view: Option<Tracked<wgpu::TextureView>>,
+    blue_noise_sampler: Option<Tracked<wgpu::Sampler>>,
 
     indirect_history_view: Option<Tracked<wgpu::TextureView>>,
     history_meta_view: Option<Tracked<wgpu::TextureView>>,
@@ -90,6 +100,8 @@ impl SsgiFeature {
 
             uniforms_buffer: None,
             black_cube_view: None,
+            blue_noise_view: None,
+            blue_noise_sampler: None,
 
             indirect_history_view: None,
             history_meta_view: None,
@@ -252,6 +264,22 @@ impl SsgiFeature {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: blue_noise_view_dimension(),
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -787,6 +815,9 @@ impl SsgiFeature {
         ctx.resource_manager.ensure_buffer(ssgi_uniforms);
 
         self.black_cube_view = Some(ctx.resource_manager.system_textures.black_cube.clone());
+        self.blue_noise_view = Some(ctx.resource_manager.system_textures.blue_noise.clone());
+        self.blue_noise_sampler =
+            Some(ctx.resource_manager.system_textures.blue_noise_sampler.clone());
         self.uniforms_buffer = ssgi_uniforms.gpu_handle().and_then(|handle| {
             ctx.resource_manager
                 .gpu_buffers
@@ -844,6 +875,8 @@ impl SsgiFeature {
         let history_meta_view = self.history_meta_view.as_ref().unwrap();
         let source_history_view = self.source_history_view.as_ref().unwrap();
         let black_cube_view = self.black_cube_view.as_ref().unwrap();
+        let blue_noise_view = self.blue_noise_view.as_ref().unwrap();
+        let blue_noise_sampler = self.blue_noise_sampler.as_ref().unwrap();
 
         let half_w = (ctx.frame_config.width / 2).max(1);
         let half_h = (ctx.frame_config.height / 2).max(1);
@@ -971,6 +1004,8 @@ impl SsgiFeature {
                     source_history,
                     pmrem_texture: pmrem_input,
                     uniforms,
+                    blue_noise_view,
+                    blue_noise_sampler,
                     output_tex: out,
                     pipeline: raw_pipeline,
                     layout: raw_layout,
@@ -1285,6 +1320,8 @@ struct SsgiRawNode<'a> {
     source_history: TextureNodeId,
     pmrem_texture: TextureNodeId,
     uniforms: BufferNodeId,
+    blue_noise_view: &'a Tracked<wgpu::TextureView>,
+    blue_noise_sampler: &'a Tracked<wgpu::Sampler>,
     output_tex: TextureNodeId,
     pipeline: &'a wgpu::RenderPipeline,
     layout: &'a Tracked<wgpu::BindGroupLayout>,
@@ -1302,7 +1339,9 @@ impl<'a> PassNode<'a> for SsgiRawNode<'a> {
             .bind_texture(4, self.pmrem_texture)
             .bind_common_sampler(5, CommonSampler::LinearClamp)
             .bind_common_sampler(6, CommonSampler::NearestClamp)
-            .bind_buffer(7, self.uniforms);
+            .bind_buffer(7, self.uniforms)
+            .bind_tracked_texture_view(8, self.blue_noise_view)
+            .bind_tracked_sampler(9, self.blue_noise_sampler);
 
         self.transient_bg = Some(builder.build());
     }

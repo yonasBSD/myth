@@ -850,7 +850,9 @@ pub fn build_screen_bind_group<'a>(
         .with_resource(light_metadata_id)
         .with_resource(light_storage_id)
         .with_resource(atmosphere_transmittance_view.id())
-        .with_resource(atmosphere_bake_params_id);
+        .with_resource(atmosphere_bake_params_id)
+        .with_resource(sys.blue_noise.id())
+        .with_resource(sys.blue_noise_sampler.id());
 
     if !use_clustered_layout {
         return cache.get_or_create_bg(base_key, || {
@@ -897,6 +899,14 @@ pub fn build_screen_bind_group<'a>(
                     wgpu::BindGroupEntry {
                         binding: 12,
                         resource: atmosphere_bake_params_binding,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::TextureView(&sys.blue_noise),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::Sampler(&sys.blue_noise_sampler),
                     },
                 ],
             })
@@ -995,6 +1005,14 @@ pub fn build_screen_bind_group<'a>(
                 wgpu::BindGroupEntry {
                     binding: 12,
                     resource: atmosphere_bake_params_binding,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::TextureView(&sys.blue_noise),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: wgpu::BindingResource::Sampler(&sys.blue_noise_sampler),
                 },
             ],
         })

@@ -1,7 +1,7 @@
 //! SSAO Feature + Ephemeral PassNodes (Flattened)
 //!
 //! - **`SsaoFeature`** (long-lived): owns pipelines, bind group layouts,
-//!   noise texture.  `extract_and_prepare()` compiles pipelines and uploads
+//!   and system blue-noise handles. `extract_and_prepare()` compiles pipelines and uploads
 //!   persistent GPU data.
 //! - **`SsaoRawNode`** / **`SsaoBlurNode`** (ephemeral per-frame):
 //!   two independent RDG passes created by `SsaoFeature::add_to_graph()`.
@@ -37,7 +37,7 @@ use crate::pipeline::{
     ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::buffer::CpuBuffer;
-use myth_resources::ssao::{SsaoUniforms, generate_ssao_noise};
+use myth_resources::ssao::SsaoUniforms;
 use myth_resources::uniforms::WgslStruct;
 
 /// The SSAO output texture format: single-channel unsigned normalized.
@@ -48,7 +48,7 @@ const SSAO_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Long-lived SSAO feature — owns persistent GPU resources (pipelines,
-/// bind group layouts, noise texture).
+/// bind group layouts, system blue-noise handles).
 ///
 /// Produces an ephemeral [`SsaoPassNode`] each frame via [`Self::add_to_graph`].
 #[derive(Default)]
@@ -63,9 +63,11 @@ pub struct SsaoFeature {
     blur_layout: Option<Tracked<wgpu::BindGroupLayout>>,
 
     // ─── Persistent Resources ──────────────────────────────────────
-    noise_texture_view: Option<Tracked<wgpu::TextureView>>,
+    blue_noise_view: Option<Tracked<wgpu::TextureView>>,
+    blue_noise_sampler: Option<Tracked<wgpu::Sampler>>,
 
     // ─── Pre-Built Static BindGroup (Group 2: uniforms) ────────────
+
     /// Feature-owned uniform bind group — eliminates GPU buffer leak to PassNode.
     uniforms_static_bg: Option<wgpu::BindGroup>,
     /// Tracked buffer identity for staleness detection.
@@ -83,7 +85,8 @@ impl SsaoFeature {
             raw_uniforms_layout: None,
             blur_layout: None,
 
-            noise_texture_view: None,
+            blue_noise_view: None,
+            blue_noise_sampler: None,
 
             uniforms_static_bg: None,
             last_uniforms_buffer_id: 0,
@@ -99,7 +102,7 @@ impl SsaoFeature {
             return;
         }
 
-        // ─── Raw SSAO Layout (Group 1): depth, normal, noise + samplers ───
+        // ─── Raw SSAO Layout (Group 1): depth, normal, blue noise + samplers ───
         let raw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SSAO Raw Layout"),
             entries: &[
@@ -127,8 +130,8 @@ impl SsaoFeature {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: blue_noise_view_dimension(),
                         multisampled: false,
                     },
                     count: None,
@@ -142,7 +145,7 @@ impl SsaoFeature {
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
@@ -222,52 +225,6 @@ impl SsaoFeature {
         self.raw_layout = Some(Tracked::new(raw_layout));
         self.raw_uniforms_layout = Some(Tracked::new(raw_uniforms_layout));
         self.blur_layout = Some(Tracked::new(blur_layout));
-    }
-
-    fn ensure_noise_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        if self.noise_texture_view.is_some() {
-            return;
-        }
-
-        let noise_data = generate_ssao_noise();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("SSAO Noise 4x4"),
-            size: wgpu::Extent3d {
-                width: 4,
-                height: 4,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        let flat: Vec<u8> = noise_data.iter().flat_map(|p| p.iter().copied()).collect();
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &flat,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * 4),
-                rows_per_image: Some(4),
-            },
-            wgpu::Extent3d {
-                width: 4,
-                height: 4,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.noise_texture_view = Some(Tracked::new(view));
     }
 
     fn ensure_pipelines(&mut self, ctx: &mut ExtractContext) {
@@ -363,19 +320,30 @@ impl SsaoFeature {
         }
     }
 
-    /// Pre-RDG resource preparation: create layouts, noise texture, compile pipelines,
+    /// Pre-RDG resource preparation: create layouts, sync blue-noise state, compile pipelines,
     /// build the static uniforms bind group (Group 2).
     pub fn extract_and_prepare(
         &mut self,
         ctx: &mut ExtractContext,
         ssao_uniforms: &CpuBuffer<SsaoUniforms>,
     ) {
-        // Persistent GPU resources: layouts, noise texture, pipelines.
+        // Persistent GPU resources: layouts and pipelines.
         self.ensure_layouts(ctx.device);
-        self.ensure_noise_texture(ctx.device, ctx.queue);
         self.ensure_pipelines(ctx);
 
+        {
+            let viewport = ctx.render_state.uniforms().read().viewport;
+            let mut uniforms = ssao_uniforms.write();
+            uniforms.noise_scale = glam::Vec2::new(
+                (viewport.x * 0.5).max(1.0),
+                (viewport.y * 0.5).max(1.0),
+            );
+            uniforms.frame_index = ctx.resource_manager.frame_index() as u32;
+        }
+
         ctx.resource_manager.ensure_buffer(ssao_uniforms);
+        self.blue_noise_view = Some(ctx.resource_manager.system_textures.blue_noise.clone());
+        self.blue_noise_sampler = Some(ctx.resource_manager.system_textures.blue_noise_sampler.clone());
 
         // Build Group 2 static BG (uniforms only) — rebuild on buffer identity change.
         if let Some(handle) = ssao_uniforms.gpu_handle()
@@ -424,7 +392,8 @@ impl SsaoFeature {
             .get_render_pipeline(self.blur_pipeline.expect("SsaoFeature not prepared"));
         let raw_layout = self.raw_layout.as_ref().unwrap();
         let blur_layout = self.blur_layout.as_ref().unwrap();
-        let noise_texture_view = self.noise_texture_view.as_ref().unwrap();
+        let blue_noise_view = self.blue_noise_view.as_ref().unwrap();
+        let blue_noise_sampler = self.blue_noise_sampler.as_ref().unwrap();
         let uniforms_static_bg = self
             .uniforms_static_bg
             .as_ref()
@@ -450,7 +419,8 @@ impl SsaoFeature {
                     uniforms_static_bg,
                     pipeline: raw_pipeline,
                     raw_layout,
-                    noise_texture_view,
+                    blue_noise_view,
+                    blue_noise_sampler,
                     transient_bg: None,
                 };
                 (node, out)
@@ -492,7 +462,7 @@ impl SsaoFeature {
 
 /// Ephemeral per-frame node for the raw SSAO hemisphere sampling pass.
 ///
-/// Binds depth, normals, noise texture, and uniforms to produce a noisy
+/// Binds depth, normals, blue noise, and uniforms to produce a noisy
 /// single-channel AO texture at half resolution.
 struct SsaoRawNode<'a> {
     depth_tex: TextureNodeId,
@@ -502,7 +472,8 @@ struct SsaoRawNode<'a> {
     uniforms_static_bg: &'a wgpu::BindGroup,
     pipeline: &'a wgpu::RenderPipeline,
     raw_layout: &'a Tracked<wgpu::BindGroupLayout>,
-    noise_texture_view: &'a Tracked<wgpu::TextureView>,
+    blue_noise_view: &'a Tracked<wgpu::TextureView>,
+    blue_noise_sampler: &'a Tracked<wgpu::Sampler>,
 
     transient_bg: Option<&'a wgpu::BindGroup>,
 }
@@ -513,9 +484,9 @@ impl<'a> PassNode<'a> for SsaoRawNode<'a> {
             crate::myth_bind_group!(ctx, self.raw_layout, Some("SSAO Raw BG (G1)"), [
                 0 => self.depth_tex,
                 1 => self.normal_tex,
-                2 => self.noise_texture_view,
+                2 => self.blue_noise_view,
                 3 => CommonSampler::LinearClamp,
-                4 => CommonSampler::NearestRepeat,
+                4 => self.blue_noise_sampler,
                 5 => CommonSampler::NearestClamp,
             ]),
         );
@@ -541,6 +512,14 @@ impl<'a> PassNode<'a> for SsaoRawNode<'a> {
         pass.set_bind_group(1, raw_bg, &[]);
         pass.set_bind_group(2, self.uniforms_static_bg, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
+    if cfg!(feature = "advanced_noise") {
+        wgpu::TextureViewDimension::D2Array
+    } else {
+        wgpu::TextureViewDimension::D2
     }
 }
 
