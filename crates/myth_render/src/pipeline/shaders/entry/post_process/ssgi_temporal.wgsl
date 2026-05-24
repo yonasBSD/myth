@@ -63,7 +63,7 @@ fn fs_main(in: VertexOutput) -> TemporalOutput {
         let history_uv = in.uv - velocity;
 
         if (history_uv.x >= 0.0 && history_uv.x <= 1.0 && history_uv.y >= 0.0 && history_uv.y <= 1.0) {
-            let hist_meta = textureSampleLevel(t_history_meta, s_linear, history_uv, 0.0);
+            let hist_meta = textureSampleLevel(t_history_meta, s_point, history_uv, 0.0);
             let hist_normal = unpack_view_normal(vec4<f32>(hist_meta.rgb, 1.0));
             let hist_linear = hist_meta.a;
 

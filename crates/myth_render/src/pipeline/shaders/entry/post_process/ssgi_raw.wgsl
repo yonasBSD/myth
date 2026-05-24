@@ -46,14 +46,30 @@ fn depth_to_linear(z: f32) -> f32 {
     return u_render_state.camera_near / max(z, 0.0001);
 }
 
+// fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
+//     if (u_ssgi.frame_params.z == 0u) {
+//         return (vec2<f32>(half_pixel) + vec2<f32>(0.5, 0.5)) * u_ssgi.half_resolution.zw;
+//     }
+
+//     let phase = (half_pixel.x + half_pixel.y + u_ssgi.frame_params.x) & 1u;
+//     let base = vec2<f32>(half_pixel * 2u);
+//     let offset = select(vec2<f32>(0.5, 0.5), vec2<f32>(1.5, 1.5), phase == 1u);
+//     return (base + offset) * u_ssgi.full_resolution.zw;
+// }
+
 fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
     if (u_ssgi.frame_params.z == 0u) {
         return (vec2<f32>(half_pixel) + vec2<f32>(0.5, 0.5)) * u_ssgi.half_resolution.zw;
     }
 
-    let phase = (half_pixel.x + half_pixel.y + u_ssgi.frame_params.x) & 1u;
+    let frame = u_ssgi.frame_params.x;
     let base = vec2<f32>(half_pixel * 2u);
-    let offset = select(vec2<f32>(0.5, 0.5), vec2<f32>(1.5, 1.5), phase == 1u);
+
+    // generate a 4-frame 2x2 traversal pattern (similar to Quincunx sampling)
+    let offset_x = f32((frame & 1u) ^ ((frame & 2u) >> 1u));
+    let offset_y = f32((frame & 2u) >> 1u);
+    
+    let offset = vec2<f32>(offset_x + 0.5, offset_y + 0.5);
     return (base + offset) * u_ssgi.full_resolution.zw;
 }
 
@@ -134,8 +150,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let view_pos = reconstruct_view_position(full_uv, depth);
     let view_normal = unpack_view_normal(normal_packed);
-    let frame_jitter = f32(u_ssgi.frame_params.x & 1023u);
-    let random = hash22(vec2<f32>(half_pixel) + vec2<f32>(frame_jitter, 31.0));
+    // let frame_jitter = f32(u_ssgi.frame_params.x & 1023u);
+    // let random = hash22(vec2<f32>(half_pixel) + vec2<f32>(frame_jitter, 31.0));
+    let random_base = hash22(vec2<f32>(half_pixel));
+    let frame_index = f32(u_ssgi.frame_params.x % 1024u);
+    let golden_offset = vec2<f32>(0.61803398875, 0.75487766624) * frame_index;
+    let random = fract(random_base + golden_offset);
+
     let ray_dir = normalize(make_tangent_basis(view_normal) * cosine_hemisphere(random));
 
     let max_levels = textureNumLevels(t_hiz);
