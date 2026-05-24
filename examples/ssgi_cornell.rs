@@ -40,17 +40,11 @@ struct SsgiCornellDemo {
 impl AppHandler for SsgiCornellDemo {
     fn init(engine: &mut Engine, _window: &dyn Window) -> Self {
         let scene = engine.scene_manager.create_active();
-        let env_texture = engine.assets.load_cube_texture(
-            [
-                format!("{}envs/Park2/posx.jpg", ASSET_PATH),
-                format!("{}envs/Park2/negx.jpg", ASSET_PATH),
-                format!("{}envs/Park2/posy.jpg", ASSET_PATH),
-                format!("{}envs/Park2/negy.jpg", ASSET_PATH),
-                format!("{}envs/Park2/posz.jpg", ASSET_PATH),
-                format!("{}envs/Park2/negz.jpg", ASSET_PATH),
-            ],
+
+        let env_texture = engine.assets.load_texture(
+            format!("{}envs/royal_esplanade_2k.hdr.jpg", ASSET_PATH),
             ColorSpace::Srgb,
-            true,
+            false,
         );
         scene.environment.set_env_map(Some(env_texture));
         scene.environment.set_intensity(0.08);
@@ -59,13 +53,9 @@ impl AppHandler for SsgiCornellDemo {
             Vec4::new(0.01, 0.01, 0.015, 1.0),
             Vec4::new(0.0, 0.0, 0.0, 1.0),
         ));
-        scene.tone_mapping.set_exposure(0.90);
-        scene.bloom.set_enabled(true);
-        scene.bloom.set_strength(0.015);
-        scene.bloom.set_radius(0.004);
 
         scene.ssgi.set_enabled(true);
-        scene.ssgi.set_quality(SsgiQuality::High);
+        scene.ssgi.set_quality(SsgiQuality::Ultra);
 
         let white = engine.assets.materials.add(
             PhysicalMaterial::new(Vec4::new(0.74, 0.73, 0.71, 1.0))
@@ -119,7 +109,7 @@ impl AppHandler for SsgiCornellDemo {
             .set_rotation(Quat::from_rotation_y(-0.24))
             .set_shadows(true, true);
 
-        let mut point = Light::new_point(Vec3::new(1.0, 0.97, 0.92), 12.5, 7.2);
+        let mut point = Light::new_point(Vec3::new(1.0, 0.97, 0.92), 6.0, 7.2);
         point.cast_shadows = true;
         let light_node = scene.add_light(point);
         scene.node(&light_node).set_position(0.0, 5.2, 0.0);

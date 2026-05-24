@@ -55,10 +55,12 @@ pub struct SsgiUniforms {
     pub ray_params: Vec4,
     /// (history_alpha, normal_rejection, depth_rejection, blur_depth_sigma)
     pub reprojection_params: Vec4,
-    /// (fallback_env_weight, hiz_mip_bias, spatial_normal_power, reserved)
+    /// (fallback_env_weight, hiz_mip_bias, spatial_normal_power, luma_phi)
     pub lighting_params: Vec4,
     /// (frame_index, max_steps, checkerboard_enabled, reserved)
     pub frame_params: UVec4,
+    /// (atrous_passes, atrous_step_size, thickness_heuristic_enabled, reserved)
+    pub denoise_params: UVec4,
 }
 
 /// Scene-level SSGI settings.
@@ -80,8 +82,9 @@ impl Default for SsgiSettings {
             half_resolution: Vec4::new(1.0, 1.0, 1.0, 1.0),
             ray_params: Vec4::new(1.0, 6.0, 0.2, 0.12),
             reprojection_params: Vec4::new(0.12, 0.85, 0.15, 0.75),
-            lighting_params: Vec4::new(1.0, 0.0, 32.0, 0.0),
+            lighting_params: Vec4::new(1.0, 0.0, 32.0, 0.35),
             frame_params: UVec4::new(0, 16, 0, 0),
+            denoise_params: UVec4::new(3, 1, 1, 0),
         };
 
         Self {
@@ -239,6 +242,16 @@ impl SsgiSettings {
         self.uniforms.read().lighting_params.z
     }
 
+    pub fn set_luma_phi(&mut self, phi: f32) {
+        self.mark_custom();
+        self.uniforms.write().lighting_params.w = phi.max(0.001);
+    }
+
+    #[must_use]
+    pub fn luma_phi(&self) -> f32 {
+        self.uniforms.read().lighting_params.w
+    }
+
     pub fn set_max_steps(&mut self, max_steps: u32) {
         self.mark_custom();
         self.uniforms.write().frame_params.y = max_steps.clamp(4, 64);
@@ -257,6 +270,26 @@ impl SsgiSettings {
     #[must_use]
     pub fn checkerboard_enabled(&self) -> bool {
         self.uniforms.read().frame_params.z != 0
+    }
+
+    pub fn set_atrous_passes(&mut self, passes: u32) {
+        self.mark_custom();
+        self.uniforms.write().denoise_params.x = passes.clamp(1, 4);
+    }
+
+    #[must_use]
+    pub fn atrous_passes(&self) -> u32 {
+        self.uniforms.read().denoise_params.x
+    }
+
+    pub fn set_thickness_heuristic_enabled(&mut self, enabled: bool) {
+        self.mark_custom();
+        self.uniforms.write().denoise_params.z = u32::from(enabled);
+    }
+
+    #[must_use]
+    pub fn thickness_heuristic_enabled(&self) -> bool {
+        self.uniforms.read().denoise_params.z != 0
     }
 
     pub fn set_frame_index(&mut self, frame_index: u32) {
@@ -312,30 +345,34 @@ impl SsgiSettings {
             SsgiQuality::Low => {
                 guard.ray_params = Vec4::new(0.9, 4.5, 0.28, 0.22);
                 guard.reprojection_params = Vec4::new(0.08, 0.80, 0.18, 1.10);
-                guard.lighting_params = Vec4::new(1.0, 0.45, 16.0, 0.0);
+                guard.lighting_params = Vec4::new(1.0, 0.45, 16.0, 0.45);
                 guard.frame_params.y = 8;
                 guard.frame_params.z = 1;
+                guard.denoise_params = UVec4::new(1, 1, 0, 0);
             }
             SsgiQuality::Medium => {
                 guard.ray_params = Vec4::new(1.0, 5.5, 0.24, 0.16);
                 guard.reprojection_params = Vec4::new(0.10, 0.84, 0.16, 0.90);
-                guard.lighting_params = Vec4::new(1.0, 0.25, 24.0, 0.0);
+                guard.lighting_params = Vec4::new(1.0, 0.25, 24.0, 0.40);
                 guard.frame_params.y = 12;
                 guard.frame_params.z = 1;
+                guard.denoise_params = UVec4::new(2, 1, 1, 0);
             }
             SsgiQuality::High => {
                 guard.ray_params = Vec4::new(1.0, 6.0, 0.20, 0.12);
                 guard.reprojection_params = Vec4::new(0.12, 0.85, 0.15, 0.75);
-                guard.lighting_params = Vec4::new(1.0, 0.0, 32.0, 0.0);
+                guard.lighting_params = Vec4::new(1.0, 0.0, 32.0, 0.35);
                 guard.frame_params.y = 16;
                 guard.frame_params.z = 0;
+                guard.denoise_params = UVec4::new(3, 1, 1, 0);
             }
             SsgiQuality::Ultra => {
                 guard.ray_params = Vec4::new(1.0, 8.0, 0.16, 0.08);
                 guard.reprojection_params = Vec4::new(0.16, 0.90, 0.12, 0.55);
-                guard.lighting_params = Vec4::new(1.0, 0.0, 48.0, 0.0);
+                guard.lighting_params = Vec4::new(1.0, 0.0, 48.0, 0.30);
                 guard.frame_params.y = 24;
                 guard.frame_params.z = 0;
+                guard.denoise_params = UVec4::new(4, 1, 1, 0);
             }
             SsgiQuality::Custom => return,
         }

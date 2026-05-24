@@ -31,9 +31,11 @@ fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
         return (vec2<f32>(half_pixel) + vec2<f32>(0.5, 0.5)) * u_ssgi.half_resolution.zw;
     }
 
-    let phase = (half_pixel.x + half_pixel.y + u_ssgi.frame_params.x) & 1u;
+    let frame = u_ssgi.frame_params.x;
     let base = vec2<f32>(half_pixel * 2u);
-    let offset = select(vec2<f32>(0.5, 0.5), vec2<f32>(1.5, 1.5), phase == 1u);
+    let offset_x = f32((frame & 1u) ^ ((frame & 2u) >> 1u));
+    let offset_y = f32((frame & 2u) >> 1u);
+    let offset = vec2<f32>(offset_x + 0.5, offset_y + 0.5);
     return (base + offset) * u_ssgi.full_resolution.zw;
 }
 

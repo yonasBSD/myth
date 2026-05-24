@@ -62,7 +62,8 @@ Native (Windows, macOS, Linux, iOS, Android) + WebGPU/WASM + Python bindings.
     * **Physically Based Materials**: Robust PBR pipeline with Clearcoat, Iridescence, Transmission, Sheen, Anisotropy.
     * **Clustered Forward Lighting**: Compute-driven clustered light assignment for dense dynamic point/spot-light scenes in forward render passes.
     * **Image-Based Lighting (IBL)** + **Dynamic Shadows (CSM)**.
-    * **SSAO / SSSS / Skybox**.
+    * **SSAO / SSGI / SSSS / Skybox**.
+    * **Production-Grade SSGI**: Half-resolution diffuse GI with Hi-Z ray marching, blue-noise sampling, temporal reuse, thickness-aware hit rejection, and multi-pass A-Trous denoising for stable indirect lighting without low-frequency blotches.
     * **Procedural Sky System**: Physically-based atmospheric scattering model (Hillaire 2020) with procedural celestial bodies (sun, moon, stars). Built-in `DayNightCycle` component for dynamic time progression, automatically syncing sun/moon/star trajectories.
 
 * **Post-Processing & FX**

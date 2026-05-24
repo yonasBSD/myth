@@ -1,8 +1,8 @@
 //! Screen Space Global Illumination feature.
 //!
 //! SSGI is implemented as a scene-level screen-space system with five stages:
-//! Hi-Z construction, raw ray march, temporal accumulation, spatial cleanup,
-//! and albedo-modulated merge back into the HDR scene color.
+//! Hi-Z construction, raw ray march, temporal accumulation, multi-stage
+//! A-Trous cleanup, and albedo-modulated merge back into the HDR scene color.
 
 use rustc_hash::FxHashMap;
 
@@ -24,8 +24,33 @@ use myth_resources::uniforms::WgslStruct;
 
 const SSGI_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const SSGI_WORKGROUP_SIZE: u32 = 8;
+const MAX_ATROUS_PASSES: usize = 4;
 const HISTORY_FLAG_INDIRECT_VALID: u32 = 1 << 0;
 const HISTORY_FLAG_SOURCE_VALID: u32 = 1 << 1;
+const SSGI_ATROUS_PASS_NAMES: [&str; MAX_ATROUS_PASSES] = [
+    "SSGI_ATrous_Step_1",
+    "SSGI_ATrous_Step_2",
+    "SSGI_ATrous_Step_4",
+    "SSGI_ATrous_Step_8",
+];
+const SSGI_ATROUS_OUTPUT_NAMES: [&str; MAX_ATROUS_PASSES] = [
+    "SSGI_ATrous_Step_1_Output",
+    "SSGI_ATrous_Step_2_Output",
+    "SSGI_ATrous_Step_4_Output",
+    "SSGI_ATrous_Step_8_Output",
+];
+const SSGI_ATROUS_UNIFORM_NAMES: [&str; MAX_ATROUS_PASSES] = [
+    "SSGI_ATrous_Uniforms_1",
+    "SSGI_ATrous_Uniforms_2",
+    "SSGI_ATrous_Uniforms_4",
+    "SSGI_ATrous_Uniforms_8",
+];
+const SSGI_ATROUS_BUFFER_LABELS: [&str; MAX_ATROUS_PASSES] = [
+    "SSGI A-Trous Uniform Step 1",
+    "SSGI A-Trous Uniform Step 2",
+    "SSGI A-Trous Uniform Step 4",
+    "SSGI A-Trous Uniform Step 8",
+];
 
 fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
     if cfg!(feature = "advanced_noise") {
@@ -47,14 +72,14 @@ pub struct SsgiFeature {
     hiz_downsample_pipeline: Option<ComputePipelineId>,
     raw_pipelines: FxHashMap<u32, RenderPipelineId>,
     temporal_pipeline: Option<RenderPipelineId>,
-    blur_pipeline: Option<RenderPipelineId>,
+    atrous_pipeline: Option<RenderPipelineId>,
     merge_pipeline: Option<RenderPipelineId>,
 
     hiz_init_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     hiz_downsample_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     raw_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     temporal_layout: Option<Tracked<wgpu::BindGroupLayout>>,
-    blur_layout: Option<Tracked<wgpu::BindGroupLayout>>,
+    atrous_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     merge_layout: Option<Tracked<wgpu::BindGroupLayout>>,
 
     uniforms_buffer: Option<Tracked<wgpu::Buffer>>,
@@ -66,8 +91,10 @@ pub struct SsgiFeature {
     history_meta_view: Option<Tracked<wgpu::TextureView>>,
     source_history_view: Option<Tracked<wgpu::TextureView>>,
     source_history_input_view: Option<Tracked<wgpu::TextureView>>,
+    atrous_uniform_buffers: Vec<Tracked<wgpu::Buffer>>,
 
     prepared_max_steps: u32,
+    prepared_atrous_passes: u32,
     full_resolution: (u32, u32),
     half_resolution: (u32, u32),
     history_valid: bool,
@@ -88,14 +115,14 @@ impl SsgiFeature {
             hiz_downsample_pipeline: None,
             raw_pipelines: FxHashMap::default(),
             temporal_pipeline: None,
-            blur_pipeline: None,
+            atrous_pipeline: None,
             merge_pipeline: None,
 
             hiz_init_layout: None,
             hiz_downsample_layout: None,
             raw_layout: None,
             temporal_layout: None,
-            blur_layout: None,
+            atrous_layout: None,
             merge_layout: None,
 
             uniforms_buffer: None,
@@ -107,8 +134,10 @@ impl SsgiFeature {
             history_meta_view: None,
             source_history_view: None,
             source_history_input_view: None,
+            atrous_uniform_buffers: Vec::with_capacity(MAX_ATROUS_PASSES),
 
             prepared_max_steps: 16,
+            prepared_atrous_passes: 3,
             full_resolution: (0, 0),
             half_resolution: (0, 0),
             history_valid: false,
@@ -374,8 +403,8 @@ impl SsgiFeature {
                 ],
             });
 
-        let blur_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("SSGI Blur Layout"),
+        let atrous_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SSGI A-Trous Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -494,8 +523,42 @@ impl SsgiFeature {
         self.hiz_downsample_layout = Some(Tracked::new(hiz_downsample_layout));
         self.raw_layout = Some(Tracked::new(raw_layout));
         self.temporal_layout = Some(Tracked::new(temporal_layout));
-        self.blur_layout = Some(Tracked::new(blur_layout));
+        self.atrous_layout = Some(Tracked::new(atrous_layout));
         self.merge_layout = Some(Tracked::new(merge_layout));
+    }
+
+    fn ensure_atrous_uniform_buffers(
+        &mut self,
+        ctx: &mut ExtractContext,
+        base_uniforms: SsgiUniforms,
+    ) {
+        while self.atrous_uniform_buffers.len() < MAX_ATROUS_PASSES {
+            let label = SSGI_ATROUS_BUFFER_LABELS[self.atrous_uniform_buffers.len()];
+            let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: std::mem::size_of::<SsgiUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.atrous_uniform_buffers.push(Tracked::new(buffer));
+        }
+
+        self.prepared_atrous_passes = base_uniforms
+            .denoise_params
+            .x
+            .clamp(1, MAX_ATROUS_PASSES as u32);
+
+        for (pass_index, buffer) in self
+            .atrous_uniform_buffers
+            .iter()
+            .enumerate()
+            .take(self.prepared_atrous_passes as usize)
+        {
+            let mut pass_uniforms = base_uniforms;
+            pass_uniforms.denoise_params.y = 1u32 << pass_index;
+            ctx.queue
+                .write_buffer(buffer, 0, bytemuck::bytes_of(&pass_uniforms));
+        }
     }
 
     fn ensure_history_buffers(&mut self, device: &wgpu::Device, width: u32, height: u32) {
@@ -720,7 +783,7 @@ impl SsgiFeature {
             ));
         }
 
-        if self.blur_pipeline.is_none() {
+        if self.atrous_pipeline.is_none() {
             let mut options = ShaderCompilationOptions::default();
             options.add_define(
                 "struct_definitions",
@@ -729,15 +792,15 @@ impl SsgiFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_blur"),
+                ShaderSource::File("entry/post_process/ssgi_atrous_blur"),
                 &options,
             );
 
             let pipeline_layout =
                 ctx.device
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("SSGI Blur Pipeline Layout"),
-                        bind_group_layouts: &[self.blur_layout.as_deref()],
+                        label: Some("SSGI A-Trous Pipeline Layout"),
+                        bind_group_layouts: &[self.atrous_layout.as_deref()],
                         immediate_size: 0,
                     });
 
@@ -750,12 +813,12 @@ impl SsgiFeature {
             let key =
                 FullscreenPipelineKey::fullscreen(hash, smallvec::smallvec![color_target], None);
 
-            self.blur_pipeline = Some(ctx.pipeline_cache.get_or_create_fullscreen(
+            self.atrous_pipeline = Some(ctx.pipeline_cache.get_or_create_fullscreen(
                 ctx.device,
                 module,
                 &pipeline_layout,
                 &key,
-                "SSGI Blur Pipeline",
+                "SSGI A-Trous Pipeline",
             ));
         }
 
@@ -808,9 +871,11 @@ impl SsgiFeature {
         self.ensure_layouts(ctx.device);
         self.ensure_history_buffers(ctx.device, size.0, size.1);
 
-        let max_steps = ssgi_uniforms.read().frame_params.y;
+        let uniforms = *ssgi_uniforms.read();
+        let max_steps = uniforms.frame_params.y;
         self.ensure_pipelines(ctx, max_steps);
         self.prepared_max_steps = max_steps;
+        self.ensure_atrous_uniform_buffers(ctx, uniforms);
 
         ctx.resource_manager.ensure_buffer(ssgi_uniforms);
 
@@ -853,8 +918,8 @@ impl SsgiFeature {
         let temporal_pipeline = ctx.pipeline_cache.get_render_pipeline(
             self.temporal_pipeline.expect("SSGI temporal pipeline missing"),
         );
-        let blur_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.blur_pipeline.expect("SSGI blur pipeline missing"),
+        let atrous_pipeline = ctx.pipeline_cache.get_render_pipeline(
+            self.atrous_pipeline.expect("SSGI A-Trous pipeline missing"),
         );
         let merge_pipeline = ctx.pipeline_cache.get_render_pipeline(
             self.merge_pipeline.expect("SSGI merge pipeline missing"),
@@ -864,7 +929,7 @@ impl SsgiFeature {
         let hiz_downsample_layout = self.hiz_downsample_layout.as_ref().unwrap();
         let raw_layout = self.raw_layout.as_ref().unwrap();
         let temporal_layout = self.temporal_layout.as_ref().unwrap();
-        let blur_layout = self.blur_layout.as_ref().unwrap();
+        let atrous_layout = self.atrous_layout.as_ref().unwrap();
         let merge_layout = self.merge_layout.as_ref().unwrap();
 
         let uniforms_buffer = self
@@ -877,10 +942,13 @@ impl SsgiFeature {
         let black_cube_view = self.black_cube_view.as_ref().unwrap();
         let blue_noise_view = self.blue_noise_view.as_ref().unwrap();
         let blue_noise_sampler = self.blue_noise_sampler.as_ref().unwrap();
+        let atrous_uniform_buffers = &self.atrous_uniform_buffers;
 
         let half_w = (ctx.frame_config.width / 2).max(1);
         let half_h = (ctx.frame_config.height / 2).max(1);
         let hiz_mip_count = pyramid_mip_count(ctx.frame_config.width, ctx.frame_config.height);
+        let atrous_pass_count = self.prepared_atrous_passes.clamp(1, MAX_ATROUS_PASSES as u32)
+            as usize;
 
         self.source_history_input_view = Some(if self.source_history_valid {
             taa_history_view.unwrap_or_else(|| source_history_view.clone())
@@ -1072,37 +1140,44 @@ impl SsgiFeature {
                 },
             );
 
-            let blur_desc = TextureDesc::new_2d(
+            let atrous_desc = TextureDesc::new_2d(
                 half_w,
                 half_h,
                 SSGI_TEXTURE_FORMAT,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             );
 
-            let clean_indirect: TextureNodeId = ctx.graph.add_pass("SSGI_Blur", |builder| {
-                builder.read_texture(temporal_indirect);
-                builder.read_texture(scene_depth);
-                builder.read_texture(scene_normals);
-                let uniforms = builder.read_external_buffer(
-                    "SSGI_Uniforms",
-                    uniforms_desc,
-                    uniforms_buffer,
-                );
+            let mut clean_indirect = temporal_indirect;
+            for pass_index in 0..atrous_pass_count {
+                let pass_name = SSGI_ATROUS_PASS_NAMES[pass_index];
+                let output_name = SSGI_ATROUS_OUTPUT_NAMES[pass_index];
+                let uniform_name = SSGI_ATROUS_UNIFORM_NAMES[pass_index];
+                let pass_uniform_buffer = atrous_uniform_buffers
+                    .get(pass_index)
+                    .expect("SSGI A-Trous uniform buffer missing");
 
-                let out = builder.create_texture("SSGI_Clean_Indirect", blur_desc);
-                let node = SsgiBlurNode {
-                    temporal_indirect,
-                    scene_depth,
-                    scene_normals,
-                    uniforms,
-                    output_tex: out,
-                    pipeline: blur_pipeline,
-                    layout: blur_layout,
-                    transient_bg: None,
-                };
+                clean_indirect = ctx.graph.add_pass(pass_name, |builder| {
+                    builder.read_texture(clean_indirect);
+                    builder.read_texture(scene_depth);
+                    builder.read_texture(scene_normals);
+                    let uniforms =
+                        builder.read_external_buffer(uniform_name, uniforms_desc, pass_uniform_buffer);
 
-                (node, out)
-            });
+                    let out = builder.create_texture(output_name, atrous_desc);
+                    let node = SsgiAtrousNode {
+                        input_indirect: clean_indirect,
+                        scene_depth,
+                        scene_normals,
+                        uniforms,
+                        output_tex: out,
+                        pipeline: atrous_pipeline,
+                        layout: atrous_layout,
+                        transient_bg: None,
+                    };
+
+                    (node, out)
+                });
+            }
 
             let merged_desc = TextureDesc::new_2d(
                 ctx.frame_config.width,
@@ -1419,8 +1494,8 @@ impl<'a> PassNode<'a> for SsgiTemporalNode<'a> {
     }
 }
 
-struct SsgiBlurNode<'a> {
-    temporal_indirect: TextureNodeId,
+struct SsgiAtrousNode<'a> {
+    input_indirect: TextureNodeId,
     scene_depth: TextureNodeId,
     scene_normals: TextureNodeId,
     uniforms: BufferNodeId,
@@ -1430,11 +1505,11 @@ struct SsgiBlurNode<'a> {
     transient_bg: Option<&'a wgpu::BindGroup>,
 }
 
-impl<'a> PassNode<'a> for SsgiBlurNode<'a> {
+impl<'a> PassNode<'a> for SsgiAtrousNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
         self.transient_bg = Some(
-            crate::myth_bind_group!(ctx, self.layout, Some("SSGI Blur BG"), [
-                0 => self.temporal_indirect,
+            crate::myth_bind_group!(ctx, self.layout, Some("SSGI A-Trous BG"), [
+                0 => self.input_indirect,
                 1 => self.scene_depth,
                 2 => self.scene_normals,
                 3 => CommonSampler::LinearClamp,
@@ -1447,7 +1522,7 @@ impl<'a> PassNode<'a> for SsgiBlurNode<'a> {
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
         let output = ctx.get_color_attachment(self.output_tex, RenderTargetOps::DontCare, None);
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("SSGI Blur Pass"),
+            label: Some("SSGI A-Trous Pass"),
             color_attachments: &[output],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -1456,7 +1531,7 @@ impl<'a> PassNode<'a> for SsgiBlurNode<'a> {
         });
 
         rpass.set_pipeline(self.pipeline);
-        rpass.set_bind_group(0, self.transient_bg.expect("SSGI blur BG missing"), &[]);
+        rpass.set_bind_group(0, self.transient_bg.expect("SSGI A-Trous BG missing"), &[]);
         rpass.draw(0..3, 0..1);
     }
 }

@@ -42,17 +42,6 @@ fn depth_to_linear(z: f32) -> f32 {
     return u_render_state.camera_near / max(z, 0.0001);
 }
 
-// fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
-//     if (u_ssgi.frame_params.z == 0u) {
-//         return (vec2<f32>(half_pixel) + vec2<f32>(0.5, 0.5)) * u_ssgi.half_resolution.zw;
-//     }
-
-//     let phase = (half_pixel.x + half_pixel.y + u_ssgi.frame_params.x) & 1u;
-//     let base = vec2<f32>(half_pixel * 2u);
-//     let offset = select(vec2<f32>(0.5, 0.5), vec2<f32>(1.5, 1.5), phase == 1u);
-//     return (base + offset) * u_ssgi.full_resolution.zw;
-// }
-
 fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
     if (u_ssgi.frame_params.z == 0u) {
         return (vec2<f32>(half_pixel) + vec2<f32>(0.5, 0.5)) * u_ssgi.half_resolution.zw;
@@ -192,13 +181,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             continue;
         }
 
+        let hit_normal = unpack_view_normal(hit_normal_packed);
         let hit_linear = depth_to_linear(hit_depth);
         let sample_linear = depth_to_linear(projected.depth);
-        if (abs(sample_linear - hit_linear) > thickness * max(hit_linear, 1.0)) {
+        let thickness_limit = select(
+            thickness * max(hit_linear, 1.0),
+            max(thickness, 0.05) / max(saturate(abs(hit_normal.z)), 0.1),
+            u_ssgi.denoise_params.z != 0u
+        );
+        let depth_diff = sample_linear - hit_linear;
+        if (depth_diff < 0.0 || depth_diff > thickness_limit) {
             continue;
         }
 
-        let hit_normal = unpack_view_normal(hit_normal_packed);
         let bounce_visibility = saturate(dot(view_normal, ray_dir)) * saturate(dot(hit_normal, -ray_dir));
         if (bounce_visibility <= 1e-4) {
             continue;

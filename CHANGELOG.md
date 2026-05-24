@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Major Changes
+- Introduced **SSGI (Screen Space Global Illumination)** as a first-class real-time global illumination feature in Myth's high-fidelity renderer.
+  - **Physically Plausible Indirect Lighting:** Adds diffuse bounce lighting to the post-lighting pipeline and merges the result back into HDR scene color through the RenderGraph.
+  - **Efficient Screen-Space Ray Tracing:** Uses half-resolution Hi-Z ray marching together with blue-noise driven hemisphere sampling to estimate indirect radiance at low cost.
+  - **Spatiotemporal Denoising:** Combines history reprojection, temporal accumulation, and multi-pass A-Trous wavelet filtering to stabilize 1-SPP indirect lighting and remove low-frequency blotches.
+  - **Robust Hit Validation:** Includes thickness-aware hit rejection to reduce light leaking on thin surfaces and grazing-angle intersections.
+  - **Scalable Quality Tiers:** Provides Low / Medium / High / Ultra presets to scale ray budget and denoiser cost across desktop and constrained hardware targets.
+
 - Added a **procedural sky system** powered by a physically-based atmospheric scattering model (Hillaire 2020), enabling high-quality real-time sky rendering with procedural celestial bodies (sun, moon, and stars).
 Also includes a `DayNightCycle` component for dynamic time progression, automatically syncing the trajectories of the sun, moon, and star field with scene parameters.
 
