@@ -15,8 +15,8 @@ use crate::graph::core::{
 };
 use crate::graph::passes::utils::CopyTextureNode;
 use crate::pipeline::{
-    ColorTargetKey, ComputePipelineId, ComputePipelineKey, FullscreenPipelineKey,
-    RenderPipelineId, ShaderCompilationOptions, ShaderSource,
+    ColorTargetKey, ComputePipelineId, ComputePipelineKey, FullscreenPipelineKey, RenderPipelineId,
+    ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::buffer::CpuBuffer;
 use myth_resources::ssgi::SsgiUniforms;
@@ -314,94 +314,93 @@ impl SsgiFeature {
             ],
         });
 
-        let temporal_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("SSGI Temporal Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let temporal_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SSGI Temporal Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Depth,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 8,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let atrous_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SSGI A-Trous Layout"),
@@ -881,8 +880,12 @@ impl SsgiFeature {
 
         self.black_cube_view = Some(ctx.resource_manager.system_textures.black_cube.clone());
         self.blue_noise_view = Some(ctx.resource_manager.system_textures.blue_noise.clone());
-        self.blue_noise_sampler =
-            Some(ctx.resource_manager.system_textures.blue_noise_sampler.clone());
+        self.blue_noise_sampler = Some(
+            ctx.resource_manager
+                .system_textures
+                .blue_noise_sampler
+                .clone(),
+        );
         self.uniforms_buffer = ssgi_uniforms.gpu_handle().and_then(|handle| {
             ctx.resource_manager
                 .gpu_buffers
@@ -909,21 +912,23 @@ impl SsgiFeature {
                 .expect("SSGI raw pipeline missing"),
         );
         let hiz_init_pipeline = ctx.pipeline_cache.get_compute_pipeline(
-            self.hiz_init_pipeline.expect("SSGI HiZ init pipeline missing"),
+            self.hiz_init_pipeline
+                .expect("SSGI HiZ init pipeline missing"),
         );
         let hiz_downsample_pipeline = ctx.pipeline_cache.get_compute_pipeline(
             self.hiz_downsample_pipeline
                 .expect("SSGI HiZ downsample pipeline missing"),
         );
         let temporal_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.temporal_pipeline.expect("SSGI temporal pipeline missing"),
+            self.temporal_pipeline
+                .expect("SSGI temporal pipeline missing"),
         );
-        let atrous_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.atrous_pipeline.expect("SSGI A-Trous pipeline missing"),
-        );
-        let merge_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.merge_pipeline.expect("SSGI merge pipeline missing"),
-        );
+        let atrous_pipeline = ctx
+            .pipeline_cache
+            .get_render_pipeline(self.atrous_pipeline.expect("SSGI A-Trous pipeline missing"));
+        let merge_pipeline = ctx
+            .pipeline_cache
+            .get_render_pipeline(self.merge_pipeline.expect("SSGI merge pipeline missing"));
 
         let hiz_init_layout = self.hiz_init_layout.as_ref().unwrap();
         let hiz_downsample_layout = self.hiz_downsample_layout.as_ref().unwrap();
@@ -947,8 +952,9 @@ impl SsgiFeature {
         let half_w = (ctx.frame_config.width / 2).max(1);
         let half_h = (ctx.frame_config.height / 2).max(1);
         let hiz_mip_count = pyramid_mip_count(ctx.frame_config.width, ctx.frame_config.height);
-        let atrous_pass_count = self.prepared_atrous_passes.clamp(1, MAX_ATROUS_PASSES as u32)
-            as usize;
+        let atrous_pass_count = self
+            .prepared_atrous_passes
+            .clamp(1, MAX_ATROUS_PASSES as u32) as usize;
 
         self.source_history_input_view = Some(if self.source_history_valid {
             taa_history_view.unwrap_or_else(|| source_history_view.clone())
@@ -1040,11 +1046,8 @@ impl SsgiFeature {
                     source_history_desc,
                     source_history_input_view,
                 );
-                let uniforms = builder.read_external_buffer(
-                    "SSGI_Uniforms",
-                    uniforms_desc,
-                    uniforms_buffer,
-                );
+                let uniforms =
+                    builder.read_external_buffer("SSGI_Uniforms", uniforms_desc, uniforms_buffer);
                 let pmrem_input = if let Some(pmrem) = pmrem_tex {
                     builder.read_texture(pmrem)
                 } else {
@@ -1092,9 +1095,8 @@ impl SsgiFeature {
                     | wgpu::TextureUsages::COPY_SRC,
             );
 
-            let (temporal_indirect, temporal_meta) = ctx.graph.add_pass(
-                "SSGI_Temporal",
-                |builder| {
+            let (temporal_indirect, temporal_meta) =
+                ctx.graph.add_pass("SSGI_Temporal", |builder| {
                     let indirect_history = builder.read_external_texture(
                         "SSGI_History_Indirect_Read",
                         indirect_history_desc,
@@ -1137,8 +1139,7 @@ impl SsgiFeature {
                     };
 
                     (node, (temporal_indirect, temporal_meta))
-                },
-            );
+                });
 
             let atrous_desc = TextureDesc::new_2d(
                 half_w,
@@ -1160,8 +1161,11 @@ impl SsgiFeature {
                     builder.read_texture(clean_indirect);
                     builder.read_texture(scene_depth);
                     builder.read_texture(scene_normals);
-                    let uniforms =
-                        builder.read_external_buffer(uniform_name, uniforms_desc, pass_uniform_buffer);
+                    let uniforms = builder.read_external_buffer(
+                        uniform_name,
+                        uniforms_desc,
+                        pass_uniform_buffer,
+                    );
 
                     let out = builder.create_texture(output_name, atrous_desc);
                     let node = SsgiAtrousNode {
@@ -1192,11 +1196,8 @@ impl SsgiFeature {
                 builder.read_texture(current_color);
                 builder.read_texture(clean_indirect);
                 builder.read_texture(albedo_mrt);
-                let uniforms = builder.read_external_buffer(
-                    "SSGI_Uniforms",
-                    uniforms_desc,
-                    uniforms_buffer,
-                );
+                let uniforms =
+                    builder.read_external_buffer("SSGI_Uniforms", uniforms_desc, uniforms_buffer);
 
                 let out = builder.create_texture("SSGI_Merged_Color", merged_desc);
                 let node = SsgiMergeNode {
@@ -1378,7 +1379,11 @@ impl<'a> PassNode<'a> for SsgiHiZNode<'a> {
                 timestamp_writes: None,
             });
             downsample_pass.set_pipeline(self.hiz_downsample_pipeline);
-            downsample_pass.set_bind_group(0, mip.bind_group.expect("SSGI HiZ mip BG missing"), &[]);
+            downsample_pass.set_bind_group(
+                0,
+                mip.bind_group.expect("SSGI HiZ mip BG missing"),
+                &[],
+            );
             downsample_pass.dispatch_workgroups(
                 mip.target_size.0.div_ceil(SSGI_WORKGROUP_SIZE),
                 mip.target_size.1.div_ceil(SSGI_WORKGROUP_SIZE),

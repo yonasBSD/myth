@@ -50,7 +50,6 @@
 use crate::core::binding::GlobalBindGroupCache;
 use crate::core::gpu::{CubeSourceType, Tracked};
 use crate::core::{ResourceManager, WgpuContext};
-use crate::graph::extracted::SceneFeatures;
 use crate::graph::ExtractedScene;
 use crate::graph::RenderState;
 use crate::graph::core::ClusteredScreenBindings;
@@ -60,6 +59,7 @@ use crate::graph::core::{
     BufferDesc, BufferNodeId, ExecuteContext, FrameArena, GraphBlackboard, HookStage, PassNode,
     PrepareContext, RenderGraph, TextureDesc, TransientPool, ViewResolver,
 };
+use crate::graph::extracted::SceneFeatures;
 use crate::graph::frame::{PreparedSkyboxDraw, RenderLists};
 #[cfg(feature = "3dgs")]
 use crate::graph::passes::GaussianSplattingFeature;

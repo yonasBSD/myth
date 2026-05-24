@@ -103,8 +103,6 @@ impl Default for SsaoSettings {
             intensity: 1.0,
             sample_count: 32,
             noise_scale: glam::Vec2::new(1.0, 1.0),
-            frame_index: 0,
-            _padding: 0,
             ..Default::default()
         };
 

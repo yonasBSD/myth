@@ -67,7 +67,6 @@ pub struct SsaoFeature {
     blue_noise_sampler: Option<Tracked<wgpu::Sampler>>,
 
     // ─── Pre-Built Static BindGroup (Group 2: uniforms) ────────────
-
     /// Feature-owned uniform bind group — eliminates GPU buffer leak to PassNode.
     uniforms_static_bg: Option<wgpu::BindGroup>,
     /// Tracked buffer identity for staleness detection.
@@ -334,16 +333,19 @@ impl SsaoFeature {
         {
             let viewport = ctx.render_state.uniforms().read().viewport;
             let mut uniforms = ssao_uniforms.write();
-            uniforms.noise_scale = glam::Vec2::new(
-                (viewport.x * 0.5).max(1.0),
-                (viewport.y * 0.5).max(1.0),
-            );
+            uniforms.noise_scale =
+                glam::Vec2::new((viewport.x * 0.5).max(1.0), (viewport.y * 0.5).max(1.0));
             uniforms.frame_index = ctx.resource_manager.frame_index() as u32;
         }
 
         ctx.resource_manager.ensure_buffer(ssao_uniforms);
         self.blue_noise_view = Some(ctx.resource_manager.system_textures.blue_noise.clone());
-        self.blue_noise_sampler = Some(ctx.resource_manager.system_textures.blue_noise_sampler.clone());
+        self.blue_noise_sampler = Some(
+            ctx.resource_manager
+                .system_textures
+                .blue_noise_sampler
+                .clone(),
+        );
 
         // Build Group 2 static BG (uniforms only) — rebuild on buffer identity change.
         if let Some(handle) = ssao_uniforms.gpu_handle()

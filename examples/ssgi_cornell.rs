@@ -2,8 +2,9 @@
 //! name = "SSGI Cornell Box"
 //! category = "Lighting"
 //! description = "High-contrast Cornell-box style scene for validating screen-space GI, quality presets, and optional debug overlays."
-//! instructions = "Press T to toggle SSGI\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views when built with --features debug_view"
+//! instructions = "Press T to toggle SSGI\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views
 //! order = 366
+//! features = ["debug_view"]
 //!
 
 use myth::prelude::*;
@@ -17,7 +18,10 @@ const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
 
 fn next_quality(current: SsgiQuality) -> SsgiQuality {
     let presets = SsgiQuality::all();
-    let index = presets.iter().position(|preset| *preset == current).unwrap_or(0);
+    let index = presets
+        .iter()
+        .position(|preset| *preset == current)
+        .unwrap_or(0);
     presets[(index + 1) % presets.len()]
 }
 
@@ -92,7 +96,10 @@ impl AppHandler for SsgiCornellDemo {
             (3.0, 3.0, 0.0, 0.12, 6.2, 6.2, green),
         ] {
             let wall = scene.spawn_box(sx, sy, sz, material, &engine.assets);
-            scene.node(&wall).set_position(x, y, z).set_shadows(true, true);
+            scene
+                .node(&wall)
+                .set_position(x, y, z)
+                .set_shadows(true, true);
         }
 
         let short_box = scene.spawn_box(1.65, 2.1, 1.65, hero, &engine.assets);

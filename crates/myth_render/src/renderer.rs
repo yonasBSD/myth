@@ -19,9 +19,8 @@ use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
-    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
-    SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
-    TransparentFeature,
+    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsgiFeature,
+    SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -637,10 +636,14 @@ impl Renderer {
                 if ssgi_enabled {
                     scene.ssgi.update_resolution(self.size.0, self.size.1);
                     scene.ssgi.set_frame_index(frame_time.frame_count as u32);
-                    scene.ssgi.set_history_flags(state.ssgi_pass.history_flags());
-                    state
-                        .ssgi_pass
-                        .extract_and_prepare(&mut extract_ctx, &scene.ssgi.uniforms, self.size);
+                    scene
+                        .ssgi
+                        .set_history_flags(state.ssgi_pass.history_flags());
+                    state.ssgi_pass.extract_and_prepare(
+                        &mut extract_ctx,
+                        &scene.ssgi.uniforms,
+                        self.size,
+                    );
                 } else {
                     state.ssgi_pass.invalidate_history();
                     scene.ssgi.set_history_flags(0);
