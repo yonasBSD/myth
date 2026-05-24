@@ -2,7 +2,7 @@
 //! name = "SSGI Cornell Box"
 //! category = "Lighting"
 //! description = "High-contrast Cornell-box style scene for validating screen-space GI, quality presets, and optional debug overlays."
-//! instructions = "Press T to toggle SSGI\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views
+//! instructions = "Press T to toggle SSGI\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views."
 //! order = 366
 //! features = ["debug_view"]
 //!
