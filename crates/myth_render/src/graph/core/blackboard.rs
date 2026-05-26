@@ -23,6 +23,7 @@ use super::types::{BufferNodeId, TextureNodeId};
 /// |------|----------|------------------|
 /// | `scene_color` | HDR scene colour buffer | Custom post-FX |
 /// | `scene_depth` | Main depth buffer (reverse-Z) | Depth-aware FX |
+/// | `scene_hiz` | Reverse-Z Hi-Z pyramid (max-depth mip chain) | Hierarchical screen-space ray tracing |
 /// | `atmosphere_transmittance` | Atmosphere transmittance LUT | Custom lit composites |
 /// | `atmosphere_bake_params` | Atmosphere bake uniform buffer | Custom lit composites |
 /// | `surface_out` | Final swap-chain output | UI overlay |
@@ -32,6 +33,8 @@ pub struct GraphBlackboard {
     pub scene_color: Option<TextureNodeId>,
     /// Main depth buffer (reverse-Z, written by scene passes).
     pub scene_depth: Option<TextureNodeId>,
+    /// Reverse-Z Hi-Z pyramid storing the maximum depth per mip texel.
+    pub scene_hiz: Option<TextureNodeId>,
     /// Optional atmosphere transmittance LUT for custom passes that need the
     /// same celestial-light attenuation as the main lighting path.
     pub atmosphere_transmittance: Option<TextureNodeId>,

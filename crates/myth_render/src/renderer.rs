@@ -18,9 +18,10 @@ use crate::graph::passes::DebugViewFeature;
 use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
-    EquirectToCubeFeature, FxaaFeature, IblComputeFeature, MsaaSyncFeature, OpaqueFeature,
-    PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsgiFeature,
-    SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
+    EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature, MsaaSyncFeature,
+    OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
+    SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
+    TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -117,6 +118,7 @@ struct RendererState {
     pub(crate) tone_map_pass: ToneMappingFeature,
     pub(crate) bloom_pass: BloomFeature,
     pub(crate) ssao_pass: SsaoFeature,
+    pub(crate) hiz_pass: HiZFeature,
     pub(crate) ssgi_pass: SsgiFeature,
 
     // Scene rendering passes
@@ -293,6 +295,7 @@ impl Renderer {
             tone_map_pass: ToneMappingFeature::new(),
             bloom_pass: BloomFeature::new(),
             ssao_pass: SsaoFeature::new(),
+            hiz_pass: HiZFeature::new(),
             ssgi_pass: SsgiFeature::new(),
 
             prepass: PrepassFeature::new(),
@@ -630,6 +633,8 @@ impl Renderer {
                     needs_velocity,
                 );
 
+                state.hiz_pass.extract_and_prepare(&mut extract_ctx);
+
                 if ssao_enabled {
                     state
                         .ssao_pass
@@ -751,6 +756,7 @@ impl Renderer {
             tone_map_pass: &mut state.tone_map_pass,
             bloom_pass: &mut state.bloom_pass,
             ssao_pass: &mut state.ssao_pass,
+            hiz_pass: &mut state.hiz_pass,
             ssgi_pass: &mut state.ssgi_pass,
 
             prepass: &mut state.prepass,

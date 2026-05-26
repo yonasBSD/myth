@@ -1,8 +1,8 @@
 //! Screen Space Global Illumination feature.
 //!
-//! SSGI is implemented as a scene-level screen-space system with five stages:
-//! Hi-Z construction, raw ray march, temporal accumulation, multi-stage
-//! A-Trous cleanup, and albedo-modulated merge back into the HDR scene color.
+//! SSGI is implemented as a scene-level screen-space system with four stages:
+//! raw Hi-Z ray march, temporal accumulation, multi-stage A-Trous cleanup,
+//! and albedo-modulated merge back into the HDR scene color.
 
 use rustc_hash::FxHashMap;
 
@@ -11,12 +11,11 @@ use crate::core::gpu::{CommonSampler, Tracked};
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
     BufferDesc, BufferNodeId, ExecuteContext, ExtractContext, PassNode, PrepareContext,
-    RenderTargetOps, SubViewKey, TextureDesc, TextureNodeId,
+    RenderTargetOps, TextureDesc, TextureNodeId,
 };
 use crate::graph::passes::utils::CopyTextureNode;
 use crate::pipeline::{
-    ColorTargetKey, ComputePipelineId, ComputePipelineKey, FullscreenPipelineKey, RenderPipelineId,
-    ShaderCompilationOptions, ShaderSource,
+    ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::buffer::CpuBuffer;
 use myth_resources::ssgi::SsgiUniforms;
@@ -69,15 +68,11 @@ pub struct SsgiOutputs {
 }
 
 pub struct SsgiFeature {
-    hiz_init_pipeline: Option<ComputePipelineId>,
-    hiz_downsample_pipeline: Option<ComputePipelineId>,
     raw_pipelines: FxHashMap<u32, RenderPipelineId>,
     temporal_pipeline: Option<RenderPipelineId>,
     atrous_pipeline: Option<RenderPipelineId>,
     merge_pipeline: Option<RenderPipelineId>,
 
-    hiz_init_layout: Option<Tracked<wgpu::BindGroupLayout>>,
-    hiz_downsample_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     raw_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     temporal_layout: Option<Tracked<wgpu::BindGroupLayout>>,
     atrous_layout: Option<Tracked<wgpu::BindGroupLayout>>,
@@ -113,15 +108,11 @@ impl SsgiFeature {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            hiz_init_pipeline: None,
-            hiz_downsample_pipeline: None,
             raw_pipelines: FxHashMap::default(),
             temporal_pipeline: None,
             atrous_pipeline: None,
             merge_pipeline: None,
 
-            hiz_init_layout: None,
-            hiz_downsample_layout: None,
             raw_layout: None,
             temporal_layout: None,
             atrous_layout: None,
@@ -171,59 +162,6 @@ impl SsgiFeature {
             return;
         }
 
-        let hiz_init_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("SSGI HiZ Init Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: SSGI_TEXTURE_FORMAT,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let hiz_downsample_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("SSGI HiZ Downsample Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: SSGI_TEXTURE_FORMAT,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
         let raw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("SSGI Raw Layout"),
             entries: &[
@@ -261,8 +199,8 @@ impl SsgiFeature {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
                     count: None,
@@ -270,17 +208,27 @@ impl SsgiFeature {
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -290,7 +238,7 @@ impl SsgiFeature {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 8,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -300,7 +248,7 @@ impl SsgiFeature {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 8,
+                    binding: 9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -542,8 +490,6 @@ impl SsgiFeature {
             ],
         });
 
-        self.hiz_init_layout = Some(Tracked::new(hiz_init_layout));
-        self.hiz_downsample_layout = Some(Tracked::new(hiz_downsample_layout));
         self.raw_layout = Some(Tracked::new(raw_layout));
         self.temporal_layout = Some(Tracked::new(temporal_layout));
         self.atrous_layout = Some(Tracked::new(atrous_layout));
@@ -655,56 +601,6 @@ impl SsgiFeature {
     }
 
     fn ensure_pipelines(&mut self, ctx: &mut ExtractContext, max_steps: u32) {
-        if self.hiz_init_pipeline.is_none() {
-            let (module, shader_hash) = ctx.shader_manager.get_or_compile(
-                ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_hiz_init"),
-                &ShaderCompilationOptions::default(),
-            );
-
-            let pipeline_layout =
-                ctx.device
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("SSGI HiZ Init Pipeline Layout"),
-                        bind_group_layouts: &[self.hiz_init_layout.as_deref()],
-                        immediate_size: 0,
-                    });
-
-            self.hiz_init_pipeline = Some(ctx.pipeline_cache.get_or_create_compute(
-                ctx.device,
-                module,
-                &pipeline_layout,
-                &ComputePipelineKey::new(shader_hash),
-                &wgpu::PipelineCompilationOptions::default(),
-                "SSGI HiZ Init Pipeline",
-            ));
-        }
-
-        if self.hiz_downsample_pipeline.is_none() {
-            let (module, shader_hash) = ctx.shader_manager.get_or_compile(
-                ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_hiz_downsample"),
-                &ShaderCompilationOptions::default(),
-            );
-
-            let pipeline_layout =
-                ctx.device
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("SSGI HiZ Downsample Pipeline Layout"),
-                        bind_group_layouts: &[self.hiz_downsample_layout.as_deref()],
-                        immediate_size: 0,
-                    });
-
-            self.hiz_downsample_pipeline = Some(ctx.pipeline_cache.get_or_create_compute(
-                ctx.device,
-                module,
-                &pipeline_layout,
-                &ComputePipelineKey::new(shader_hash),
-                &wgpu::PipelineCompilationOptions::default(),
-                "SSGI HiZ Downsample Pipeline",
-            ));
-        }
-
         if !self.raw_pipelines.contains_key(&max_steps) {
             let global_state_key = (ctx.render_state.id, ctx.extracted_scene.scene_id);
             let gpu_world = ctx
@@ -923,6 +819,7 @@ impl SsgiFeature {
         ctx: &mut GraphBuilderContext<'a, '_>,
         current_color: TextureNodeId,
         scene_depth: TextureNodeId,
+        scene_hiz: TextureNodeId,
         scene_normals: TextureNodeId,
         velocity: TextureNodeId,
         albedo_mrt: TextureNodeId,
@@ -1013,6 +910,7 @@ impl SsgiFeature {
 
             let raw_indirect: TextureNodeId = ctx.graph.add_pass("SSGI_Raw", |builder| {
                 builder.read_texture(scene_depth);
+                builder.read_texture(scene_hiz);
                 builder.read_texture(scene_normals);
 
                 let source_history = builder.read_external_texture(
@@ -1044,6 +942,7 @@ impl SsgiFeature {
                 let out = builder.create_texture("SSGI_Raw_Indirect", raw_desc);
                 let node = SsgiRawNode {
                     scene_depth,
+                    scene_hiz,
                     scene_normals,
                     source_history,
                     pmrem_texture: pmrem_input,
@@ -1259,124 +1158,9 @@ impl SsgiFeature {
     }
 }
 
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-struct SsgiHiZMipState<'a> {
-    mip_level: u32,
-    target_size: (u32, u32),
-    bind_group: Option<&'a wgpu::BindGroup>,
-}
-
-#[allow(dead_code)]
-struct SsgiHiZNode<'a> {
-    scene_depth: TextureNodeId,
-    hiz_texture: TextureNodeId,
-    hiz_init_pipeline: &'a wgpu::ComputePipeline,
-    hiz_downsample_pipeline: &'a wgpu::ComputePipeline,
-    hiz_init_layout: &'a Tracked<wgpu::BindGroupLayout>,
-    hiz_downsample_layout: &'a Tracked<wgpu::BindGroupLayout>,
-    init_bg: Option<&'a wgpu::BindGroup>,
-    mips: &'a mut [SsgiHiZMipState<'a>],
-}
-
-impl<'a> PassNode<'a> for SsgiHiZNode<'a> {
-    fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
-        let mip0 = ctx
-            .views
-            .get_or_create_sub_view(
-                self.hiz_texture,
-                &SubViewKey {
-                    base_mip: 0,
-                    mip_count: Some(1),
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    ..Default::default()
-                },
-            )
-            .clone();
-
-        self.init_bg = Some(
-            ctx.build_bind_group(self.hiz_init_layout, Some("SSGI HiZ Init BG"))
-                .bind_texture(0, self.scene_depth)
-                .bind_tracked_texture_view(1, &mip0)
-                .build(),
-        );
-
-        for mip in self.mips.iter_mut() {
-            let src_view = ctx
-                .views
-                .get_or_create_sub_view(
-                    self.hiz_texture,
-                    &SubViewKey {
-                        base_mip: mip.mip_level - 1,
-                        mip_count: Some(1),
-                        dimension: Some(wgpu::TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )
-                .clone();
-            let dst_view = ctx
-                .views
-                .get_or_create_sub_view(
-                    self.hiz_texture,
-                    &SubViewKey {
-                        base_mip: mip.mip_level,
-                        mip_count: Some(1),
-                        dimension: Some(wgpu::TextureViewDimension::D2),
-                        ..Default::default()
-                    },
-                )
-                .clone();
-
-            mip.bind_group = Some(
-                ctx.build_bind_group(self.hiz_downsample_layout, Some("SSGI HiZ Downsample BG"))
-                    .bind_tracked_texture_view(0, &src_view)
-                    .bind_tracked_texture_view(1, &dst_view)
-                    .build(),
-            );
-        }
-    }
-
-    fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
-        let hiz_texture = ctx.get_texture(self.hiz_texture);
-        let full_w = hiz_texture.width();
-        let full_h = hiz_texture.height();
-
-        let mut init_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("SSGI HiZ Init Compute"),
-            timestamp_writes: None,
-        });
-
-        init_pass.set_pipeline(self.hiz_init_pipeline);
-        init_pass.set_bind_group(0, self.init_bg.expect("SSGI HiZ init BG missing"), &[]);
-        init_pass.dispatch_workgroups(
-            full_w.div_ceil(SSGI_WORKGROUP_SIZE),
-            full_h.div_ceil(SSGI_WORKGROUP_SIZE),
-            1,
-        );
-        drop(init_pass);
-
-        for mip in self.mips.iter() {
-            let mut downsample_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("SSGI HiZ Downsample Compute"),
-                timestamp_writes: None,
-            });
-            downsample_pass.set_pipeline(self.hiz_downsample_pipeline);
-            downsample_pass.set_bind_group(
-                0,
-                mip.bind_group.expect("SSGI HiZ mip BG missing"),
-                &[],
-            );
-            downsample_pass.dispatch_workgroups(
-                mip.target_size.0.div_ceil(SSGI_WORKGROUP_SIZE),
-                mip.target_size.1.div_ceil(SSGI_WORKGROUP_SIZE),
-                1,
-            );
-        }
-    }
-}
-
 struct SsgiRawNode<'a> {
     scene_depth: TextureNodeId,
+    scene_hiz: TextureNodeId,
     scene_normals: TextureNodeId,
     source_history: TextureNodeId,
     pmrem_texture: TextureNodeId,
@@ -1396,12 +1180,13 @@ impl<'a> PassNode<'a> for SsgiRawNode<'a> {
             .bind_texture(0, self.scene_depth)
             .bind_texture(1, self.scene_normals)
             .bind_texture(2, self.source_history)
-            .bind_texture(3, self.pmrem_texture)
-            .bind_common_sampler(4, CommonSampler::LinearClamp)
-            .bind_common_sampler(5, CommonSampler::NearestClamp)
-            .bind_buffer(6, self.uniforms)
-            .bind_tracked_texture_view(7, self.blue_noise_view)
-            .bind_tracked_sampler(8, self.blue_noise_sampler);
+            .bind_texture(3, self.scene_hiz)
+            .bind_texture(4, self.pmrem_texture)
+            .bind_common_sampler(5, CommonSampler::LinearClamp)
+            .bind_common_sampler(6, CommonSampler::NearestClamp)
+            .bind_buffer(7, self.uniforms)
+            .bind_tracked_texture_view(8, self.blue_noise_view)
+            .bind_tracked_sampler(9, self.blue_noise_sampler);
 
         self.transient_bg = Some(builder.build());
     }

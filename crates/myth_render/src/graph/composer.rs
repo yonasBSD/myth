@@ -66,7 +66,7 @@ use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::utils::add_msaa_resolve_pass;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
-    ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, IblComputeFeature,
+    ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature,
     MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature,
     SkyboxFeature, SsaoFeature, SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature,
     TransmissionCopyFeature, TransparentFeature,
@@ -115,6 +115,7 @@ pub struct ComposerContext<'a> {
     pub tone_map_pass: &'a mut ToneMappingFeature,
     pub bloom_pass: &'a mut BloomFeature,
     pub ssao_pass: &'a mut SsaoFeature,
+    pub hiz_pass: &'a mut HiZFeature,
     pub ssgi_pass: &'a mut SsgiFeature,
     // Scene rendering
     pub prepass: &'a mut PrepassFeature,
@@ -650,6 +651,7 @@ impl<'a> FrameComposer<'a> {
             // Track scene_color / scene_depth for the GraphBlackboard (hooks).
             let mut bb_scene_color = None;
             let mut bb_scene_depth = None;
+            let mut bb_scene_hiz = None;
 
             // Debug view: capture intermediate texture IDs for safe resolution.
             #[cfg(feature = "debug_view")]
@@ -686,238 +688,244 @@ impl<'a> FrameComposer<'a> {
 
                 let fxaa_enabled = self.ctx.camera.aa_mode.is_fxaa();
 
-                let (mut active_color, mut scene_depth) = graph_ctx.with_group("Scene", |c| {
-                    let scene_lights = c.with_group("Scene_Lighting", |c| {
-                        import_scene_lighting(c, self.ctx.render_lists)
-                    });
-                    let injected_gpu_lights = self
-                        .gpu_local_light_hook
-                        .as_mut()
-                        .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
-                    let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(
-                        c,
-                        ClusteredLightingInputs {
-                            enabled: self.ctx.clustered_lighting_enabled,
-                            cpu_light_metadata_buffer: scene_lights.light_metadata,
-                            cpu_light_data_buffer: scene_lights.light_storage,
-                            injected_gpu_lights,
-                        },
-                    );
-                    let scene_lighting = ClusteredScreenBindings {
-                        light_metadata: Some(clustered_out.final_light_metadata_buffer),
-                        lights: Some(clustered_out.final_light_data_buffer),
-                        params: self
-                            .ctx
-                            .clustered_lighting_enabled
-                            .then_some(clustered_out.params_buffer),
-                        records: if self.ctx.clustered_lighting_enabled {
-                            clustered_out.cluster_records
-                        } else {
-                            None
-                        },
-                        light_indices: if self.ctx.clustered_lighting_enabled {
-                            clustered_out.light_indices
-                        } else {
-                            None
-                        },
-                        atmosphere_transmittance,
-                        atmosphere_bake_params,
-                    };
+                let (mut active_color, mut scene_depth, mut scene_hiz) =
+                    graph_ctx.with_group("Scene", |c| {
+                        let scene_lights = c.with_group("Scene_Lighting", |c| {
+                            import_scene_lighting(c, self.ctx.render_lists)
+                        });
+                        let injected_gpu_lights = self
+                            .gpu_local_light_hook
+                            .as_mut()
+                            .and_then(|hook| c.with_group("Inject_GPU_Local_Lights", |c| hook(c)));
+                        let clustered_out = self.ctx.clustered_lighting_pass.add_to_graph(
+                            c,
+                            ClusteredLightingInputs {
+                                enabled: self.ctx.clustered_lighting_enabled,
+                                cpu_light_metadata_buffer: scene_lights.light_metadata,
+                                cpu_light_data_buffer: scene_lights.light_storage,
+                                injected_gpu_lights,
+                            },
+                        );
+                        let scene_lighting = ClusteredScreenBindings {
+                            light_metadata: Some(clustered_out.final_light_metadata_buffer),
+                            lights: Some(clustered_out.final_light_data_buffer),
+                            params: self
+                                .ctx
+                                .clustered_lighting_enabled
+                                .then_some(clustered_out.params_buffer),
+                            records: if self.ctx.clustered_lighting_enabled {
+                                clustered_out.cluster_records
+                            } else {
+                                None
+                            },
+                            light_indices: if self.ctx.clustered_lighting_enabled {
+                                clustered_out.light_indices
+                            } else {
+                                None
+                            },
+                            atmosphere_transmittance,
+                            atmosphere_bake_params,
+                        };
 
-                    #[cfg(feature = "debug_view")]
-                    {
-                        dbg_clustered_params = Some(clustered_out.params_buffer);
-                        dbg_clustered_records = clustered_out.cluster_records;
-                    }
-
-                    // 1. Prepass
-                    let prepass_out = self.ctx.prepass.add_to_graph(
-                        c,
-                        needs_normal,
-                        needs_feature_id,
-                        needs_velocity,
-                    );
-
-                    let scene_depth = prepass_out.scene_depth;
-
-                    // 2. SSAO
-                    let ssao_output = if ssao_enabled {
-                        Some(
-                            self.ctx.ssao_pass.add_to_graph(
-                                c,
-                                scene_depth,
-                                prepass_out
-                                    .scene_normals
-                                    .expect("SSAO requires scene normals from Prepass"),
-                            ),
-                        )
-                    } else {
-                        None
-                    };
-
-                    // 3. Opaque
-                    let opaque_out = self.ctx.opaque_pass.add_to_graph(
-                        c,
-                        scene_depth,
-                        self.ctx.extracted_scene.background.clear_color(),
-                        ssss_enabled,
-                        ssgi_enabled,
-                        ssao_output,
-                        shadow_output.shadow_2d,
-                        shadow_output.shadow_cube,
-                        env_dependency_base,
-                        env_dependency_pmrem,
-                        scene_lighting,
-                    );
-
-                    let mut active_color = opaque_out.active_color;
-
-                    // 4. SSSS
-                    if ssss_enabled {
-                        if is_msaa {
-                            let hdr_desc = TextureDesc::new_2d(
-                                c.frame_config.width,
-                                c.frame_config.height,
-                                crate::HDR_TEXTURE_FORMAT,
-                                wgpu::TextureUsages::RENDER_ATTACHMENT
-                                    | wgpu::TextureUsages::TEXTURE_BINDING
-                                    | wgpu::TextureUsages::COPY_SRC,
-                            );
-                            // If MSAA is enabled, resolve the opaque output to an intermediate non-MSAA texture for SSSS input.
-                            active_color = add_msaa_resolve_pass(c, active_color, hdr_desc);
+                        #[cfg(feature = "debug_view")]
+                        {
+                            dbg_clustered_params = Some(clustered_out.params_buffer);
+                            dbg_clustered_records = clustered_out.cluster_records;
                         }
 
-                        active_color = self.ctx.ssss_pass.add_to_graph(
+                        // 1. Prepass
+                        let prepass_out = self.ctx.prepass.add_to_graph(
                             c,
-                            active_color,
-                            prepass_out.scene_depth,
-                            prepass_out.scene_normals.unwrap(),
-                            prepass_out.feature_id.unwrap(),
-                            opaque_out.specular_mrt.unwrap(),
+                            needs_normal,
+                            needs_feature_id,
+                            needs_velocity,
                         );
 
-                        if is_msaa {
-                            // If MSAA is enabled, synchronize the SSSS output back to an MSAA texture for downstream passes (Skybox, Transparent) that expect MSAA input.
-                            // This avoids redundant MSAA resolve + re-multisample operations.
-                            active_color = self.ctx.msaa_sync_pass.add_to_graph(c, active_color);
-                        }
-                    }
+                        let scene_depth = prepass_out.scene_depth;
 
-                    // 5. Skybox
-                    if needs_skybox {
-                        active_color = self.ctx.skybox_pass.add_to_graph(
-                            c,
-                            active_color,
-                            opaque_out.active_depth,
-                            procedural_skybox_dependencies,
-                        );
-                    }
-
-                    if ssgi_enabled {
-                        let taa_history_view = if taa_enabled {
-                            self.ctx.taa_pass.history_color_view()
+                        // 2. SSAO
+                        let ssao_output = if ssao_enabled {
+                            Some(
+                                self.ctx.ssao_pass.add_to_graph(
+                                    c,
+                                    scene_depth,
+                                    prepass_out
+                                        .scene_normals
+                                        .expect("SSAO requires scene normals from Prepass"),
+                                ),
+                            )
                         } else {
                             None
                         };
 
-                        let ssgi_out = self.ctx.ssgi_pass.add_to_graph(
+                        // 3. Opaque
+                        let opaque_out = self.ctx.opaque_pass.add_to_graph(
                             c,
-                            active_color,
                             scene_depth,
-                            prepass_out
-                                .scene_normals
-                                .expect("SSGI requires scene normals from Prepass"),
-                            prepass_out
-                                .velocity_buffer
-                                .expect("SSGI requires motion vectors from Prepass"),
-                            opaque_out
-                                .albedo_mrt
-                                .expect("SSGI requires opaque albedo MRT"),
-                            env_dependency_pmrem.or(env_dependency_base),
-                            taa_history_view,
+                            self.ctx.extracted_scene.background.clear_color(),
+                            ssss_enabled,
+                            ssgi_enabled,
+                            ssao_output,
+                            shadow_output.shadow_2d,
+                            shadow_output.shadow_cube,
+                            env_dependency_base,
+                            env_dependency_pmrem,
+                            scene_lighting,
                         );
 
-                        #[cfg(feature = "debug_view")]
-                        {
-                            dbg_ssgi_raw = Some(ssgi_out.raw_indirect);
-                            dbg_ssgi_denoised = Some(ssgi_out.clean_indirect);
-                        }
+                        let mut active_color = opaque_out.active_color;
 
-                        active_color = ssgi_out.merged_color;
-                    }
+                        let scene_hiz = self.ctx.hiz_pass.add_to_graph(c, scene_depth);
 
-                    // ── 6. TAA Resolve ────────────────────────────────────────────
-                    // Resolve temporal anti-aliasing before bloom/tone-mapping.
-                    // The resolved colour replaces post_transparent_color for
-                    // downstream post-processing.
-                    if taa_enabled && let Some(velocity) = prepass_out.velocity_buffer {
-                        c.with_group("TAA_System", |c| {
-                            active_color = self.ctx.taa_pass.add_to_graph(
+                        // 4. SSSS
+                        if ssss_enabled {
+                            if is_msaa {
+                                let hdr_desc = TextureDesc::new_2d(
+                                    c.frame_config.width,
+                                    c.frame_config.height,
+                                    crate::HDR_TEXTURE_FORMAT,
+                                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                                        | wgpu::TextureUsages::TEXTURE_BINDING
+                                        | wgpu::TextureUsages::COPY_SRC,
+                                );
+                                // If MSAA is enabled, resolve the opaque output to an intermediate non-MSAA texture for SSSS input.
+                                active_color = add_msaa_resolve_pass(c, active_color, hdr_desc);
+                            }
+
+                            active_color = self.ctx.ssss_pass.add_to_graph(
                                 c,
                                 active_color,
-                                velocity,
-                                scene_depth,
+                                prepass_out.scene_depth,
+                                prepass_out.scene_normals.unwrap(),
+                                prepass_out.feature_id.unwrap(),
+                                opaque_out.specular_mrt.unwrap(),
                             );
 
-                            // ── 6b. CAS (Contrast Adaptive Sharpening) ────────────
-                            // Recover fine detail lost to temporal filtering.
-                            if cas_enabled {
-                                active_color = self.ctx.cas_pass.add_to_graph(c, active_color);
+                            if is_msaa {
+                                // If MSAA is enabled, synchronize the SSSS output back to an MSAA texture for downstream passes (Skybox, Transparent) that expect MSAA input.
+                                // This avoids redundant MSAA resolve + re-multisample operations.
+                                active_color =
+                                    self.ctx.msaa_sync_pass.add_to_graph(c, active_color);
                             }
-                        });
-                    }
+                        }
 
-                    #[cfg(feature = "3dgs")]
-                    {
-                        // 7a. Gaussian Splatting
-                        c.with_group("3D_Gaussian_Splatting", |c| {
-                            active_color = self.ctx.gaussian_splatting_pass.add_to_graph(
+                        // 5. Skybox
+                        if needs_skybox {
+                            active_color = self.ctx.skybox_pass.add_to_graph(
                                 c,
                                 active_color,
                                 opaque_out.active_depth,
+                                procedural_skybox_dependencies,
                             );
-                        });
-                    }
+                        }
 
-                    // 7. Transmission Copy
-                    let transmission_tex = if has_transmission {
-                        Some(
-                            self.ctx
-                                .transmission_copy_pass
-                                .add_to_graph(c, active_color),
-                        )
-                    } else {
-                        None
-                    };
+                        if ssgi_enabled {
+                            let taa_history_view = if taa_enabled {
+                                self.ctx.taa_pass.history_color_view()
+                            } else {
+                                None
+                            };
 
-                    // 8. Transparent
-                    let active_color = self.ctx.transparent_pass.add_to_graph(
-                        c,
-                        active_color,
-                        opaque_out.active_depth,
-                        transmission_tex,
-                        ssao_output,
-                        shadow_output.shadow_2d,
-                        shadow_output.shadow_cube,
-                        scene_lighting,
-                    );
+                            let ssgi_out = self.ctx.ssgi_pass.add_to_graph(
+                                c,
+                                active_color,
+                                scene_depth,
+                                scene_hiz,
+                                prepass_out
+                                    .scene_normals
+                                    .expect("SSGI requires scene normals from Prepass"),
+                                prepass_out
+                                    .velocity_buffer
+                                    .expect("SSGI requires motion vectors from Prepass"),
+                                opaque_out
+                                    .albedo_mrt
+                                    .expect("SSGI requires opaque albedo MRT"),
+                                env_dependency_pmrem.or(env_dependency_base),
+                                taa_history_view,
+                            );
 
-                    // Capture intermediate IDs for debug view resolution.
-                    #[cfg(feature = "debug_view")]
-                    {
-                        dbg_normals = prepass_out.scene_normals;
-                        dbg_velocity = prepass_out.velocity_buffer;
-                        dbg_ssao = ssao_output;
-                    }
+                            #[cfg(feature = "debug_view")]
+                            {
+                                dbg_ssgi_raw = Some(ssgi_out.raw_indirect);
+                                dbg_ssgi_denoised = Some(ssgi_out.clean_indirect);
+                            }
 
-                    (active_color, scene_depth)
-                });
+                            active_color = ssgi_out.merged_color;
+                        }
+
+                        // ── 6. TAA Resolve ────────────────────────────────────────────
+                        // Resolve temporal anti-aliasing before bloom/tone-mapping.
+                        // The resolved colour replaces post_transparent_color for
+                        // downstream post-processing.
+                        if taa_enabled && let Some(velocity) = prepass_out.velocity_buffer {
+                            c.with_group("TAA_System", |c| {
+                                active_color = self.ctx.taa_pass.add_to_graph(
+                                    c,
+                                    active_color,
+                                    velocity,
+                                    scene_depth,
+                                );
+
+                                // ── 6b. CAS (Contrast Adaptive Sharpening) ────────────
+                                // Recover fine detail lost to temporal filtering.
+                                if cas_enabled {
+                                    active_color = self.ctx.cas_pass.add_to_graph(c, active_color);
+                                }
+                            });
+                        }
+
+                        #[cfg(feature = "3dgs")]
+                        {
+                            // 7a. Gaussian Splatting
+                            c.with_group("3D_Gaussian_Splatting", |c| {
+                                active_color = self.ctx.gaussian_splatting_pass.add_to_graph(
+                                    c,
+                                    active_color,
+                                    opaque_out.active_depth,
+                                );
+                            });
+                        }
+
+                        // 7. Transmission Copy
+                        let transmission_tex = if has_transmission {
+                            Some(
+                                self.ctx
+                                    .transmission_copy_pass
+                                    .add_to_graph(c, active_color),
+                            )
+                        } else {
+                            None
+                        };
+
+                        // 8. Transparent
+                        let active_color = self.ctx.transparent_pass.add_to_graph(
+                            c,
+                            active_color,
+                            opaque_out.active_depth,
+                            transmission_tex,
+                            ssao_output,
+                            shadow_output.shadow_2d,
+                            shadow_output.shadow_cube,
+                            scene_lighting,
+                        );
+
+                        // Capture intermediate IDs for debug view resolution.
+                        #[cfg(feature = "debug_view")]
+                        {
+                            dbg_normals = prepass_out.scene_normals;
+                            dbg_velocity = prepass_out.velocity_buffer;
+                            dbg_ssao = ssao_output;
+                        }
+
+                        (active_color, scene_depth, scene_hiz)
+                    });
 
                 // ── Before-Post-Process Hooks ──────────────────────────────
                 {
                     let mut blackboard = GraphBlackboard {
                         scene_color: Some(active_color),
                         scene_depth: Some(scene_depth),
+                        scene_hiz: Some(scene_hiz),
                         atmosphere_transmittance,
                         atmosphere_bake_params,
                         surface_out,
@@ -932,6 +940,7 @@ impl<'a> FrameComposer<'a> {
 
                     active_color = blackboard.scene_color.unwrap_or(active_color);
                     scene_depth = blackboard.scene_depth.unwrap_or(scene_depth);
+                    scene_hiz = blackboard.scene_hiz.unwrap_or(scene_hiz);
                 }
 
                 // ── Post-Processing Group ──────────────────────────────────
@@ -970,6 +979,7 @@ impl<'a> FrameComposer<'a> {
 
                     bb_scene_color = Some(active_color);
                     bb_scene_depth = Some(scene_depth);
+                    bb_scene_hiz = Some(scene_hiz);
 
                     surface
                 });
@@ -1103,6 +1113,7 @@ impl<'a> FrameComposer<'a> {
                 let mut blackboard = GraphBlackboard {
                     scene_color: bb_scene_color,
                     scene_depth: bb_scene_depth,
+                    scene_hiz: bb_scene_hiz,
                     atmosphere_transmittance,
                     atmosphere_bake_params,
                     surface_out: current_surface,
