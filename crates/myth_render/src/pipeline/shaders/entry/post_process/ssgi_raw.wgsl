@@ -5,27 +5,27 @@
 {{ scene_lighting_structs }}
 
 const SSGI_MAX_STEPS: u32 = {{ ssgi_max_steps }}u;
+const SSGI_TRACE_STEP_MULTIPLIER: u32 = 4u;
 
 @group(1) @binding(0) var t_depth: texture_depth_2d;
 @group(1) @binding(1) var t_normal: texture_2d<f32>;
-@group(1) @binding(2) var t_hiz: texture_2d<f32>;
-@group(1) @binding(3) var t_source_history: texture_2d<f32>;
-@group(1) @binding(4) var t_pmrem: texture_cube<f32>;
-@group(1) @binding(5) var s_linear: sampler;
-@group(1) @binding(6) var s_point: sampler;
-@group(1) @binding(7) var<uniform> u_ssgi: SsgiUniforms;
+@group(1) @binding(2) var t_source_history: texture_2d<f32>;
+@group(1) @binding(3) var t_pmrem: texture_cube<f32>;
+@group(1) @binding(4) var s_linear: sampler;
+@group(1) @binding(5) var s_point: sampler;
+@group(1) @binding(6) var<uniform> u_ssgi: SsgiUniforms;
 $$ if HIGH_END_NOISE is defined
-@group(1) @binding(8) var t_blue_noise: texture_2d_array<f32>;
+@group(1) @binding(7) var t_blue_noise: texture_2d_array<f32>;
 $$ else
-@group(1) @binding(8) var t_blue_noise: texture_2d<f32>;
+@group(1) @binding(7) var t_blue_noise: texture_2d<f32>;
 $$ endif
-@group(1) @binding(9) var s_blue_noise: sampler;
+@group(1) @binding(8) var s_blue_noise: sampler;
 
 {$ include 'entry/utility/blue_noise' $}
 
 struct ProjectedSample {
-    uv: vec2<f32>,
-    depth: f32,
+    unjittered_uv: vec2<f32>,
+    jittered_uv: vec2<f32>,
     valid: bool,
 };
 
@@ -40,6 +40,18 @@ fn unpack_view_normal(packed: vec4<f32>) -> vec3<f32> {
 
 fn depth_to_linear(z: f32) -> f32 {
     return u_render_state.camera_near / max(z, 0.0001);
+}
+
+fn jitter_uv_offset() -> vec2<f32> {
+    return vec2<f32>(-0.5, 0.5) * u_render_state.jitter;
+}
+
+fn jittered_to_unjittered_uv(uv: vec2<f32>) -> vec2<f32> {
+    return uv - jitter_uv_offset();
+}
+
+fn unjittered_to_jittered_uv(uv: vec2<f32>) -> vec2<f32> {
+    return uv + jitter_uv_offset();
 }
 
 fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
@@ -65,16 +77,24 @@ fn reconstruct_view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     return view_pos.xyz / safe_w;
 }
 
+fn project_unjittered_clip(view_pos: vec3<f32>) -> vec4<f32> {
+    return u_render_state.unjittered_projection_matrix * vec4<f32>(view_pos, 1.0);
+}
+
 fn project_view_position(view_pos: vec3<f32>) -> ProjectedSample {
-    let clip = u_render_state.projection_matrix * vec4<f32>(view_pos, 1.0);
+    let clip = project_unjittered_clip(view_pos);
     if (clip.w <= 1e-5) {
-        return ProjectedSample(vec2<f32>(0.0), 0.0, false);
+        return ProjectedSample(vec2<f32>(0.0), vec2<f32>(0.0), false);
     }
 
     let ndc = clip.xyz / clip.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    let in_bounds = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
-    return ProjectedSample(uv, ndc.z, in_bounds);
+    let unjittered_uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let jittered_uv = unjittered_to_jittered_uv(unjittered_uv);
+    let in_bounds = unjittered_uv.x >= 0.0 && unjittered_uv.x <= 1.0
+        && unjittered_uv.y >= 0.0 && unjittered_uv.y <= 1.0
+        && jittered_uv.x >= 0.0 && jittered_uv.x <= 1.0
+        && jittered_uv.y >= 0.0 && jittered_uv.y <= 1.0;
+    return ProjectedSample(unjittered_uv, jittered_uv, in_bounds);
 }
 
 fn make_tangent_basis(normal: vec3<f32>) -> mat3x3<f32> {
@@ -89,16 +109,6 @@ fn cosine_hemisphere(rnd: vec2<f32>) -> vec3<f32> {
     let cos_theta = sqrt(max(1.0 - rnd.y, 0.0));
     let sin_theta = sqrt(max(rnd.y, 0.0));
     return vec3<f32>(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
-}
-
-fn sample_hiz_bounds(uv: vec2<f32>, mip: u32) -> vec2<f32> {
-    let dims = textureDimensions(t_hiz, i32(mip));
-    let coord = clamp(
-        vec2<i32>(uv * vec2<f32>(dims)),
-        vec2<i32>(0, 0),
-        vec2<i32>(dims) - vec2<i32>(1, 1)
-    );
-    return textureLoad(t_hiz, coord, i32(mip)).xy;
 }
 
 fn sample_environment(view_dir: vec3<f32>) -> vec3<f32> {
@@ -122,10 +132,18 @@ fn sample_environment(view_dir: vec3<f32>) -> vec3<f32> {
     return env * u_environment.env_map_intensity + u_environment.ambient_light;
 }
 
+fn edge_vignette(uv: vec2<f32>) -> f32 {
+    let fade_start = clamp(u_ssgi.merge_params.z, 0.0, 0.999);
+    let fade_end = max(u_ssgi.merge_params.w, fade_start + 1e-3);
+    let edge_dist = abs(uv - vec2<f32>(0.5)) * 2.0;
+    return 1.0 - smoothstep(fade_start, fade_end, max(edge_dist.x, edge_dist.y));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let half_pixel = vec2<u32>(in.position.xy);
     let full_uv = resolve_full_uv(half_pixel);
+    let full_unjittered_uv = jittered_to_unjittered_uv(full_uv);
     let depth = textureSampleLevel(t_depth, s_point, full_uv, 0u);
     let normal_packed = textureSampleLevel(t_normal, s_point, full_uv, 0.0);
 
@@ -140,70 +158,118 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ray_dir = normalize(make_tangent_basis(view_normal) * cosine_hemisphere(random));
 
-    let max_levels = textureNumLevels(t_hiz);
-    let history_available = (u_ssgi.frame_params.w & 2u) != 0u;
+    let history_available = (u_ssgi.frame_params.w & 2u) != 0u && (u_ssgi.frame_params.w & 4u) == 0u;
     let fallback = sample_environment(ray_dir) * u_ssgi.lighting_params.x;
     let max_distance = u_ssgi.ray_params.y;
-    let base_step = max_distance / f32(SSGI_MAX_STEPS);
     let thickness = u_ssgi.ray_params.z;
-    let mip_bias = u_ssgi.lighting_params.y;
 
-    var travel = 0.0;
+    var trace_distance = max_distance;
+    var ray_end = view_pos + ray_dir * trace_distance;
+    var ray_end_projected = project_view_position(ray_end);
+    for (var retry: u32 = 0u; retry < 4u && !ray_end_projected.valid; retry++) {
+        trace_distance *= 0.5;
+        ray_end = view_pos + ray_dir * trace_distance;
+        ray_end_projected = project_view_position(ray_end);
+    }
 
-    for (var step: u32 = 0u; step < SSGI_MAX_STEPS; step++) {
-        let step_scale = 1.0 + f32(step) * u_ssgi.ray_params.w;
-        travel += base_step * step_scale;
-        if (travel > max_distance) {
+    if (!ray_end_projected.valid) {
+        return vec4<f32>(fallback, 1.0);
+    }
+
+    let clip_start = project_unjittered_clip(view_pos);
+    let clip_end = project_unjittered_clip(ray_end);
+    let k0 = 1.0 / max(clip_start.w, 1e-5);
+    let k1 = 1.0 / max(clip_end.w, 1e-5);
+    let q0 = view_pos * k0;
+    let q1 = ray_end * k1;
+
+    let pixel_start = full_unjittered_uv * u_ssgi.full_resolution.xy;
+    let pixel_end = ray_end_projected.unjittered_uv * u_ssgi.full_resolution.xy;
+    let delta_pixels = pixel_end - pixel_start;
+    let pixel_span = max(abs(delta_pixels.x), abs(delta_pixels.y));
+    let stride_scale = max(1.0 + u_ssgi.ray_params.w * 8.0, 1.0);
+    let total_steps = u32(clamp(
+        ceil(pixel_span / stride_scale),
+        1.0,
+        f32(SSGI_MAX_STEPS * SSGI_TRACE_STEP_MULTIPLIER)
+    ));
+    let pixel_step = delta_pixels / f32(total_steps);
+    let q_step = (q1 - q0) / f32(total_steps);
+    let k_step = (k1 - k0) / f32(total_steps);
+
+    var pixel = pixel_start;
+    var q = q0;
+    var k = k0;
+
+    for (var step: u32 = 0u; step < SSGI_MAX_STEPS * SSGI_TRACE_STEP_MULTIPLIER; step++) {
+        if (step >= total_steps) {
             break;
         }
 
-        let sample_pos = view_pos + ray_dir * travel;
-        let projected = project_view_position(sample_pos);
-        if (!projected.valid) {
+        pixel += pixel_step;
+        q += q_step;
+        k += k_step;
+
+        if (abs(k) <= 1e-6) {
             break;
         }
 
-        let screen_delta = abs((projected.uv - full_uv) * u_ssgi.full_resolution.xy);
-        let footprint = max(screen_delta.x, screen_delta.y);
-        let mip = u32(clamp(
-            floor(log2(max(footprint, 1.0)) + mip_bias),
-            0.0,
-            f32(max_levels - 1u)
-        ));
-        let bounds = sample_hiz_bounds(projected.uv, mip);
-        if (projected.depth > bounds.y + 1e-4) {
+        let sample_pos = q / k;
+        let sample_linear = max(-sample_pos.z, u_render_state.camera_near);
+        let sample_unjittered_uv = pixel * u_ssgi.full_resolution.zw;
+        let sample_jittered_uv = unjittered_to_jittered_uv(sample_unjittered_uv);
+        if (sample_unjittered_uv.x < 0.0 || sample_unjittered_uv.x > 1.0
+            || sample_unjittered_uv.y < 0.0 || sample_unjittered_uv.y > 1.0
+            || sample_jittered_uv.x < 0.0 || sample_jittered_uv.x > 1.0
+            || sample_jittered_uv.y < 0.0 || sample_jittered_uv.y > 1.0) {
+            break;
+        }
+
+
+        let hit_depth = textureSampleLevel(t_depth, s_point, sample_jittered_uv, 0u);
+        if (hit_depth <= 0.0) {
             continue;
         }
 
-        let hit_depth = textureSampleLevel(t_depth, s_point, projected.uv, 0u);
-        let hit_normal_packed = textureSampleLevel(t_normal, s_point, projected.uv, 0.0);
-        if (hit_depth <= 0.0 || hit_normal_packed.a < 0.5) {
+        let hit_linear = depth_to_linear(hit_depth);
+        let depth_diff = sample_linear - hit_linear;
+        let depth_scaled_thickness = thickness * max(hit_linear, 1.0);
+        let max_possible_thickness = select(
+            depth_scaled_thickness,
+            max(depth_scaled_thickness, max(thickness, 0.05) * 10.0),
+            u_ssgi.denoise_params.z != 0u
+        );
+        if (depth_diff < 0.0 || depth_diff > max_possible_thickness) {
+            continue;
+        }
+
+        let hit_normal_packed = textureSampleLevel(t_normal, s_point, sample_jittered_uv, 0.0);
+        if (hit_normal_packed.a < 0.5) {
             continue;
         }
 
         let hit_normal = unpack_view_normal(hit_normal_packed);
-        let hit_linear = depth_to_linear(hit_depth);
-        let sample_linear = depth_to_linear(projected.depth);
         let thickness_limit = select(
-            thickness * max(hit_linear, 1.0),
+            depth_scaled_thickness,
             max(thickness, 0.05) / max(saturate(abs(hit_normal.z)), 0.1),
             u_ssgi.denoise_params.z != 0u
         );
-        let depth_diff = sample_linear - hit_linear;
-        if (depth_diff < 0.0 || depth_diff > thickness_limit) {
+        if (depth_diff > thickness_limit) {
             continue;
         }
 
-        let bounce_visibility = saturate(dot(view_normal, ray_dir)) * saturate(dot(hit_normal, -ray_dir));
+        let bounce_visibility = saturate(dot(hit_normal, -ray_dir));
         if (bounce_visibility <= 1e-4) {
-            continue;
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
 
-        let source_color = select(
-            fallback,
-            textureSampleLevel(t_source_history, s_linear, projected.uv, 0.0).rgb,
-            history_available
-        );
+        var source_color = fallback;
+        if (history_available) {
+            let history_color = textureSampleLevel(t_source_history, s_linear, sample_jittered_uv, 0.0).rgb;
+            source_color = mix(fallback, history_color, edge_vignette(sample_unjittered_uv));
+        }
+
+        let travel = length(sample_pos - view_pos);
         let attenuation = 1.0 / (1.0 + travel * travel * 0.25);
         return vec4<f32>(source_color * bounce_visibility * attenuation, 1.0);
     }

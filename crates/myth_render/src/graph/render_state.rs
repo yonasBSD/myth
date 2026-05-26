@@ -144,6 +144,7 @@ impl RenderState {
         let prev_j = self.prev_jitter;
         let prev_unjittered_vp = self.prev_unjittered_vp;
 
+        let unjittered_projection_inverse = camera.unjittered_projection.inverse();
         let unjittered_vp = camera.unjittered_projection * camera.view_matrix;
         let focal_x = (camera.projection_matrix.x_axis.x * viewport_size.0 as f32 * 0.5).abs();
         let focal_y = (camera.projection_matrix.y_axis.y * viewport_size.1 as f32 * 0.5).abs();
@@ -153,9 +154,12 @@ impl RenderState {
         u.view_projection_inverse = camera.view_projection_matrix.inverse();
         u.projection_matrix = camera.projection_matrix;
         u.projection_inverse = camera.projection_matrix.inverse();
+        u.unjittered_projection_matrix = camera.unjittered_projection;
+        u.unjittered_projection_inverse = unjittered_projection_inverse;
         u.view_matrix = camera.view_matrix;
         u.prev_view_projection = prev_vp;
         u.unjittered_view_projection = unjittered_vp;
+        u.unjittered_view_projection_inverse = unjittered_vp.inverse();
         u.prev_unjittered_view_projection = prev_unjittered_vp;
         u.camera_position = camera.position.into();
         u.viewport = glam::Vec2::new(viewport_size.0 as f32, viewport_size.1 as f32);

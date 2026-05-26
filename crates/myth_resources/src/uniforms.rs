@@ -307,6 +307,10 @@ pub struct RenderStateUniforms {
     pub projection_matrix: Mat4,
     #[default(Mat4::IDENTITY)]
     pub projection_inverse: Mat4,
+    #[default(Mat4::IDENTITY)]
+    pub unjittered_projection_matrix: Mat4,
+    #[default(Mat4::IDENTITY)]
+    pub unjittered_projection_inverse: Mat4,
 
     #[default(Mat4::IDENTITY)]
     pub view_matrix: Mat4,
@@ -316,6 +320,8 @@ pub struct RenderStateUniforms {
 
     #[default(Mat4::IDENTITY)]
     pub unjittered_view_projection: Mat4,
+    #[default(Mat4::IDENTITY)]
+    pub unjittered_view_projection_inverse: Mat4,
     #[default(Mat4::IDENTITY)]
     pub prev_unjittered_view_projection: Mat4,
 

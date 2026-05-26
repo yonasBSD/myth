@@ -132,6 +132,7 @@ fn make_render_camera(
         view_projection_matrix: proj * view,
         position: Vec3A::from(pos),
         frustum: Frustum::from_matrix(proj * view),
+        camera_cut: 0,
         near,
         far: f32::INFINITY,
         unjittered_projection: proj,

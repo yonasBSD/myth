@@ -39,6 +39,8 @@ use crate::pipeline::{
 };
 use crate::settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
 
+const SSGI_HISTORY_FLAG_CAMERA_CUT: u32 = 1 << 2;
+
 fn build_pipeline_layout(
     device: &wgpu::Device,
     bind_group_layouts: &[&Tracked<wgpu::BindGroupLayout>],
@@ -600,6 +602,7 @@ impl Renderer {
                     state.taa_pass.extract_and_prepare(
                         &mut extract_ctx,
                         taa_settins.feedback_weight,
+                        camera.camera_cut != 0,
                         self.size,
                         HDR_TEXTURE_FORMAT,
                     );
@@ -636,9 +639,13 @@ impl Renderer {
                 if ssgi_enabled {
                     scene.ssgi.update_resolution(self.size.0, self.size.1);
                     scene.ssgi.set_frame_index(frame_time.frame_count as u32);
-                    scene
-                        .ssgi
-                        .set_history_flags(state.ssgi_pass.history_flags());
+                    scene.ssgi.set_runtime_camera_near(camera.near);
+
+                    let mut ssgi_history_flags = state.ssgi_pass.history_flags();
+                    if camera.camera_cut != 0 {
+                        ssgi_history_flags |= SSGI_HISTORY_FLAG_CAMERA_CUT;
+                    }
+                    scene.ssgi.set_history_flags(ssgi_history_flags);
                     state.ssgi_pass.extract_and_prepare(
                         &mut extract_ctx,
                         &scene.ssgi.uniforms,

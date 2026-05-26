@@ -23,6 +23,7 @@ use myth_resources::ssgi::SsgiUniforms;
 use myth_resources::uniforms::WgslStruct;
 
 const SSGI_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+#[allow(dead_code)]
 const SSGI_WORKGROUP_SIZE: u32 = 8;
 const MAX_ATROUS_PASSES: usize = 4;
 const HISTORY_FLAG_INDIRECT_VALID: u32 = 1 << 0;
@@ -99,6 +100,7 @@ pub struct SsgiFeature {
     half_resolution: (u32, u32),
     history_valid: bool,
     source_history_valid: bool,
+    prev_frame_taa_enabled: bool,
 }
 
 impl Default for SsgiFeature {
@@ -142,6 +144,7 @@ impl SsgiFeature {
             half_resolution: (0, 0),
             history_valid: false,
             source_history_valid: false,
+            prev_frame_taa_enabled: false,
         }
     }
 
@@ -160,6 +163,7 @@ impl SsgiFeature {
     pub fn invalidate_history(&mut self) {
         self.history_valid = false;
         self.source_history_valid = false;
+        self.prev_frame_taa_enabled = false;
     }
 
     fn ensure_layouts(&mut self, device: &wgpu::Device) {
@@ -247,7 +251,7 @@ impl SsgiFeature {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -258,7 +262,7 @@ impl SsgiFeature {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::Cube,
                         multisampled: false,
                     },
                     count: None,
@@ -266,27 +270,17 @@ impl SsgiFeature {
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::Cube,
-                        multisampled: false,
-                    },
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -296,7 +290,7 @@ impl SsgiFeature {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 8,
+                    binding: 7,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -306,7 +300,7 @@ impl SsgiFeature {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 9,
+                    binding: 8,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -438,17 +432,27 @@ impl SsgiFeature {
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -496,17 +500,37 @@ impl SsgiFeature {
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -911,14 +935,6 @@ impl SsgiFeature {
                 .copied()
                 .expect("SSGI raw pipeline missing"),
         );
-        let hiz_init_pipeline = ctx.pipeline_cache.get_compute_pipeline(
-            self.hiz_init_pipeline
-                .expect("SSGI HiZ init pipeline missing"),
-        );
-        let hiz_downsample_pipeline = ctx.pipeline_cache.get_compute_pipeline(
-            self.hiz_downsample_pipeline
-                .expect("SSGI HiZ downsample pipeline missing"),
-        );
         let temporal_pipeline = ctx.pipeline_cache.get_render_pipeline(
             self.temporal_pipeline
                 .expect("SSGI temporal pipeline missing"),
@@ -930,8 +946,6 @@ impl SsgiFeature {
             .pipeline_cache
             .get_render_pipeline(self.merge_pipeline.expect("SSGI merge pipeline missing"));
 
-        let hiz_init_layout = self.hiz_init_layout.as_ref().unwrap();
-        let hiz_downsample_layout = self.hiz_downsample_layout.as_ref().unwrap();
         let raw_layout = self.raw_layout.as_ref().unwrap();
         let temporal_layout = self.temporal_layout.as_ref().unwrap();
         let atrous_layout = self.atrous_layout.as_ref().unwrap();
@@ -951,13 +965,16 @@ impl SsgiFeature {
 
         let half_w = (ctx.frame_config.width / 2).max(1);
         let half_h = (ctx.frame_config.height / 2).max(1);
-        let hiz_mip_count = pyramid_mip_count(ctx.frame_config.width, ctx.frame_config.height);
         let atrous_pass_count = self
             .prepared_atrous_passes
             .clamp(1, MAX_ATROUS_PASSES as u32) as usize;
 
-        self.source_history_input_view = Some(if self.source_history_valid {
-            taa_history_view.unwrap_or_else(|| source_history_view.clone())
+        let taa_enabled = taa_history_view.is_some();
+        let use_taa_source_history =
+            self.source_history_valid && self.prev_frame_taa_enabled && taa_enabled;
+
+        self.source_history_input_view = Some(if use_taa_source_history {
+            taa_history_view.expect("SSGI TAA history view missing")
         } else {
             source_history_view.clone()
         });
@@ -987,48 +1004,6 @@ impl SsgiFeature {
         );
 
         let outputs = ctx.with_group("SSGI_System", |ctx| {
-            let hiz_desc = TextureDesc::new(
-                ctx.frame_config.width,
-                ctx.frame_config.height,
-                1,
-                hiz_mip_count,
-                1,
-                wgpu::TextureDimension::D2,
-                SSGI_TEXTURE_FORMAT,
-                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
-            );
-
-            let hiz_tex: TextureNodeId = ctx.graph.add_pass("SSGI_HiZ", |builder| {
-                builder.read_texture(scene_depth);
-                let out = builder.create_texture("SSGI_HiZ_Tex", hiz_desc);
-
-                let mut mips = Vec::with_capacity(hiz_mip_count.saturating_sub(1) as usize);
-                for mip in 1..hiz_mip_count {
-                    mips.push(SsgiHiZMipState {
-                        mip_level: mip,
-                        target_size: (
-                            (ctx.frame_config.width >> mip).max(1),
-                            (ctx.frame_config.height >> mip).max(1),
-                        ),
-                        bind_group: None,
-                    });
-                }
-
-                let mips = builder.graph.alloc_slice_mut(&mips);
-                let node = SsgiHiZNode {
-                    scene_depth,
-                    hiz_texture: out,
-                    hiz_init_pipeline,
-                    hiz_downsample_pipeline,
-                    hiz_init_layout,
-                    hiz_downsample_layout,
-                    init_bg: None,
-                    mips,
-                };
-
-                (node, out)
-            });
-
             let raw_desc = TextureDesc::new_2d(
                 half_w,
                 half_h,
@@ -1039,7 +1014,6 @@ impl SsgiFeature {
             let raw_indirect: TextureNodeId = ctx.graph.add_pass("SSGI_Raw", |builder| {
                 builder.read_texture(scene_depth);
                 builder.read_texture(scene_normals);
-                builder.read_texture(hiz_tex);
 
                 let source_history = builder.read_external_texture(
                     "SSGI_Source_History_Read",
@@ -1071,7 +1045,6 @@ impl SsgiFeature {
                 let node = SsgiRawNode {
                     scene_depth,
                     scene_normals,
-                    hiz_texture: hiz_tex,
                     source_history,
                     pmrem_texture: pmrem_input,
                     uniforms,
@@ -1161,6 +1134,7 @@ impl SsgiFeature {
                     builder.read_texture(clean_indirect);
                     builder.read_texture(scene_depth);
                     builder.read_texture(scene_normals);
+                    builder.read_texture(temporal_meta);
                     let uniforms = builder.read_external_buffer(
                         uniform_name,
                         uniforms_desc,
@@ -1172,6 +1146,7 @@ impl SsgiFeature {
                         input_indirect: clean_indirect,
                         scene_depth,
                         scene_normals,
+                        variance_meta: temporal_meta,
                         uniforms,
                         output_tex: out,
                         pipeline: atrous_pipeline,
@@ -1196,6 +1171,8 @@ impl SsgiFeature {
                 builder.read_texture(current_color);
                 builder.read_texture(clean_indirect);
                 builder.read_texture(albedo_mrt);
+                builder.read_texture(scene_depth);
+                builder.read_texture(scene_normals);
                 let uniforms =
                     builder.read_external_buffer("SSGI_Uniforms", uniforms_desc, uniforms_buffer);
 
@@ -1204,6 +1181,8 @@ impl SsgiFeature {
                     current_color,
                     clean_indirect,
                     albedo_mrt,
+                    scene_depth,
+                    scene_normals,
                     uniforms,
                     output_tex: out,
                     pipeline: merge_pipeline,
@@ -1275,17 +1254,20 @@ impl SsgiFeature {
 
         self.history_valid = true;
         self.source_history_valid = true;
+        self.prev_frame_taa_enabled = taa_enabled;
         outputs
     }
 }
 
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 struct SsgiHiZMipState<'a> {
     mip_level: u32,
     target_size: (u32, u32),
     bind_group: Option<&'a wgpu::BindGroup>,
 }
 
+#[allow(dead_code)]
 struct SsgiHiZNode<'a> {
     scene_depth: TextureNodeId,
     hiz_texture: TextureNodeId,
@@ -1396,7 +1378,6 @@ impl<'a> PassNode<'a> for SsgiHiZNode<'a> {
 struct SsgiRawNode<'a> {
     scene_depth: TextureNodeId,
     scene_normals: TextureNodeId,
-    hiz_texture: TextureNodeId,
     source_history: TextureNodeId,
     pmrem_texture: TextureNodeId,
     uniforms: BufferNodeId,
@@ -1414,14 +1395,13 @@ impl<'a> PassNode<'a> for SsgiRawNode<'a> {
             .build_bind_group(self.layout, Some("SSGI Raw BG"))
             .bind_texture(0, self.scene_depth)
             .bind_texture(1, self.scene_normals)
-            .bind_texture(2, self.hiz_texture)
-            .bind_texture(3, self.source_history)
-            .bind_texture(4, self.pmrem_texture)
-            .bind_common_sampler(5, CommonSampler::LinearClamp)
-            .bind_common_sampler(6, CommonSampler::NearestClamp)
-            .bind_buffer(7, self.uniforms)
-            .bind_tracked_texture_view(8, self.blue_noise_view)
-            .bind_tracked_sampler(9, self.blue_noise_sampler);
+            .bind_texture(2, self.source_history)
+            .bind_texture(3, self.pmrem_texture)
+            .bind_common_sampler(4, CommonSampler::LinearClamp)
+            .bind_common_sampler(5, CommonSampler::NearestClamp)
+            .bind_buffer(6, self.uniforms)
+            .bind_tracked_texture_view(7, self.blue_noise_view)
+            .bind_tracked_sampler(8, self.blue_noise_sampler);
 
         self.transient_bg = Some(builder.build());
     }
@@ -1503,6 +1483,7 @@ struct SsgiAtrousNode<'a> {
     input_indirect: TextureNodeId,
     scene_depth: TextureNodeId,
     scene_normals: TextureNodeId,
+    variance_meta: TextureNodeId,
     uniforms: BufferNodeId,
     output_tex: TextureNodeId,
     pipeline: &'a wgpu::RenderPipeline,
@@ -1517,9 +1498,10 @@ impl<'a> PassNode<'a> for SsgiAtrousNode<'a> {
                 0 => self.input_indirect,
                 1 => self.scene_depth,
                 2 => self.scene_normals,
-                3 => CommonSampler::LinearClamp,
-                4 => CommonSampler::NearestClamp,
-                5 => self.uniforms,
+                3 => self.variance_meta,
+                4 => CommonSampler::LinearClamp,
+                5 => CommonSampler::NearestClamp,
+                6 => self.uniforms,
             ]),
         );
     }
@@ -1545,6 +1527,8 @@ struct SsgiMergeNode<'a> {
     current_color: TextureNodeId,
     clean_indirect: TextureNodeId,
     albedo_mrt: TextureNodeId,
+    scene_depth: TextureNodeId,
+    scene_normals: TextureNodeId,
     uniforms: BufferNodeId,
     output_tex: TextureNodeId,
     pipeline: &'a wgpu::RenderPipeline,
@@ -1559,9 +1543,11 @@ impl<'a> PassNode<'a> for SsgiMergeNode<'a> {
                 0 => self.current_color,
                 1 => self.clean_indirect,
                 2 => self.albedo_mrt,
-                3 => CommonSampler::LinearClamp,
-                4 => CommonSampler::NearestClamp,
-                5 => self.uniforms,
+                3 => self.scene_depth,
+                4 => self.scene_normals,
+                5 => CommonSampler::LinearClamp,
+                6 => CommonSampler::NearestClamp,
+                7 => self.uniforms,
             ]),
         );
     }
@@ -1583,6 +1569,7 @@ impl<'a> PassNode<'a> for SsgiMergeNode<'a> {
     }
 }
 
+#[allow(dead_code)]
 fn pyramid_mip_count(width: u32, height: u32) -> u32 {
     width.max(height).max(1).ilog2() + 1
 }

@@ -485,7 +485,7 @@ fn hierarchy_camera_sync_on_update() {
     update_hierarchy_iterative(&mut nodes, &mut cameras, &roots);
 
     // Camera's view projection should reflect the node's world position
-    let cam = cameras.get(handle).unwrap();
+    let cam = cameras.get_mut(handle).unwrap();
     let cam_render = cam.extract_render_camera();
     assert!(
         approx_eq(cam_render.position.y, 5.0),

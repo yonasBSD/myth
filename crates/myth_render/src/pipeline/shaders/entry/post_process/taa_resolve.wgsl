@@ -23,7 +23,7 @@
 struct TaaParams {
     feedback_weight: f32,
     camera_near: f32,
-    _padding0: f32,
+    camera_cut: f32,
     _padding1: f32,
 };
 @group(0) @binding(7) var<uniform> u_params: TaaParams;
@@ -171,10 +171,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // ════════════════════════════════════════════════════════════════════
 
     let history_uv = uv - velocity;
+    let current_hdr = textureSampleLevel(t_current_color, s_nearest, uv, 0.0).rgb;
+
+    if (u_params.camera_cut > 0.5) {
+        return vec4<f32>(current_hdr, 1.0);
+    }
 
     // Reject out-of-screen history immediately
     if (history_uv.x < 0.0 || history_uv.x > 1.0 || history_uv.y < 0.0 || history_uv.y > 1.0) {
-        return vec4<f32>(textureSampleLevel(t_current_color, s_nearest, uv, 0.0).rgb, 1.0);
+        return vec4<f32>(current_hdr, 1.0);
     }
 
 
@@ -183,7 +188,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // // 3. Sample current frame colour (center pixel)
     // // ════════════════════════════════════════════════════════════════════
 
-    let current_color = tonemap_per_channel(textureSampleLevel(t_current_color, s_nearest, uv, 0.0).rgb);
+    let current_color = tonemap_per_channel(current_hdr);
 
     // ════════════════════════════════════════════════════════════════════
     // 4. Catmull-Rom 5-Tap history sampling (high-quality bicubic)

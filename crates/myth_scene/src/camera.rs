@@ -146,6 +146,8 @@ pub struct RenderCamera {
     pub frustum: Frustum,
     /// Current-frame TAA jitter in NDC space.
     pub jitter: Vec2,
+    /// Single-frame history rejection hint for temporal effects.
+    pub camera_cut: u32,
     pub near: f32,
     pub far: f32,
 
@@ -191,7 +193,12 @@ pub struct Camera {
     pub(crate) view_projection_matrix: Mat4,
     pub(crate) frustum: Frustum,
     pub(crate) jitter: Vec2,
+    view_state_initialized: bool,
+    pending_camera_cut: bool,
 }
+
+const CAMERA_CUT_POSITION_THRESHOLD_SQ: f32 = 4.0;
+const CAMERA_CUT_FORWARD_DOT_THRESHOLD: f32 = 0.8;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ProjectionType {
@@ -260,12 +267,14 @@ impl Camera {
     /// Sets the projection type and updates the projection matrix.
     pub fn set_projection_type(&mut self, projection_type: ProjectionType) {
         self.projection_type = projection_type;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
     /// Sets the field of view in radians and updates the projection matrix.
     pub fn set_fov(&mut self, fov: f32) {
         self.fov = fov;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
@@ -278,24 +287,28 @@ impl Camera {
     /// Sets the aspect ratio and updates the projection matrix.
     pub fn set_aspect(&mut self, aspect: f32) {
         self.aspect = aspect;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
     /// Sets the near clipping plane and updates the projection matrix.
     pub fn set_near(&mut self, near: f32) {
         self.near = near;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
     /// Sets the far clipping plane and updates the projection matrix.
     pub fn set_far(&mut self, far: f32) {
         self.far = far;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
     /// Sets the orthographic size and updates the projection matrix.
     pub fn set_ortho_size(&mut self, ortho_size: f32) {
         self.ortho_size = ortho_size;
+        self.mark_camera_cut();
         self.update_projection_matrix();
     }
 
@@ -324,6 +337,8 @@ impl Camera {
             view_projection_matrix: Mat4::IDENTITY,
             frustum: Frustum::default(),
             jitter: Vec2::ZERO,
+            view_state_initialized: false,
+            pending_camera_cut: false,
         };
 
         cam.update_projection_matrix();
@@ -355,6 +370,8 @@ impl Camera {
             view_projection_matrix: Mat4::IDENTITY,
             frustum: Frustum::default(),
             jitter: Vec2::ZERO,
+            view_state_initialized: false,
+            pending_camera_cut: false,
         };
 
         cam.update_projection_matrix();
@@ -369,7 +386,12 @@ impl Camera {
     /// convert Halton offsets into precise NDC-space sub-pixel jitter.
     pub fn set_viewport_size(&mut self, width: f32, height: f32) {
         self.viewport_size = Vec2::new(width.max(1.0), height.max(1.0));
+        self.mark_camera_cut();
         self.set_aspect(width / height.max(1.0));
+    }
+
+    pub fn mark_camera_cut(&mut self) {
+        self.pending_camera_cut = true;
     }
 
     /// Returns `true` when the current AA mode is TAA.
@@ -394,6 +416,7 @@ impl Camera {
         let was_taa = self.aa_mode.is_taa();
         let is_taa = mode.is_taa();
         self.aa_mode = mode;
+        self.mark_camera_cut();
 
         if was_taa && !is_taa {
             self.frame_index = 0;
@@ -464,7 +487,24 @@ impl Camera {
     }
 
     pub fn update_view_projection(&mut self, world_transform: &Affine3A) {
+        if self.view_state_initialized {
+            let prev_world = Mat4::from(self.world_matrix);
+            let curr_world = Mat4::from(*world_transform);
+            let position_delta_sq =
+                (world_transform.translation - self.world_matrix.translation).length_squared();
+            let prev_forward = (-prev_world.z_axis.truncate()).normalize_or_zero();
+            let curr_forward = (-curr_world.z_axis.truncate()).normalize_or_zero();
+            let forward_dot = prev_forward.dot(curr_forward);
+
+            if position_delta_sq > CAMERA_CUT_POSITION_THRESHOLD_SQ
+                || forward_dot < CAMERA_CUT_FORWARD_DOT_THRESHOLD
+            {
+                self.mark_camera_cut();
+            }
+        }
+
         self.world_matrix = *world_transform;
+        self.view_state_initialized = true;
 
         // 1. View Matrix = World Inverse
         self.view_matrix = Mat4::from(*world_transform).inverse();
@@ -477,7 +517,10 @@ impl Camera {
     }
 
     #[must_use]
-    pub fn extract_render_camera(&self) -> RenderCamera {
+    pub fn extract_render_camera(&mut self) -> RenderCamera {
+        let camera_cut = u32::from(self.pending_camera_cut);
+        self.pending_camera_cut = false;
+
         RenderCamera {
             view_matrix: self.view_matrix,
             projection_matrix: self.projection_matrix,
@@ -486,6 +529,7 @@ impl Camera {
             position: self.world_matrix.translation,
             frustum: self.frustum,
             jitter: self.jitter,
+            camera_cut,
             near: self.near,
             far: self.far,
             aa_mode: self.aa_mode,
@@ -502,6 +546,7 @@ impl Camera {
         let center = bbox.center();
         let radius = bbox.size().length() * 0.5;
         self.near = radius / 100.0;
+        self.mark_camera_cut();
         self.update_projection_matrix();
 
         // Position the camera at a distance proportional to the bounding sphere radius

@@ -5,9 +5,10 @@
 @group(0) @binding(0) var t_indirect: texture_2d<f32>;
 @group(0) @binding(1) var t_depth: texture_depth_2d;
 @group(0) @binding(2) var t_normal: texture_2d<f32>;
-@group(0) @binding(3) var s_linear: sampler;
-@group(0) @binding(4) var s_point: sampler;
-@group(0) @binding(5) var<uniform> u_ssgi: SsgiUniforms;
+@group(0) @binding(3) var t_variance_meta: texture_2d<f32>;
+@group(0) @binding(4) var s_linear: sampler;
+@group(0) @binding(5) var s_point: sampler;
+@group(0) @binding(6) var<uniform> u_ssgi: SsgiUniforms;
 
 const KERNEL_WEIGHTS: array<f32, 2> = array<f32, 2>(0.5, 0.25);
 
@@ -21,7 +22,7 @@ fn unpack_view_normal(packed: vec4<f32>) -> vec3<f32> {
 }
 
 fn linearize_depth(z: f32) -> f32 {
-    return 1.0 / max(z, 0.0001);
+    return u_ssgi.temporal_params.z / max(z, 0.0001);
 }
 
 fn half_pixel_to_uv(half_pixel: vec2<u32>) -> vec2<f32> {
@@ -65,10 +66,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let center_linear = linearize_depth(center_depth);
     let center_normal = unpack_view_normal(center_normal_packed);
     let center_luma = perceptual_luma(center.rgb);
+    let spatial_variance = max(textureLoad(t_variance_meta, vec2<i32>(center_pixel), 0).a, 1e-4);
+    let variance_sigma = sqrt(spatial_variance);
+    let estimated_variance = max(variance_sigma, 1e-3);
     let step_size = i32(max(u_ssgi.denoise_params.y, 1u));
     let half_extent = vec2<i32>(i32(u_ssgi.half_resolution.x), i32(u_ssgi.half_resolution.y));
     let depth_sigma = max(u_ssgi.reprojection_params.w * max(center_linear, 1.0), 1e-3);
-    let luma_phi = max(u_ssgi.lighting_params.w, 1e-3);
+    let luma_phi = max(u_ssgi.lighting_params.w * estimated_variance, 1e-3);
     let center_weight = KERNEL_WEIGHTS[0] * KERNEL_WEIGHTS[0];
 
     var color_sum = center.rgb * center_weight;
@@ -112,8 +116,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             );
 
             let sample_luma = perceptual_luma(sample_indirect.rgb);
-            let luma_delta = center_luma - sample_luma;
-            let luma_weight = exp(-(luma_delta * luma_delta) / (2.0 * luma_phi * luma_phi));
+            let luma_delta = abs(center_luma - sample_luma);
+            let luma_weight = exp(-luma_delta / max(luma_phi, 1e-4));
             let spatial_weight = KERNEL_WEIGHTS[u32(abs(x))] * KERNEL_WEIGHTS[u32(abs(y))];
             let weight = spatial_weight * depth_weight * normal_weight * luma_weight;
 

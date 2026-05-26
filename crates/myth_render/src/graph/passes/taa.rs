@@ -64,6 +64,7 @@ pub struct TaaFeature {
 
     last_feedback_weight: f32,
     last_camera_near: f32,
+    last_camera_cut: f32,
 }
 
 impl Default for TaaFeature {
@@ -85,6 +86,7 @@ impl TaaFeature {
             params_buffer: None,
             last_feedback_weight: -1.0, // invalid default to ensure first update
             last_camera_near: -1.0,     // invalid default to ensure first update
+            last_camera_cut: -1.0,
         }
     }
 
@@ -158,6 +160,7 @@ impl TaaFeature {
         &mut self,
         ctx: &mut ExtractContext,
         feedback_weight: f32,
+        camera_cut: bool,
         size: (u32, u32),
         output_format: wgpu::TextureFormat,
     ) {
@@ -266,10 +269,17 @@ impl TaaFeature {
             self.params_buffer = Some(Tracked::new(buffer));
         }
 
+        let camera_cut_value = if camera_cut { 1.0 } else { 0.0 };
         if (self.last_feedback_weight - feedback_weight).abs() > f32::EPSILON
             || (ctx.render_camera.near - self.last_camera_near).abs() > f32::EPSILON
+            || (self.last_camera_cut - camera_cut_value).abs() > f32::EPSILON
         {
-            let data: [f32; 4] = [feedback_weight, ctx.render_camera.near, 0.0, 0.0];
+            let data: [f32; 4] = [
+                feedback_weight,
+                ctx.render_camera.near,
+                camera_cut_value,
+                0.0,
+            ];
             ctx.queue.write_buffer(
                 self.params_buffer.as_ref().unwrap(),
                 0,
@@ -277,6 +287,7 @@ impl TaaFeature {
             );
             self.last_feedback_weight = feedback_weight;
             self.last_camera_near = ctx.render_camera.near;
+            self.last_camera_cut = camera_cut_value;
         }
 
         self.ensure_history_buffers(ctx.device, size.0, size.1, depth_format);

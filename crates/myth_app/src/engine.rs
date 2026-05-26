@@ -392,7 +392,7 @@ impl Engine {
         let scene_handle = self.scene_manager.active_handle()?;
         let scene = self.scene_manager.get_scene_mut(scene_handle)?;
         let camera_node = scene.active_camera?;
-        let cam = scene.cameras.get(camera_node)?;
+        let cam = scene.cameras.get_mut(camera_node)?;
         let render_camera = cam.extract_render_camera();
 
         self.renderer

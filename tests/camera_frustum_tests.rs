@@ -26,7 +26,7 @@ fn approx(a: f32, b: f32) -> bool {
 
 #[test]
 fn perspective_reverse_z_near_maps_to_1() {
-    let cam = Camera::new_perspective(60.0, 1.0, 0.1);
+    let mut cam = Camera::new_perspective(60.0, 1.0, 0.1);
     let rc = cam.extract_render_camera();
 
     // In reverse-Z infinite perspective, a point at z = -near in view space
@@ -41,7 +41,7 @@ fn perspective_reverse_z_near_maps_to_1() {
 
 #[test]
 fn perspective_reverse_z_far_maps_to_0() {
-    let cam = Camera::new_perspective(60.0, 1.0, 0.1);
+    let mut cam = Camera::new_perspective(60.0, 1.0, 0.1);
     let rc = cam.extract_render_camera();
 
     // In infinite reverse-Z, as z → -∞, NDC z → 0.0
@@ -55,8 +55,8 @@ fn perspective_reverse_z_far_maps_to_0() {
 
 #[test]
 fn perspective_aspect_ratio_affects_fov() {
-    let cam_wide = Camera::new_perspective(60.0, 2.0, 0.1); // wide
-    let cam_square = Camera::new_perspective(60.0, 1.0, 0.1);
+    let mut cam_wide = Camera::new_perspective(60.0, 2.0, 0.1); // wide
+    let mut cam_square = Camera::new_perspective(60.0, 1.0, 0.1);
     let rc_wide = cam_wide.extract_render_camera();
     let rc_square = cam_square.extract_render_camera();
 
@@ -244,7 +244,7 @@ fn frustum_shadow_caster_no_near_cull() {
 
 #[test]
 fn render_camera_has_correct_near() {
-    let cam = Camera::new_perspective(60.0, 1.0, 0.5);
+    let mut cam = Camera::new_perspective(60.0, 1.0, 0.5);
     let render_cam = cam.extract_render_camera();
     assert!(approx(render_cam.near, 0.5));
 }

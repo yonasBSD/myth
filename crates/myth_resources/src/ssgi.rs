@@ -57,6 +57,10 @@ pub struct SsgiUniforms {
     pub reprojection_params: Vec4,
     /// (fallback_env_weight, hiz_mip_bias, spatial_normal_power, luma_phi)
     pub lighting_params: Vec4,
+    /// (neighborhood_clamp_gamma, firefly_luma_limit, camera_near, reserved)
+    pub temporal_params: Vec4,
+    /// (upsample_depth_sensitivity, upsample_normal_power, edge_fade_start, edge_fade_end)
+    pub merge_params: Vec4,
     /// (frame_index, max_steps, checkerboard_enabled, reserved)
     pub frame_params: UVec4,
     /// (atrous_passes, atrous_step_size, thickness_heuristic_enabled, reserved)
@@ -83,6 +87,8 @@ impl Default for SsgiSettings {
             ray_params: Vec4::new(1.0, 6.0, 0.2, 0.12),
             reprojection_params: Vec4::new(0.12, 0.85, 0.15, 0.75),
             lighting_params: Vec4::new(1.0, 0.0, 32.0, 0.35),
+            temporal_params: Vec4::new(1.25, 20.0, 0.1, 0.0),
+            merge_params: Vec4::new(32.0, 32.0, 0.82, 1.0),
             frame_params: UVec4::new(0, 16, 0, 0),
             denoise_params: UVec4::new(3, 1, 1, 0),
         };
@@ -252,6 +258,63 @@ impl SsgiSettings {
         self.uniforms.read().lighting_params.w
     }
 
+    pub fn set_clamp_gamma(&mut self, gamma: f32) {
+        self.mark_custom();
+        self.uniforms.write().temporal_params.x = gamma.clamp(0.0, 8.0);
+    }
+
+    #[must_use]
+    pub fn clamp_gamma(&self) -> f32 {
+        self.uniforms.read().temporal_params.x
+    }
+
+    pub fn set_firefly_luma_limit(&mut self, limit: f32) {
+        self.mark_custom();
+        self.uniforms.write().temporal_params.y = limit.max(0.0);
+    }
+
+    #[must_use]
+    pub fn firefly_luma_limit(&self) -> f32 {
+        self.uniforms.read().temporal_params.y
+    }
+
+    pub fn set_upsample_depth_sensitivity(&mut self, sensitivity: f32) {
+        self.mark_custom();
+        self.uniforms.write().merge_params.x = sensitivity.max(0.0);
+    }
+
+    #[must_use]
+    pub fn upsample_depth_sensitivity(&self) -> f32 {
+        self.uniforms.read().merge_params.x
+    }
+
+    pub fn set_upsample_normal_power(&mut self, power: f32) {
+        self.mark_custom();
+        self.uniforms.write().merge_params.y = power.max(1.0);
+    }
+
+    #[must_use]
+    pub fn upsample_normal_power(&self) -> f32 {
+        self.uniforms.read().merge_params.y
+    }
+
+    pub fn set_edge_fade_range(&mut self, start: f32, end: f32) {
+        self.mark_custom();
+
+        let safe_start = start.clamp(0.0, 0.999);
+        let safe_end = end.clamp(safe_start + 1e-3, 1.0);
+
+        let mut uniforms = self.uniforms.write();
+        uniforms.merge_params.z = safe_start;
+        uniforms.merge_params.w = safe_end;
+    }
+
+    #[must_use]
+    pub fn edge_fade_range(&self) -> (f32, f32) {
+        let params = self.uniforms.read().merge_params;
+        (params.z, params.w)
+    }
+
     pub fn set_max_steps(&mut self, max_steps: u32) {
         self.mark_custom();
         self.uniforms.write().frame_params.y = max_steps.clamp(4, 64);
@@ -310,6 +373,10 @@ impl SsgiSettings {
         self.uniforms.read().frame_params.w
     }
 
+    pub fn set_runtime_camera_near(&mut self, near: f32) {
+        self.uniforms.write().temporal_params.z = near.max(0.0001);
+    }
+
     pub fn update_resolution(&mut self, width: u32, height: u32) {
         let half_w = (width / 2).max(1);
         let half_h = (height / 2).max(1);
@@ -346,6 +413,8 @@ impl SsgiSettings {
                 guard.ray_params = Vec4::new(0.9, 4.5, 0.28, 0.22);
                 guard.reprojection_params = Vec4::new(0.08, 0.80, 0.18, 1.10);
                 guard.lighting_params = Vec4::new(1.0, 0.45, 16.0, 0.45);
+                guard.temporal_params = Vec4::new(1.8, 12.0, guard.temporal_params.z, 0.0);
+                guard.merge_params = Vec4::new(16.0, 16.0, 0.76, 1.0);
                 guard.frame_params.y = 8;
                 guard.frame_params.z = 1;
                 guard.denoise_params = UVec4::new(1, 1, 0, 0);
@@ -354,6 +423,8 @@ impl SsgiSettings {
                 guard.ray_params = Vec4::new(1.0, 5.5, 0.24, 0.16);
                 guard.reprojection_params = Vec4::new(0.10, 0.84, 0.16, 0.90);
                 guard.lighting_params = Vec4::new(1.0, 0.25, 24.0, 0.40);
+                guard.temporal_params = Vec4::new(1.5, 16.0, guard.temporal_params.z, 0.0);
+                guard.merge_params = Vec4::new(24.0, 24.0, 0.79, 1.0);
                 guard.frame_params.y = 12;
                 guard.frame_params.z = 1;
                 guard.denoise_params = UVec4::new(2, 1, 1, 0);
@@ -362,6 +433,8 @@ impl SsgiSettings {
                 guard.ray_params = Vec4::new(1.0, 6.0, 0.20, 0.12);
                 guard.reprojection_params = Vec4::new(0.12, 0.85, 0.15, 0.75);
                 guard.lighting_params = Vec4::new(1.0, 0.0, 32.0, 0.35);
+                guard.temporal_params = Vec4::new(1.25, 20.0, guard.temporal_params.z, 0.0);
+                guard.merge_params = Vec4::new(32.0, 32.0, 0.82, 1.0);
                 guard.frame_params.y = 16;
                 guard.frame_params.z = 0;
                 guard.denoise_params = UVec4::new(3, 1, 1, 0);
@@ -370,6 +443,8 @@ impl SsgiSettings {
                 guard.ray_params = Vec4::new(1.0, 8.0, 0.16, 0.08);
                 guard.reprojection_params = Vec4::new(0.16, 0.90, 0.12, 0.55);
                 guard.lighting_params = Vec4::new(1.0, 0.0, 48.0, 0.30);
+                guard.temporal_params = Vec4::new(1.0, 24.0, guard.temporal_params.z, 0.0);
+                guard.merge_params = Vec4::new(40.0, 48.0, 0.84, 1.0);
                 guard.frame_params.y = 24;
                 guard.frame_params.z = 0;
                 guard.denoise_params = UVec4::new(4, 1, 1, 0);

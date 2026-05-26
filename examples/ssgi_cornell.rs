@@ -2,7 +2,7 @@
 //! name = "SSGI Cornell Box"
 //! category = "Lighting"
 //! description = "High-contrast Cornell-box style scene for validating screen-space GI, quality presets, and optional debug overlays."
-//! instructions = "Press T to toggle SSGI\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views."
+//! instructions = "Press T to toggle SSGI\nPress Y to toggle TAA\nPress Q to cycle SSGI quality\nPress G to cycle SSGI debug views."
 //! order = 366
 //! features = ["debug_view"]
 //!
@@ -23,6 +23,14 @@ fn next_quality(current: SsgiQuality) -> SsgiQuality {
         .position(|preset| *preset == current)
         .unwrap_or(0);
     presets[(index + 1) % presets.len()]
+}
+
+fn toggle_taa(mode: AntiAliasingMode) -> AntiAliasingMode {
+    if mode.is_taa() {
+        AntiAliasingMode::fxaa()
+    } else {
+        AntiAliasingMode::taa_fxaa()
+    }
 }
 
 #[cfg(feature = "debug_view")]
@@ -172,6 +180,13 @@ impl AppHandler for SsgiCornellDemo {
             scene.ssgi.set_quality(next);
         }
 
+        if engine.input.get_key_down(Key::Y)
+            && let Some(camera_node) = scene.active_camera
+            && let Some(camera) = scene.get_camera_mut(camera_node)
+        {
+            camera.set_aa_mode(toggle_taa(camera.aa_mode));
+        }
+
         #[cfg(feature = "debug_view")]
         if engine.input.get_key_down(Key::G)
             && let Some(camera_node) = scene.active_camera
@@ -205,9 +220,20 @@ impl AppHandler for SsgiCornellDemo {
             let debug_label = "Final Image";
 
             let enabled_label = if scene.ssgi.enabled { "On" } else { "Off" };
+            let aa_label = scene
+                .query_main_camera_bundle()
+                .map(|(_, camera)| {
+                    if camera.aa_mode.is_taa() {
+                        "TAA+FXAA"
+                    } else {
+                        "FXAA"
+                    }
+                })
+                .unwrap_or("Unknown");
             window.set_title(&format!(
-                "SSGI Cornell Box | SSGI: {} | Quality: {} | View: {} | FPS: {:.2}",
+                "SSGI Cornell Box | SSGI: {} | AA: {} | Quality: {} | View: {} | FPS: {:.2}",
                 enabled_label,
+                aa_label,
                 scene.ssgi.quality().name(),
                 debug_label,
                 fps
