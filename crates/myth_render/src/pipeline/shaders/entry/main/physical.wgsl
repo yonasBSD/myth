@@ -406,24 +406,23 @@ fn fs_main(
     out_specular = clamp(out_specular, vec3<f32>(0.0), vec3<f32>(65000.0));
     $$ endif
 
-    $$ if HAS_MRT_SSSS is defined
+    var out_color = out_diffuse + out_specular;
+    $$ if HAS_MRT_SPECULAR_DATA is defined and USE_SSS is defined
         if (u_material.sss_id != 0u) {
-            out.color = vec4<f32>(out_diffuse, opacity);
-            out.specular = vec4<f32>(out_specular, 1.0);
-        } else {
-            out.color = vec4<f32>(out_diffuse + out_specular, opacity);
-            out.specular = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            out_color = out_diffuse;
         }
-    $$ else
-        var out_color = out_diffuse + out_specular;
-        $$ if not HDR
-            out_color = apply_pbr_tone_mapping(out_color);
-        $$ endif
-        out.color = vec4<f32>(out_color, opacity);
+    $$ endif
+    $$ if not HDR
+        out_color = apply_pbr_tone_mapping(out_color);
+    $$ endif
+    out.color = vec4<f32>(out_color, opacity);
+
+    $$ if HAS_MRT_SPECULAR_DATA is defined
+    out.specular_data = vec4<f32>(out_specular, metalness_factor);
     $$ endif
 
-    $$ if HAS_MRT_SSGI_ALBEDO is defined
-    out.albedo = vec4<f32>(material.diffuse_color, opacity);
+    $$ if HAS_MRT_MATERIAL_DATA is defined
+    out.material_data = vec4<f32>(material.diffuse_color, material.roughness);
     $$ endif
 
     return out;

@@ -12,6 +12,7 @@ use myth_resources::screen_space::ScreenSpaceSettings;
 use myth_resources::shader_defines::ShaderDefines;
 use myth_resources::ssao::SsaoSettings;
 use myth_resources::ssgi::SsgiSettings;
+use myth_resources::ssr::SsrSettings;
 use myth_resources::tone_mapping::ToneMappingSettings;
 
 use crate::background::{BackgroundMode, BackgroundSettings};
@@ -144,6 +145,8 @@ pub struct Scene {
     pub ssao: SsaoSettings,
     /// SSGI (Screen Space Global Illumination) settings
     pub ssgi: SsgiSettings,
+    /// SSR (Screen Space Reflections) tuning settings
+    pub ssr: SsrSettings,
     /// Screen space effects settings (SSS, SSR)
     pub screen_space: ScreenSpaceSettings,
     /// Background rendering settings (mode + skybox uniform buffer)
@@ -197,6 +200,7 @@ impl Scene {
             bloom: BloomSettings::default(),
             ssao: SsaoSettings::default(),
             ssgi: SsgiSettings::default(),
+            ssr: SsrSettings::default(),
             screen_space: ScreenSpaceSettings::default(),
             background: BackgroundSettings::default(),
 

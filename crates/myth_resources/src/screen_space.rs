@@ -132,5 +132,5 @@ impl SssRegistry {
 #[derive(Default, Clone, Debug)]
 pub struct ScreenSpaceSettings {
     pub enable_sss: bool,
-    pub enable_ssr: bool, // Reserved for future use
+    pub enable_ssr: bool,
 }

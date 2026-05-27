@@ -26,6 +26,7 @@ use glam::Vec3A;
 use log::{error, warn};
 use slotmap::Key;
 
+use crate::HDR_TEXTURE_FORMAT;
 use crate::RenderPath;
 use crate::core::view::ViewTarget;
 use crate::core::{ResourceManager, WgpuContext};
@@ -36,8 +37,8 @@ use crate::pipeline::pipeline_key::PipelineFlags;
 use crate::pipeline::shader_gen::ShaderCompilationOptions;
 use crate::pipeline::shader_manager::ShaderSource;
 use crate::pipeline::{
-    BlendStateKey, DepthStencilKey, FastPipelineKey, FastShadowPipelineKey, GraphicsPipelineKey,
-    PipelineCache, ShaderManager, SimpleGeometryPipelineKey,
+    BlendStateKey, ColorTargetKey, DepthStencilKey, FastPipelineKey, FastShadowPipelineKey,
+    GraphicsPipelineKey, PipelineCache, ShaderManager, SimpleGeometryPipelineKey,
 };
 use myth_assets::AssetServer;
 use myth_resources::AntiAliasingMode;
@@ -265,45 +266,37 @@ fn prepare_main_camera_commands(
                     options.add_define("IN_TRANSPARENT_PASS", "1");
                 }
 
-                // MRT determination: inject HAS_MRT_SSSS before shader hash
-                // so different MRT configurations produce distinct shader variants.
-                let is_specular_split = match wgpu_ctx.render_path {
+                // Shared material-bus determination: inject MRT defines before the shader hash
+                // so different attachment layouts produce distinct shader variants.
+                let has_specular_data_mrt = match wgpu_ctx.render_path {
                     RenderPath::HighFidelity => {
                         is_opaque_item
                             && extracted_scene
                                 .scene_variants
-                                .contains(SceneFeatures::USE_SSS)
+                                .intersects(SceneFeatures::USE_SSS | SceneFeatures::USE_SSR)
                     }
                     RenderPath::BasicForward => false,
                 };
 
-                let is_albedo_split = match wgpu_ctx.render_path {
+                let has_material_data_mrt = match wgpu_ctx.render_path {
                     RenderPath::HighFidelity => {
                         is_opaque_item
                             && extracted_scene
                                 .scene_variants
-                                .contains(SceneFeatures::USE_SSGI)
+                                .intersects(SceneFeatures::USE_SSGI | SceneFeatures::USE_SSR)
                     }
                     RenderPath::BasicForward => false,
                 };
 
-                if is_specular_split {
-                    options.add_define("HAS_MRT_SSSS", "1");
+                if has_specular_data_mrt {
+                    options.add_define("HAS_MRT_SPECULAR_DATA", "1");
                 }
 
-                if is_albedo_split {
-                    options.add_define("HAS_MRT_SSGI_ALBEDO", "1");
+                if has_material_data_mrt {
+                    options.add_define("HAS_MRT_MATERIAL_DATA", "1");
                 }
 
                 let shader_hash = shader_manager.pipeline_shader_hash(shader_source, &options);
-
-                if is_specular_split {
-                    flags |= PipelineFlags::SPECULAR_SPLIT;
-                }
-
-                if is_albedo_split {
-                    flags |= PipelineFlags::ALBEDO_SPLIT;
-                }
 
                 let depth_write = if is_opaque_item && use_depth_pre {
                     false
@@ -324,6 +317,34 @@ fn prepare_main_camera_commands(
                 } else {
                     wgpu::CompareFunction::Always
                 };
+
+                let main_color_target = ColorTargetKey::from(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: if material.is_transparent() {
+                        Some(wgpu::BlendState::ALPHA_BLENDING)
+                    } else {
+                        None
+                    },
+                    write_mask: wgpu::ColorWrites::ALL,
+                });
+                let mut color_targets: smallvec::SmallVec<[ColorTargetKey; 3]> =
+                    smallvec::smallvec![main_color_target];
+
+                if has_specular_data_mrt {
+                    color_targets.push(ColorTargetKey::from(wgpu::ColorTargetState {
+                        format: HDR_TEXTURE_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }));
+                }
+
+                if has_material_data_mrt {
+                    color_targets.push(ColorTargetKey::from(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }));
+                }
 
                 let canonical_key = GraphicsPipelineKey {
                     shader_hash,
@@ -353,7 +374,7 @@ fn prepare_main_camera_commands(
                     } else {
                         None
                     },
-                    color_format,
+                    color_targets,
                     depth_format,
                     sample_count,
                     front_face: if item.item_variant_flags & 0x1 != 0 {

@@ -9,8 +9,8 @@ use myth_resources::BoundingBox;
 
 /// Semantic identifier for the debug visualisation mode.
 ///
-/// Modes 1–5 are **post-process** overlays (read transient screen-space
-/// textures).  Modes 10–12 are **material attribute** visualisations
+/// Modes 1–9 are **post-process** overlays (read transient screen-space
+/// textures). Modes 10–12 are **material attribute** visualisations
 /// (short-circuit the PBR lighting via shader defines).
 #[cfg(feature = "debug_view")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -26,6 +26,8 @@ pub enum DebugViewMode {
     ClusterHeatmap = 5,
     SsgiRaw = 6,
     SsgiDenoised = 7,
+    SsrRaw = 8,
+    SsrResolved = 9,
     // Material attribute modes (shader override)
     Albedo = 10,
     Roughness = 11,
@@ -46,6 +48,8 @@ impl DebugViewMode {
             Self::ClusterHeatmap => "Cluster Heatmap",
             Self::SsgiRaw => "SSGI Raw Indirect",
             Self::SsgiDenoised => "SSGI Denoised Indirect",
+            Self::SsrRaw => "SSR Raw Reflection",
+            Self::SsrResolved => "SSR Resolved Reflection",
             Self::Albedo => "Albedo (Material)",
             Self::Roughness => "Roughness (Material)",
             Self::Metalness => "Metalness (Material)",
@@ -56,7 +60,7 @@ impl DebugViewMode {
     #[inline]
     #[must_use]
     pub const fn is_post_process(self) -> bool {
-        (self as u32) >= 1 && (self as u32) <= 7
+        (self as u32) >= 1 && (self as u32) <= 9
     }
 
     /// Returns `true` for modes that use shader-override (material attribute) visualisation.
@@ -76,6 +80,8 @@ impl DebugViewMode {
         Self::ClusterHeatmap,
         Self::SsgiRaw,
         Self::SsgiDenoised,
+        Self::SsrRaw,
+        Self::SsrResolved,
         Self::Albedo,
         Self::Roughness,
         Self::Metalness,

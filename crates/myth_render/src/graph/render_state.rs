@@ -34,6 +34,8 @@ pub enum DebugViewTarget {
     ClusterHeatmap,
     SsgiRaw,
     SsgiDenoised,
+    SsrRaw,
+    SsrResolved,
 }
 
 #[cfg(feature = "debug_view")]
@@ -53,6 +55,8 @@ impl DebugViewTarget {
             DebugViewMode::ClusterHeatmap => Self::ClusterHeatmap,
             DebugViewMode::SsgiRaw => Self::SsgiRaw,
             DebugViewMode::SsgiDenoised => Self::SsgiDenoised,
+            DebugViewMode::SsrRaw => Self::SsrRaw,
+            DebugViewMode::SsrResolved => Self::SsrResolved,
             _ => Self::None,
         }
     }
@@ -67,6 +71,8 @@ impl DebugViewTarget {
     /// | 5    | Cluster heatmap |
     /// | 6    | SSGI raw indirect |
     /// | 7    | SSGI denoised indirect |
+    /// | 8    | SSR raw reflection |
+    /// | 9    | SSR resolved reflection |
     #[must_use]
     pub const fn view_mode(self) -> u32 {
         match self {
@@ -78,6 +84,8 @@ impl DebugViewTarget {
             Self::ClusterHeatmap => 5,
             Self::SsgiRaw => 6,
             Self::SsgiDenoised => 7,
+            Self::SsrRaw => 8,
+            Self::SsrResolved => 9,
         }
     }
 }

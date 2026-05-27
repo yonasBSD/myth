@@ -179,10 +179,6 @@ bitflags! {
         const DEPTH_WRITE         = 1 << 0;
         /// Enables Alpha-to-Coverage for multisampling.
         const ALPHA_TO_COVERAGE   = 1 << 1;
-        /// Indicates if specular is split into a separate buffer.
-        const SPECULAR_SPLIT      = 1 << 2;
-        /// Indicates if diffuse albedo is split into a separate buffer.
-        const ALBEDO_SPLIT        = 1 << 3;
     }
 }
 
@@ -203,7 +199,12 @@ pub struct GraphicsPipelineKey {
     pub front_face: wgpu::FrontFace,
     pub depth_compare: wgpu::CompareFunction,
     pub blend_state: Option<BlendStateKey>,
-    pub color_format: wgpu::TextureFormat,
+    /// Explicit render-target layout for the scene pass.
+    ///
+    /// Opaque pipelines may append shared material/specular MRTs after the
+    /// main scene color target, and those auxiliary targets may use formats
+    /// that differ from the main HDR surface.
+    pub color_targets: smallvec::SmallVec<[ColorTargetKey; 3]>,
     pub depth_format: wgpu::TextureFormat,
     pub sample_count: u32,
 

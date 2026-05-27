@@ -68,8 +68,8 @@ use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature,
     MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature,
-    SkyboxFeature, SsaoFeature, SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature,
-    TransmissionCopyFeature, TransparentFeature,
+    SkyboxFeature, SsaoFeature, SsgiFeature, SsrFeature, SsssFeature, TaaFeature,
+    ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
@@ -117,6 +117,7 @@ pub struct ComposerContext<'a> {
     pub ssao_pass: &'a mut SsaoFeature,
     pub hiz_pass: &'a mut HiZFeature,
     pub ssgi_pass: &'a mut SsgiFeature,
+    pub ssr_pass: &'a mut SsrFeature,
     // Scene rendering
     pub prepass: &'a mut PrepassFeature,
     pub opaque_pass: &'a mut OpaqueFeature,
@@ -503,9 +504,14 @@ impl<'a> FrameComposer<'a> {
                 .extracted_scene
                 .scene_variants
                 .contains(SceneFeatures::USE_SSGI);
+        let ssr_enabled = is_high_fidelity
+            && self
+                .ctx
+                .extracted_scene
+                .scene_variants
+                .contains(SceneFeatures::USE_SSR);
 
-        let needs_feature_id = is_high_fidelity
-            && (self.ctx.scene.screen_space.enable_sss || self.ctx.scene.screen_space.enable_ssr);
+        let needs_feature_id = is_high_fidelity && (self.ctx.scene.screen_space.enable_sss || ssr_enabled);
 
         #[cfg(feature = "debug_view")]
         let (dbg_needs_normal, dbg_needs_velocity) = {
@@ -522,7 +528,7 @@ impl<'a> FrameComposer<'a> {
 
         let taa_enabled = self.ctx.camera.aa_mode.is_taa();
         let needs_normal = ssao_enabled || ssgi_enabled || needs_feature_id || dbg_needs_normal;
-        let needs_velocity = taa_enabled || ssgi_enabled || dbg_needs_velocity;
+        let needs_velocity = taa_enabled || ssgi_enabled || ssr_enabled || dbg_needs_velocity;
 
         // let needs_normal = ssao_enabled || needs_feature_id;
         let needs_skybox = self.ctx.scene.background.needs_skybox_pass();
@@ -665,6 +671,10 @@ impl<'a> FrameComposer<'a> {
             #[cfg(feature = "debug_view")]
             let mut dbg_ssgi_denoised: Option<crate::graph::core::TextureNodeId> = None;
             #[cfg(feature = "debug_view")]
+            let mut dbg_ssr_raw: Option<crate::graph::core::TextureNodeId> = None;
+            #[cfg(feature = "debug_view")]
+            let mut dbg_ssr_resolved: Option<crate::graph::core::TextureNodeId> = None;
+            #[cfg(feature = "debug_view")]
             let mut dbg_clustered_params: Option<crate::graph::core::BufferNodeId> = None;
             #[cfg(feature = "debug_view")]
             let mut dbg_clustered_records: Option<crate::graph::core::BufferNodeId> = None;
@@ -763,8 +773,8 @@ impl<'a> FrameComposer<'a> {
                             c,
                             scene_depth,
                             self.ctx.extracted_scene.background.clear_color(),
-                            ssss_enabled,
-                            ssgi_enabled,
+                            ssss_enabled || ssr_enabled,
+                            ssgi_enabled || ssr_enabled,
                             ssao_output,
                             shadow_output.shadow_2d,
                             shadow_output.shadow_cube,
@@ -838,8 +848,8 @@ impl<'a> FrameComposer<'a> {
                                     .velocity_buffer
                                     .expect("SSGI requires motion vectors from Prepass"),
                                 opaque_out
-                                    .albedo_mrt
-                                    .expect("SSGI requires opaque albedo MRT"),
+                                    .material_mrt
+                                    .expect("SSGI requires opaque material MRT"),
                                 env_dependency_pmrem.or(env_dependency_base),
                                 taa_history_view,
                             );
@@ -851,6 +861,35 @@ impl<'a> FrameComposer<'a> {
                             }
 
                             active_color = ssgi_out.merged_color;
+                        }
+
+                        if ssr_enabled {
+                            let ssr_out = self.ctx.ssr_pass.add_to_graph(
+                                c,
+                                active_color,
+                                scene_depth,
+                                scene_hiz,
+                                prepass_out
+                                    .scene_normals
+                                    .expect("SSR requires scene normals from Prepass"),
+                                prepass_out
+                                    .velocity_buffer
+                                    .expect("SSR requires motion vectors from Prepass"),
+                                opaque_out
+                                    .material_mrt
+                                    .expect("SSR requires opaque material MRT"),
+                                opaque_out
+                                    .specular_mrt
+                                    .expect("SSR requires opaque specular MRT"),
+                            );
+
+                            #[cfg(feature = "debug_view")]
+                            {
+                                dbg_ssr_raw = Some(ssr_out.raw_reflection);
+                                dbg_ssr_resolved = Some(ssr_out.clean_reflection);
+                            }
+
+                            active_color = ssr_out.merged_color;
                         }
 
                         // ── 6. TAA Resolve ────────────────────────────────────────────
@@ -1003,6 +1042,8 @@ impl<'a> FrameComposer<'a> {
                         DebugViewTarget::ClusterHeatmap => Some(scene_depth),
                         DebugViewTarget::SsgiRaw => dbg_ssgi_raw,
                         DebugViewTarget::SsgiDenoised => dbg_ssgi_denoised,
+                        DebugViewTarget::SsrRaw => dbg_ssr_raw,
+                        DebugViewTarget::SsrResolved => dbg_ssr_resolved,
                         _ => None,
                     };
 

@@ -308,45 +308,28 @@ impl PipelineCache {
         let vertex_buffers_layout: Vec<_> =
             vertex_layout.buffers.iter().map(|l| l.as_wgpu()).collect();
 
-        let blend_state: Option<wgpu::BlendState> =
-            canonical_key
-                .blend_state
-                .as_ref()
-                .map(|bk| wgpu::BlendState {
-                    color: wgpu::BlendComponent {
-                        src_factor: bk.color.src_factor,
-                        dst_factor: bk.color.dst_factor,
-                        operation: bk.color.operation,
-                    },
-                    alpha: wgpu::BlendComponent {
-                        src_factor: bk.alpha.src_factor,
-                        dst_factor: bk.alpha.dst_factor,
-                        operation: bk.alpha.operation,
-                    },
-                });
-
-        let mut color_targets = vec![Some(wgpu::ColorTargetState {
-            format: canonical_key.color_format,
-            blend: blend_state,
-            write_mask: wgpu::ColorWrites::ALL,
-        })];
-
-        // Specular split requires a second render target for the specular output, which is appended after the main color target.
-        if canonical_key.flags.contains(PipelineFlags::SPECULAR_SPLIT) {
-            color_targets.push(Some(wgpu::ColorTargetState {
-                format: canonical_key.color_format,
-                blend: blend_state,
-                write_mask: wgpu::ColorWrites::ALL,
-            }));
-        }
-
-        if canonical_key.flags.contains(PipelineFlags::ALBEDO_SPLIT) {
-            color_targets.push(Some(wgpu::ColorTargetState {
-                format: canonical_key.color_format,
-                blend: blend_state,
-                write_mask: wgpu::ColorWrites::ALL,
-            }));
-        }
+        let color_targets: Vec<Option<wgpu::ColorTargetState>> = canonical_key
+            .color_targets
+            .iter()
+            .map(|target| {
+                Some(wgpu::ColorTargetState {
+                    format: target.format,
+                    blend: target.blend.as_ref().map(|bk| wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: bk.color.src_factor,
+                            dst_factor: bk.color.dst_factor,
+                            operation: bk.color.operation,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: bk.alpha.src_factor,
+                            dst_factor: bk.alpha.dst_factor,
+                            operation: bk.alpha.operation,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::from_bits_retain(target.write_mask),
+                })
+            })
+            .collect();
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Scene Render Pipeline"),

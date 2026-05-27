@@ -19,13 +19,16 @@ fn screen_space_effects_headless_smoke() {
     scene.ssao.set_enabled(true);
     scene.ssgi.set_enabled(true);
     scene.ssgi.set_quality(SsgiQuality::Low);
+    scene.screen_space.enable_ssr = true;
+    scene.ssr.set_max_steps(12);
+    scene.ssr.set_spatial_radius(1);
 
     let floor = PhysicalMaterial::new(Vec4::new(0.75, 0.75, 0.78, 1.0))
-        .with_roughness(0.9)
+        .with_roughness(0.28)
         .with_metalness(0.0);
     let box_mat = PhysicalMaterial::new(Vec4::new(0.85, 0.3, 0.22, 1.0))
-        .with_roughness(0.55)
-        .with_metalness(0.0);
+        .with_roughness(0.14)
+        .with_metalness(0.92);
 
     let floor_node = scene.spawn_box(6.0, 0.2, 6.0, floor, &engine.assets);
     scene.node(&floor_node).set_position(0.0, -1.2, 0.0);

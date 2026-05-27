@@ -163,6 +163,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let overlay = mix(vec3<f32>(0.08, 0.16, 0.44), vec3<f32>(0.28, 0.96, 0.36), confidence);
             return vec4<f32>(mix(mapped, overlay, 0.18), 1.0);
         }
+        // Mode 8: SSR raw reflection hit confidence
+        case 8u: {
+            let mapped = tonemap_debug(tex_color.rgb, uniforms.custom_scale);
+            let confidence = clamp(tex_color.a, 0.0, 1.0);
+            let overlay = mix(vec3<f32>(0.10, 0.06, 0.22), vec3<f32>(0.94, 0.58, 0.18), confidence);
+            return vec4<f32>(mix(mapped, overlay, 0.16), 1.0);
+        }
+        // Mode 9: SSR resolved reflection confidence
+        case 9u: {
+            let mapped = tonemap_debug(tex_color.rgb, uniforms.custom_scale);
+            let confidence = clamp(tex_color.a, 0.0, 1.0);
+            let overlay = mix(vec3<f32>(0.05, 0.10, 0.20), vec3<f32>(0.30, 0.92, 0.86), confidence);
+            return vec4<f32>(mix(mapped, overlay, 0.18), 1.0);
+        }
         // Default: colour pass-through
         default: {
             return vec4<f32>(tex_color.rgb, 1.0);

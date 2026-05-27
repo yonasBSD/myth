@@ -2,7 +2,7 @@
 //!
 //! SSGI is implemented as a scene-level screen-space system with four stages:
 //! raw Hi-Z ray march, temporal accumulation, multi-stage A-Trous cleanup,
-//! and albedo-modulated merge back into the HDR scene color.
+//! and material-modulated merge back into the HDR scene color.
 
 use rustc_hash::FxHashMap;
 
@@ -822,7 +822,7 @@ impl SsgiFeature {
         scene_hiz: TextureNodeId,
         scene_normals: TextureNodeId,
         velocity: TextureNodeId,
-        albedo_mrt: TextureNodeId,
+        material_mrt: TextureNodeId,
         pmrem_tex: Option<TextureNodeId>,
         taa_history_view: Option<Tracked<wgpu::TextureView>>,
     ) -> SsgiOutputs {
@@ -1069,7 +1069,7 @@ impl SsgiFeature {
             let merged_color: TextureNodeId = ctx.graph.add_pass("SSGI_Merge", |builder| {
                 builder.read_texture(current_color);
                 builder.read_texture(clean_indirect);
-                builder.read_texture(albedo_mrt);
+                builder.read_texture(material_mrt);
                 builder.read_texture(scene_depth);
                 builder.read_texture(scene_normals);
                 let uniforms =
@@ -1079,7 +1079,7 @@ impl SsgiFeature {
                 let node = SsgiMergeNode {
                     current_color,
                     clean_indirect,
-                    albedo_mrt,
+                    material_mrt,
                     scene_depth,
                     scene_normals,
                     uniforms,
@@ -1311,7 +1311,7 @@ impl<'a> PassNode<'a> for SsgiAtrousNode<'a> {
 struct SsgiMergeNode<'a> {
     current_color: TextureNodeId,
     clean_indirect: TextureNodeId,
-    albedo_mrt: TextureNodeId,
+    material_mrt: TextureNodeId,
     scene_depth: TextureNodeId,
     scene_normals: TextureNodeId,
     uniforms: BufferNodeId,
@@ -1327,7 +1327,7 @@ impl<'a> PassNode<'a> for SsgiMergeNode<'a> {
             crate::myth_bind_group!(ctx, self.layout, Some("SSGI Merge BG"), [
                 0 => self.current_color,
                 1 => self.clean_indirect,
-                2 => self.albedo_mrt,
+                2 => self.material_mrt,
                 3 => self.scene_depth,
                 4 => self.scene_normals,
                 5 => CommonSampler::LinearClamp,

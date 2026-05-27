@@ -4,7 +4,7 @@
 
 @group(0) @binding(0) var t_scene_color: texture_2d<f32>;
 @group(0) @binding(1) var t_clean_indirect: texture_2d<f32>;
-@group(0) @binding(2) var t_albedo: texture_2d<f32>;
+@group(0) @binding(2) var t_material_data: texture_2d<f32>;
 @group(0) @binding(3) var t_depth: texture_depth_2d;
 @group(0) @binding(4) var t_normal: texture_2d<f32>;
 @group(0) @binding(5) var s_linear: sampler;
@@ -40,10 +40,8 @@ fn resolve_full_uv(half_pixel: vec2<u32>) -> vec2<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let scene_color = textureSampleLevel(t_scene_color, s_point, in.uv, 0.0);
-    let albedo = textureSampleLevel(t_albedo, s_point, in.uv, 0.0);
-    if (albedo.a <= 0.0) {
-        return scene_color;
-    }
+    let material_data = textureSampleLevel(t_material_data, s_point, in.uv, 0.0);
+    let albedo = material_data.rgb;
 
     let full_depth = textureSampleLevel(t_depth, s_point, in.uv, 0u);
     let full_normal_packed = textureSampleLevel(t_normal, s_point, in.uv, 0.0);
@@ -105,11 +103,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return scene_color;
         }
 
-        let contribution = nearest_indirect.rgb * albedo.rgb * u_ssgi.ray_params.x;
+        let contribution = nearest_indirect.rgb * albedo * u_ssgi.ray_params.x;
         return vec4<f32>(scene_color.rgb + contribution, scene_color.a);
     }
 
     let indirect = sum_color / sum_weight;
-    let contribution = indirect * albedo.rgb * u_ssgi.ray_params.x;
+    let contribution = indirect * albedo * u_ssgi.ray_params.x;
     return vec4<f32>(scene_color.rgb + contribution, scene_color.a);
 }

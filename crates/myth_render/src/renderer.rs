@@ -20,8 +20,8 @@ use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature, MsaaSyncFeature,
     OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
-    SsgiFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
-    TransparentFeature,
+    SsgiFeature, SsrFeature, SsssFeature, TaaFeature, ToneMappingFeature,
+    TransmissionCopyFeature, TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -41,6 +41,7 @@ use crate::pipeline::{
 use crate::settings::{ClusteredShadingMode, RenderPath, RendererInitConfig, RendererSettings};
 
 const SSGI_HISTORY_FLAG_CAMERA_CUT: u32 = 1 << 2;
+const SSR_HISTORY_FLAG_CAMERA_CUT: u32 = 1 << 1;
 
 fn build_pipeline_layout(
     device: &wgpu::Device,
@@ -120,6 +121,7 @@ struct RendererState {
     pub(crate) ssao_pass: SsaoFeature,
     pub(crate) hiz_pass: HiZFeature,
     pub(crate) ssgi_pass: SsgiFeature,
+    pub(crate) ssr_pass: SsrFeature,
 
     // Scene rendering passes
     pub(crate) prepass: PrepassFeature,
@@ -297,6 +299,7 @@ impl Renderer {
             ssao_pass: SsaoFeature::new(),
             hiz_pass: HiZFeature::new(),
             ssgi_pass: SsgiFeature::new(),
+            ssr_pass: SsrFeature::new(),
 
             prepass: PrepassFeature::new(),
             opaque_pass: OpaqueFeature::new(),
@@ -429,6 +432,9 @@ impl Renderer {
         let ssgi_supported = state.wgpu_ctx.render_path.supports_post_processing()
             && state.wgpu_ctx.msaa_samples <= 1;
         let ssgi_enabled = scene.ssgi.enabled && ssgi_supported;
+        let ssr_supported = state.wgpu_ctx.render_path.supports_post_processing()
+            && state.wgpu_ctx.msaa_samples <= 1;
+        let ssr_enabled = scene.screen_space.enable_ssr && ssr_supported;
         if ssgi_enabled {
             state
                 .render_frame
@@ -451,6 +457,44 @@ impl Renderer {
                 .extracted_scene
                 .scene_defines
                 .remove("USE_SSGI");
+        }
+
+        if ssr_enabled {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .insert(SceneFeatures::USE_SSR);
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .set("USE_SSR", "1");
+        } else {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .remove(SceneFeatures::USE_SSR);
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .remove("USE_SSR");
+        }
+
+        if scene.screen_space.enable_sss || ssr_enabled {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .set("USE_SCREEN_SPACE_FEATURES", "1");
+        } else {
+            state
+                .render_frame
+                .extracted_scene
+                .scene_defines
+                .remove("USE_SCREEN_SPACE_FEATURES");
         }
 
         // ── Phase 2: Cull + sort + command generation ───────────────────
@@ -482,13 +526,17 @@ impl Renderer {
             let global_state_key = (render_state_id, scene_id_val);
 
             let ssao_enabled = scene.ssao.enabled && is_hf;
-            let needs_feature_id =
-                is_hf && (scene.screen_space.enable_sss || scene.screen_space.enable_ssr);
             let ssgi_enabled = state
                 .render_frame
                 .extracted_scene
                 .scene_variants
                 .contains(SceneFeatures::USE_SSGI);
+            let ssr_enabled = state
+                .render_frame
+                .extracted_scene
+                .scene_variants
+                .contains(SceneFeatures::USE_SSR);
+            let needs_feature_id = is_hf && (scene.screen_space.enable_sss || ssr_enabled);
 
             // Sync camera debug settings → RenderState before borrowing it.
             #[cfg(feature = "debug_view")]
@@ -513,7 +561,8 @@ impl Renderer {
             let (dbg_needs_normal, dbg_needs_velocity) = (false, false);
 
             let needs_normal = ssao_enabled || ssgi_enabled || needs_feature_id || dbg_needs_normal;
-            let needs_velocity = camera.aa_mode.is_taa() || ssgi_enabled || dbg_needs_velocity;
+            let needs_velocity =
+                camera.aa_mode.is_taa() || ssgi_enabled || ssr_enabled || dbg_needs_velocity;
 
             // let needs_normal = ssao_enabled || needs_feature_id;
             let needs_skybox = scene.background.needs_skybox_pass();
@@ -661,6 +710,24 @@ impl Renderer {
                     scene.ssgi.set_history_flags(0);
                 }
 
+                if ssr_enabled {
+                    scene.ssr.update_resolution(self.size.0, self.size.1);
+                    scene.ssr.set_frame_index(frame_time.frame_count as u32);
+                    scene.ssr.set_runtime_camera_near(camera.near);
+
+                    let mut ssr_history_flags = state.ssr_pass.history_flags();
+                    if camera.camera_cut != 0 {
+                        ssr_history_flags |= SSR_HISTORY_FLAG_CAMERA_CUT;
+                    }
+                    scene.ssr.set_history_flags(ssr_history_flags);
+                    state
+                        .ssr_pass
+                        .extract_and_prepare(&mut extract_ctx, &scene.ssr.uniforms, self.size);
+                } else {
+                    state.ssr_pass.invalidate_history();
+                    scene.ssr.set_history_flags(0);
+                }
+
                 state.ssss_pass.extract_and_prepare(&mut extract_ctx);
 
                 // MSAA Sync — needed when SSSS modifies the resolved HDR
@@ -758,6 +825,7 @@ impl Renderer {
             ssao_pass: &mut state.ssao_pass,
             hiz_pass: &mut state.hiz_pass,
             ssgi_pass: &mut state.ssgi_pass,
+            ssr_pass: &mut state.ssr_pass,
 
             prepass: &mut state.prepass,
             opaque_pass: &mut state.opaque_pass,
