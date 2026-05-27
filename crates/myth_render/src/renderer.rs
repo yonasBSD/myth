@@ -20,8 +20,8 @@ use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature, MsaaSyncFeature,
     OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
-    SsgiFeature, SsrFeature, SsssFeature, TaaFeature, ToneMappingFeature,
-    TransmissionCopyFeature, TransparentFeature,
+    SsgiFeature, SsrFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
+    TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -536,6 +536,7 @@ impl Renderer {
                 .extracted_scene
                 .scene_variants
                 .contains(SceneFeatures::USE_SSR);
+            let needs_scene_hiz = ssgi_enabled || ssr_enabled;
             let needs_feature_id = is_hf && (scene.screen_space.enable_sss || ssr_enabled);
 
             // Sync camera debug settings → RenderState before borrowing it.
@@ -682,7 +683,9 @@ impl Renderer {
                     needs_velocity,
                 );
 
-                state.hiz_pass.extract_and_prepare(&mut extract_ctx);
+                if needs_scene_hiz {
+                    state.hiz_pass.extract_and_prepare(&mut extract_ctx);
+                }
 
                 if ssao_enabled {
                     state
@@ -720,9 +723,11 @@ impl Renderer {
                         ssr_history_flags |= SSR_HISTORY_FLAG_CAMERA_CUT;
                     }
                     scene.ssr.set_history_flags(ssr_history_flags);
-                    state
-                        .ssr_pass
-                        .extract_and_prepare(&mut extract_ctx, &scene.ssr.uniforms, self.size);
+                    state.ssr_pass.extract_and_prepare(
+                        &mut extract_ctx,
+                        &scene.ssr.uniforms,
+                        self.size,
+                    );
                 } else {
                     state.ssr_pass.invalidate_history();
                     scene.ssr.set_history_flags(0);

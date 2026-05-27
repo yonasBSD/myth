@@ -23,6 +23,62 @@ fn unpack_view_normal(packed: vec4<f32>) -> vec3<f32> {
     return normalize(select(vec3<f32>(0.0, 0.0, 1.0), raw, dot(raw, raw) > 1e-5));
 }
 
+fn linearize_depth(z: f32) -> f32 {
+    return u_ssr.temporal_params.z / max(z, 0.0001);
+}
+
+struct SurfaceSample {
+    depth: f32,
+    normal_packed: vec4<f32>,
+};
+
+fn sample_surface_nearest(uv: vec2<f32>) -> SurfaceSample {
+    return SurfaceSample(
+        textureSampleLevel(t_depth, s_point, uv, 0u),
+        textureSampleLevel(t_normal, s_point, uv, 0.0)
+    );
+}
+
+fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
+    let reflection_extent = vec2<i32>(textureDimensions(t_clean_reflection));
+    let full_extent = vec2<i32>(i32(u_ssr.full_resolution.x), i32(u_ssr.full_resolution.y));
+    if (all(reflection_extent == full_extent)) {
+        return sample_surface_nearest(uv);
+    }
+
+    let full_extent_f = vec2<f32>(full_extent);
+    let full_pixel = uv * full_extent_f - vec2<f32>(0.5, 0.5);
+    let base_coord = clamp(
+        vec2<i32>(floor(full_pixel)),
+        vec2<i32>(0, 0),
+        full_extent - vec2<i32>(2, 2)
+    );
+
+    var best_depth = -1.0;
+    var best_normal = vec4<f32>(0.0);
+    for (var y: i32 = 0; y <= 1; y++) {
+        for (var x: i32 = 0; x <= 1; x++) {
+            let coord = base_coord + vec2<i32>(x, y);
+            let depth = textureLoad(t_depth, coord, 0);
+            let normal = textureLoad(t_normal, coord, 0);
+            if (normal.a < 0.5 || depth <= 0.0) {
+                continue;
+            }
+
+            if (depth > best_depth) {
+                best_depth = depth;
+                best_normal = normal;
+            }
+        }
+    }
+
+    if (best_depth <= 0.0) {
+        return sample_surface_nearest(uv);
+    }
+
+    return SurfaceSample(best_depth, best_normal);
+}
+
 fn reconstruct_view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     let ndc = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
     let view_pos = u_render_state.projection_inverse * ndc;
@@ -30,22 +86,84 @@ fn reconstruct_view_position(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     return view_pos.xyz / safe_w;
 }
 
-fn fresnel_schlick(f0: vec3<f32>, dot_nv: f32) -> vec3<f32> {
-    let x = pow(1.0 - saturate(dot_nv), 5.0);
-    return f0 + (vec3<f32>(1.0) - f0) * x;
+fn sample_reflection(full_uv: vec2<f32>, full_linear: f32, full_normal: vec3<f32>) -> vec4<f32> {
+    let reflection_extent = vec2<i32>(textureDimensions(t_clean_reflection));
+    let full_extent = vec2<i32>(i32(u_ssr.full_resolution.x), i32(u_ssr.full_resolution.y));
+    if (all(reflection_extent == full_extent)) {
+        return textureSampleLevel(t_clean_reflection, s_linear, full_uv, 0.0);
+    }
+
+    let max_coord = reflection_extent - vec2<i32>(1, 1);
+    let reflection_pos = full_uv * vec2<f32>(reflection_extent) - vec2<f32>(0.5, 0.5);
+    let base_coord = vec2<i32>(floor(reflection_pos));
+    let frac = fract(reflection_pos);
+    let depth_sigma = max(u_ssr.reprojection_params.z * max(full_linear, 1.0), 1e-3);
+
+    var color_sum = vec3<f32>(0.0);
+    var confidence_sum = 0.0;
+    var weight_sum = 0.0;
+
+    for (var y: i32 = 0; y <= 1; y++) {
+        for (var x: i32 = 0; x <= 1; x++) {
+            let sample_coord = clamp(base_coord + vec2<i32>(x, y), vec2<i32>(0, 0), max_coord);
+            let sample_reflection = textureLoad(t_clean_reflection, sample_coord, 0);
+            if (sample_reflection.a <= 1e-4) {
+                continue;
+            }
+
+            let sample_uv = (vec2<f32>(sample_coord) + vec2<f32>(0.5, 0.5))
+                / vec2<f32>(reflection_extent);
+            let sample_surface = sample_surface_conservative(sample_uv);
+            let sample_depth = sample_surface.depth;
+            let sample_normal_packed = sample_surface.normal_packed;
+            if (sample_depth <= 0.0 || sample_normal_packed.a < 0.5) {
+                continue;
+            }
+
+            let sample_linear = linearize_depth(sample_depth);
+            let sample_normal = unpack_view_normal(sample_normal_packed);
+            let bilinear_weight_x = select(1.0 - frac.x, frac.x, x == 1);
+            let bilinear_weight_y = select(1.0 - frac.y, frac.y, y == 1);
+            let spatial_weight = bilinear_weight_x * bilinear_weight_y;
+            let depth_delta = full_linear - sample_linear;
+            let depth_weight = exp(
+                -(depth_delta * depth_delta) / (2.0 * depth_sigma * depth_sigma)
+            );
+            let normal_weight = pow(
+                saturate(dot(full_normal, sample_normal)),
+                u_ssr.shading_params.z
+            );
+            let weight = spatial_weight * depth_weight * normal_weight;
+
+            color_sum += sample_reflection.rgb * weight;
+            confidence_sum += sample_reflection.a * weight;
+            weight_sum += weight;
+        }
+    }
+
+    if (weight_sum <= 1e-4) {
+        return textureSampleLevel(t_clean_reflection, s_linear, full_uv, 0.0);
+    }
+
+    return vec4<f32>(
+        color_sum / max(weight_sum, 1e-4),
+        confidence_sum / max(weight_sum, 1e-4)
+    );
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let scene_color = textureSampleLevel(t_scene_color, s_point, in.uv, 0.0);
-    let reflection = textureSampleLevel(t_clean_reflection, s_linear, in.uv, 0.0);
-    if (reflection.a <= 1e-4) {
+    let surface = sample_surface_conservative(in.uv);
+    let depth = surface.depth;
+    let normal_packed = surface.normal_packed;
+    if (depth <= 0.0 || normal_packed.a < 0.5) {
         return scene_color;
     }
 
-    let depth = textureSampleLevel(t_depth, s_point, in.uv, 0u);
-    let normal_packed = textureSampleLevel(t_normal, s_point, in.uv, 0.0);
-    if (depth <= 0.0 || normal_packed.a < 0.5) {
+    let view_normal = unpack_view_normal(normal_packed);
+    let reflection = sample_reflection(in.uv, linearize_depth(depth), view_normal);
+    if (reflection.a <= 1e-4) {
         return scene_color;
     }
 
@@ -55,14 +173,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (roughness > u_ssr.shading_params.x) {
         return scene_color;
     }
-
-    let view_pos = reconstruct_view_position(in.uv, depth);
-    let view_dir = normalize(-view_pos);
-    let view_normal = unpack_view_normal(normal_packed);
-    let dot_nv = saturate(dot(view_normal, view_dir));
-    let metalness = specular_data.a;
-    let f0 = mix(vec3<f32>(0.04), material_data.rgb, metalness);
-    let fresnel = fresnel_schlick(f0, dot_nv);
     let roughness_weight = 1.0 - smoothstep(
         u_ssr.shading_params.x * 0.5,
         u_ssr.shading_params.x,
@@ -70,7 +180,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     );
     let blend = reflection.a * roughness_weight;
     let base_specular = specular_data.rgb;
-    let ssr_specular = reflection.rgb * fresnel;
+    let ssr_specular = reflection.rgb;
     let base_color = max(scene_color.rgb - base_specular, vec3<f32>(0.0));
     let merged_specular = mix(base_specular, ssr_specular, vec3<f32>(blend));
     return vec4<f32>(base_color + merged_specular, scene_color.a);

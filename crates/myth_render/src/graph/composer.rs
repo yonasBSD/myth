@@ -510,8 +510,10 @@ impl<'a> FrameComposer<'a> {
                 .extracted_scene
                 .scene_variants
                 .contains(SceneFeatures::USE_SSR);
+        let needs_scene_hiz = ssgi_enabled || ssr_enabled;
 
-        let needs_feature_id = is_high_fidelity && (self.ctx.scene.screen_space.enable_sss || ssr_enabled);
+        let needs_feature_id =
+            is_high_fidelity && (self.ctx.scene.screen_space.enable_sss || ssr_enabled);
 
         #[cfg(feature = "debug_view")]
         let (dbg_needs_normal, dbg_needs_velocity) = {
@@ -785,7 +787,8 @@ impl<'a> FrameComposer<'a> {
 
                         let mut active_color = opaque_out.active_color;
 
-                        let scene_hiz = self.ctx.hiz_pass.add_to_graph(c, scene_depth);
+                        let scene_hiz =
+                            needs_scene_hiz.then(|| self.ctx.hiz_pass.add_to_graph(c, scene_depth));
 
                         // 4. SSSS
                         if ssss_enabled {
@@ -840,7 +843,7 @@ impl<'a> FrameComposer<'a> {
                                 c,
                                 active_color,
                                 scene_depth,
-                                scene_hiz,
+                                scene_hiz.expect("SSGI requires Hi-Z pyramid"),
                                 prepass_out
                                     .scene_normals
                                     .expect("SSGI requires scene normals from Prepass"),
@@ -868,7 +871,7 @@ impl<'a> FrameComposer<'a> {
                                 c,
                                 active_color,
                                 scene_depth,
-                                scene_hiz,
+                                scene_hiz.expect("SSR requires Hi-Z pyramid"),
                                 prepass_out
                                     .scene_normals
                                     .expect("SSR requires scene normals from Prepass"),
@@ -964,7 +967,7 @@ impl<'a> FrameComposer<'a> {
                     let mut blackboard = GraphBlackboard {
                         scene_color: Some(active_color),
                         scene_depth: Some(scene_depth),
-                        scene_hiz: Some(scene_hiz),
+                        scene_hiz,
                         atmosphere_transmittance,
                         atmosphere_bake_params,
                         surface_out,
@@ -979,7 +982,7 @@ impl<'a> FrameComposer<'a> {
 
                     active_color = blackboard.scene_color.unwrap_or(active_color);
                     scene_depth = blackboard.scene_depth.unwrap_or(scene_depth);
-                    scene_hiz = blackboard.scene_hiz.unwrap_or(scene_hiz);
+                    scene_hiz = blackboard.scene_hiz;
                 }
 
                 // ── Post-Processing Group ──────────────────────────────────
@@ -1018,7 +1021,7 @@ impl<'a> FrameComposer<'a> {
 
                     bb_scene_color = Some(active_color);
                     bb_scene_depth = Some(scene_depth);
-                    bb_scene_hiz = Some(scene_hiz);
+                    bb_scene_hiz = scene_hiz;
 
                     surface
                 });

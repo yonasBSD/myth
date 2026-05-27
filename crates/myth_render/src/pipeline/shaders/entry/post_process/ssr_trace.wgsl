@@ -40,6 +40,11 @@ fn luminance(color: vec3<f32>) -> f32 {
     return dot(max(color, vec3<f32>(0.0)), vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
+fn fresnel_schlick(f0: vec3<f32>, dot_vh: f32) -> vec3<f32> {
+    let x = pow(1.0 - saturate(dot_vh), 5.0);
+    return f0 + (vec3<f32>(1.0) - f0) * x;
+}
+
 fn unpack_view_normal(packed: vec4<f32>) -> vec3<f32> {
     let raw = packed.xyz * 2.0 - 1.0;
     return normalize(select(vec3<f32>(0.0, 0.0, 1.0), raw, dot(raw, raw) > 1e-5));
@@ -88,22 +93,52 @@ fn project_view_position(view_pos: vec3<f32>) -> ProjectedSample {
     return ProjectedSample(unjittered_uv, jittered_uv, in_bounds);
 }
 
-fn importance_sample_ggx(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> vec3<f32> {
-    let a = roughness * roughness;
-    let phi = 2.0 * PI * xi.x;
-    let cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
-    let sin_theta = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
-
-    let half_vector = vec3<f32>(
-        cos(phi) * sin_theta,
-        sin(phi) * sin_theta,
-        cos_theta
-    );
-
+fn make_tangent_basis(normal: vec3<f32>) -> mat3x3<f32> {
     let up = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(normal.z) < 0.999);
     let tangent = normalize(cross(up, normal));
     let bitangent = cross(normal, tangent);
-    return normalize(tangent * half_vector.x + bitangent * half_vector.y + normal * half_vector.z);
+    return mat3x3<f32>(tangent, bitangent, normal);
+}
+
+fn sample_visible_ggx_half_vector(
+    xi: vec2<f32>,
+    normal: vec3<f32>,
+    view_dir: vec3<f32>,
+    roughness: f32,
+) -> vec3<f32> {
+    let alpha = max(roughness * roughness, 0.001);
+    let basis = make_tangent_basis(normal);
+    let view_local_raw = transpose(basis) * view_dir;
+    let view_local = normalize(vec3<f32>(view_local_raw.xy, max(view_local_raw.z, 1e-4)));
+    let stretched_view = normalize(vec3<f32>(alpha * view_local.x, alpha * view_local.y, view_local.z));
+    let lensq = dot(stretched_view.xy, stretched_view.xy);
+    let t1 = select(
+        vec3<f32>(1.0, 0.0, 0.0),
+        normalize(vec3<f32>(-stretched_view.y, stretched_view.x, 0.0)),
+        lensq > 1e-6
+    );
+    let t2 = cross(stretched_view, t1);
+
+    let r = sqrt(xi.x);
+    let phi = 2.0 * PI * xi.y;
+    let p1 = r * cos(phi);
+    var p2 = r * sin(phi);
+    let s = 0.5 * (1.0 + stretched_view.z);
+    p2 = mix(sqrt(max(1.0 - p1 * p1, 0.0)), p2, s);
+
+    let nh = p1 * t1
+        + p2 * t2
+        + sqrt(max(1.0 - p1 * p1 - p2 * p2, 0.0)) * stretched_view;
+    let half_local = normalize(vec3<f32>(alpha * nh.x, alpha * nh.y, max(nh.z, 0.0)));
+    return normalize(basis * half_local);
+}
+
+fn smith_ggx_g1(dot_nx: f32, alpha: f32) -> f32 {
+    let clamped_dot = saturate(dot_nx);
+    let a2 = alpha * alpha;
+    let dot2 = clamped_dot * clamped_dot;
+    return (2.0 * clamped_dot)
+        / max(clamped_dot + sqrt(a2 + (1.0 - a2) * dot2), 1e-4);
 }
 
 fn edge_vignette(uv: vec2<f32>) -> f32 {
@@ -139,7 +174,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_normal = unpack_view_normal(normal_packed);
     let view_dir = normalize(-view_pos);
     let noise = get_blue_noise(pixel, u_ssr.frame_params.x).rg;
-    let half_vector = importance_sample_ggx(noise, view_normal, max(roughness, 0.02));
+    let half_vector = sample_visible_ggx_half_vector(
+        noise,
+        view_normal,
+        view_dir,
+        max(roughness, 0.02)
+    );
     let ray_dir = normalize(reflect(-view_dir, half_vector));
 
     let ndotr = dot(view_normal, ray_dir);
@@ -232,5 +272,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let hit_color = textureSampleLevel(t_scene_color, s_linear, trace.uv, 0.0).rgb;
-    return vec4<f32>(hit_color, confidence);
+    let metalness = specular_data.a;
+    let f0 = mix(vec3<f32>(0.04), material_data.rgb, metalness);
+    let v_dot_h = saturate(dot(view_dir, half_vector));
+    let alpha = max(roughness * roughness, 0.001);
+    let g1_v = smith_ggx_g1(saturate(dot(view_normal, view_dir)), alpha);
+    let g1_l = smith_ggx_g1(saturate(dot(view_normal, ray_dir)), alpha);
+    let g2 = g1_v * g1_l;
+    let brdf_weight = fresnel_schlick(f0, v_dot_h) * (g2 / max(g1_v, 1e-4));
+    let final_radiance = hit_color * brdf_weight;
+    return vec4<f32>(final_radiance, confidence);
 }

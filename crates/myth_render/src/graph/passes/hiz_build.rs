@@ -15,7 +15,7 @@ use crate::pipeline::{
 
 const HIZ_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 const HIZ_WORKGROUP_SIZE: u32 = 8;
-const DEFAULT_HIZ_MIP_COUNT: u32 = 6;
+const HIZ_MIN_MIP_SIZE: u32 = 16;
 
 pub struct HiZFeature {
     init_pipeline: Option<ComputePipelineId>,
@@ -336,8 +336,15 @@ impl<'a> PassNode<'a> for HiZBuildNode<'a> {
 
 #[inline]
 fn hiz_mip_count(width: u32, height: u32) -> u32 {
-    let max_dim = width.max(height).max(1);
-    (max_dim.ilog2() + 1).min(DEFAULT_HIZ_MIP_COUNT).max(1)
+    let mut mip_count = 1;
+    let mut max_dim = width.max(height).max(1);
+
+    while max_dim > HIZ_MIN_MIP_SIZE {
+        max_dim = max_dim.div_ceil(2);
+        mip_count += 1;
+    }
+
+    mip_count
 }
 
 #[cfg(test)]
@@ -345,9 +352,11 @@ mod tests {
     use super::hiz_mip_count;
 
     #[test]
-    fn clamps_mip_chain_to_budget() {
+    fn extends_mip_chain_until_minimum_size() {
         assert_eq!(hiz_mip_count(1, 1), 1);
-        assert_eq!(hiz_mip_count(64, 32), 6);
-        assert_eq!(hiz_mip_count(1920, 1080), 6);
+        assert_eq!(hiz_mip_count(17, 17), 2);
+        assert_eq!(hiz_mip_count(64, 32), 3);
+        assert_eq!(hiz_mip_count(1920, 1080), 8);
+        assert_eq!(hiz_mip_count(3840, 2160), 9);
     }
 }

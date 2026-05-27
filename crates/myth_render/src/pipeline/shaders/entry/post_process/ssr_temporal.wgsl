@@ -76,6 +76,58 @@ fn linearize_depth(z: f32) -> f32 {
     return u_ssr.temporal_params.z / max(z, 0.0001);
 }
 
+struct SurfaceSample {
+    depth: f32,
+    normal_packed: vec4<f32>,
+};
+
+fn sample_surface_nearest(uv: vec2<f32>) -> SurfaceSample {
+    return SurfaceSample(
+        textureSampleLevel(t_depth, s_point, uv, 0u),
+        textureSampleLevel(t_normal, s_point, uv, 0.0)
+    );
+}
+
+fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
+    let history_extent = vec2<i32>(textureDimensions(t_history_reflection));
+    let full_extent = vec2<i32>(i32(u_ssr.full_resolution.x), i32(u_ssr.full_resolution.y));
+    if (all(history_extent == full_extent)) {
+        return sample_surface_nearest(uv);
+    }
+
+    let full_extent_f = vec2<f32>(full_extent);
+    let full_pixel = uv * full_extent_f - vec2<f32>(0.5, 0.5);
+    let base_coord = clamp(
+        vec2<i32>(floor(full_pixel)),
+        vec2<i32>(0, 0),
+        full_extent - vec2<i32>(2, 2)
+    );
+
+    var best_depth = -1.0;
+    var best_normal = vec4<f32>(0.0);
+    for (var y: i32 = 0; y <= 1; y++) {
+        for (var x: i32 = 0; x <= 1; x++) {
+            let coord = base_coord + vec2<i32>(x, y);
+            let depth = textureLoad(t_depth, coord, 0);
+            let normal = textureLoad(t_normal, coord, 0);
+            if (normal.a < 0.5 || depth <= 0.0) {
+                continue;
+            }
+
+            if (depth > best_depth) {
+                best_depth = depth;
+                best_normal = normal;
+            }
+        }
+    }
+
+    if (best_depth <= 0.0) {
+        return sample_surface_nearest(uv);
+    }
+
+    return SurfaceSample(best_depth, best_normal);
+}
+
 fn get_safe_raw_reflection(pixel: vec2<i32>, extent: vec2<i32>) -> vec4<f32> {
     let coord = clamp(pixel, vec2<i32>(0, 0), extent - vec2<i32>(1, 1));
     let raw = textureLoad(t_raw_reflection, coord, 0);
@@ -168,8 +220,9 @@ fn fs_main(in: VertexOutput) -> TemporalOutput {
 
     let pixel = vec2<i32>(in.position.xy);
     let raw_extent = vec2<i32>(textureDimensions(t_raw_reflection));
-    let current_depth = textureSampleLevel(t_depth, s_point, in.uv, 0u);
-    let current_normal_packed = textureSampleLevel(t_normal, s_point, in.uv, 0.0);
+    let surface = sample_surface_conservative(in.uv);
+    let current_depth = surface.depth;
+    let current_normal_packed = surface.normal_packed;
     if (current_depth <= 0.0 || current_normal_packed.a < 0.5) {
         return out;
     }

@@ -10,8 +10,8 @@
 use std::f32::consts::{PI, TAU};
 
 use myth::prelude::*;
-use myth::resources::input::Key;
 use myth::resources::SsrQuality;
+use myth::resources::input::Key;
 use myth_dev_utils::FpsCounter;
 
 const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
@@ -100,6 +100,18 @@ impl SsrShowroomDemo {
             .set_scale_xyz(1.75, 0.84, 1.75)
             .set_shadows(true, true);
     }
+
+    fn print_help() {
+        println!("╔═══════════════════════════════════════╗");
+        println!("║            SSR Demo Controls          ║");
+        println!("╠═══════════════════════════════════════╣");
+        println!("║ T - Toggle SSR                        ║");
+        println!("║ Y - Toggle TAA                        ║");
+        println!("║ Q - Cycle SSR Quality                 ║");
+        #[cfg(feature = "debug_view")]
+        println!("║ G - Cycle SSR Debug Views             ║");
+        println!("╚═══════════════════════════════════════╝");
+    }
 }
 
 impl AppHandler for SsrShowroomDemo {
@@ -113,7 +125,7 @@ impl AppHandler for SsrShowroomDemo {
         let floor_material = engine.assets.materials.add(
             PhysicalMaterial::new(Vec4::new(0.03, 0.035, 0.045, 1.0))
                 .with_roughness(0.045)
-                .with_metalness(0.94),
+                .with_metalness(0.04),
         );
         let wall_material = engine.assets.materials.add(
             PhysicalMaterial::new(Vec4::new(0.09, 0.10, 0.12, 1.0))
@@ -192,7 +204,9 @@ impl AppHandler for SsrShowroomDemo {
             .assets
             .load_hdr_texture(format!("{}envs/royal_esplanade_2k.hdr.jpg", ASSET_PATH));
         scene.environment.set_env_map(Some(env_texture));
-        scene.background.set_mode(BackgroundMode::equirectangular(env_texture, 1.0));
+        scene
+            .background
+            .set_mode(BackgroundMode::equirectangular(env_texture, 1.0));
 
         Self::spawn_bar(
             scene,
@@ -394,6 +408,8 @@ impl AppHandler for SsrShowroomDemo {
         controls.max_distance = 18.0;
         controls.pan_speed = 0.85;
         controls.rotate_speed = 0.12;
+
+        Self::print_help();
 
         Self {
             controls,

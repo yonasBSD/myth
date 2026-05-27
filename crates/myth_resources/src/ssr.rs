@@ -55,7 +55,7 @@ pub struct SsrUniforms {
     pub temporal_params: Vec4,
     /// (frame_index, max_steps, spatial_filter_enabled, history_flags)
     pub frame_params: UVec4,
-    /// (spatial_radius, reserved, reserved, reserved)
+    /// (spatial_radius, half_resolution_enabled, reserved, reserved)
     pub denoise_params: UVec4,
 }
 
@@ -78,7 +78,7 @@ impl Default for SsrSettings {
             shading_params: Vec4::new(0.70, 0.0, 24.0, 0.30),
             temporal_params: Vec4::new(1.25, 20.0, 0.1, 0.0),
             frame_params: UVec4::new(0, 24, 1, 0),
-            denoise_params: UVec4::new(1, 0, 0, 0),
+            denoise_params: UVec4::new(1, 1, 0, 0),
         };
 
         Self {
@@ -159,6 +159,16 @@ impl SsrSettings {
         self.uniforms.write().denoise_params.x = radius.clamp(1, 4);
     }
 
+    pub fn set_half_resolution_enabled(&mut self, enabled: bool) {
+        self.mark_custom();
+        self.uniforms.write().denoise_params.y = u32::from(enabled);
+    }
+
+    #[must_use]
+    pub fn half_resolution_enabled(&self) -> bool {
+        self.uniforms.read().denoise_params.y != 0
+    }
+
     pub fn set_frame_index(&mut self, frame_index: u32) {
         self.uniforms.write().frame_params.x = frame_index;
     }
@@ -198,7 +208,7 @@ impl SsrSettings {
                 guard.shading_params = Vec4::new(0.40, 0.45, 16.0, 0.42);
                 guard.temporal_params = Vec4::new(1.8, 16.0, guard.temporal_params.z, 0.0);
                 guard.frame_params = UVec4::new(guard.frame_params.x, 16, 1, 0);
-                guard.denoise_params = UVec4::new(1, 0, 0, 0);
+                guard.denoise_params = UVec4::new(1, 1, 0, 0);
             }
             SsrQuality::Medium => {
                 guard.ray_params = Vec4::new(1.0, 12.0, 0.10, 0.06);
@@ -207,7 +217,7 @@ impl SsrSettings {
                 guard.shading_params = Vec4::new(0.55, 0.2, 20.0, 0.34);
                 guard.temporal_params = Vec4::new(1.5, 18.0, guard.temporal_params.z, 0.0);
                 guard.frame_params = UVec4::new(guard.frame_params.x, 24, 1, 0);
-                guard.denoise_params = UVec4::new(1, 0, 0, 0);
+                guard.denoise_params = UVec4::new(1, 1, 0, 0);
             }
             SsrQuality::High => {
                 guard.ray_params = Vec4::new(1.0, 16.0, 0.05, 0.05);
@@ -216,7 +226,7 @@ impl SsrSettings {
                 guard.shading_params = Vec4::new(0.70, 0.0, 24.0, 0.30);
                 guard.temporal_params = Vec4::new(1.25, 20.0, guard.temporal_params.z, 0.0);
                 guard.frame_params = UVec4::new(guard.frame_params.x, 48, 1, 0);
-                guard.denoise_params = UVec4::new(1, 0, 0, 0);
+                guard.denoise_params = UVec4::new(1, 1, 0, 0);
             }
             SsrQuality::Ultra => {
                 guard.ray_params = Vec4::new(1.0, 24.0, 0.02, 0.03);

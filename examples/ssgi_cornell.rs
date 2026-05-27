@@ -42,6 +42,18 @@ fn next_debug_mode(current: DebugViewMode) -> DebugViewMode {
     }
 }
 
+fn print_help() {
+    println!("╔══════════════════════════════════════════╗");
+    println!("║          SSGI Cornell Box Demo           ║");
+    println!("╟──────────────────────────────────────────╢");
+    println!("║ T: Toggle SSGI                           ║");
+    println!("║ Y: Toggle TAA                            ║");
+    println!("║ Q: Cycle SSGI Quality                    ║");
+    #[cfg(feature = "debug_view")]
+    println!("║ G: Cycle SSGI Debug Views                ║");
+    println!("╚══════════════════════════════════════════╝");
+}
+
 struct SsgiCornellDemo {
     controls: OrbitControls,
     fps_counter: FpsCounter,
@@ -155,6 +167,8 @@ impl AppHandler for SsgiCornellDemo {
         let mut controls = OrbitControls::new(Vec3::new(0.0, 2.6, 9.4), Vec3::new(0.0, 2.3, 0.0));
         controls.min_distance = 5.0;
         controls.max_distance = 14.0;
+
+        print_help();
 
         Self {
             controls,

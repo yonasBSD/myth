@@ -15,8 +15,7 @@ use crate::graph::core::{
 };
 use crate::graph::passes::utils::CopyTextureNode;
 use crate::pipeline::{
-    ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions,
-    ShaderSource,
+    ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
 use myth_resources::buffer::CpuBuffer;
 use myth_resources::ssr::SsrUniforms;
@@ -24,6 +23,14 @@ use myth_resources::uniforms::WgslStruct;
 
 const SSR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const SSR_HISTORY_FLAG_VALID: u32 = 1 << 0;
+
+fn ssr_trace_resolution(width: u32, height: u32, half_resolution: bool) -> (u32, u32) {
+    if half_resolution {
+        ((width / 2).max(1), (height / 2).max(1))
+    } else {
+        (width.max(1), height.max(1))
+    }
+}
 
 fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
     if cfg!(feature = "advanced_noise") {
@@ -58,7 +65,7 @@ pub struct SsrFeature {
     history_meta_view: Option<Tracked<wgpu::TextureView>>,
 
     prepared_max_steps: u32,
-    full_resolution: (u32, u32),
+    trace_resolution: (u32, u32),
     history_valid: bool,
 }
 
@@ -86,7 +93,7 @@ impl SsrFeature {
             reflection_history_view: None,
             history_meta_view: None,
             prepared_max_steps: 24,
-            full_resolution: (0, 0),
+            trace_resolution: (0, 0),
             history_valid: false,
         }
     }
@@ -190,23 +197,30 @@ impl SsrFeature {
         self.merge_layout = Some(Tracked::new(merge_layout));
     }
 
-    fn ensure_history_buffers(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        if self.full_resolution == (width, height)
+    fn ensure_history_buffers(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        half_resolution: bool,
+    ) {
+        let trace_resolution = ssr_trace_resolution(width, height, half_resolution);
+        if self.trace_resolution == trace_resolution
             && self.reflection_history_view.is_some()
             && self.history_meta_view.is_some()
         {
             return;
         }
 
-        let full_extent = wgpu::Extent3d {
-            width,
-            height,
+        let trace_extent = wgpu::Extent3d {
+            width: trace_resolution.0,
+            height: trace_resolution.1,
             depth_or_array_layers: 1,
         };
 
         let reflection_history = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SSR History Reflection"),
-            size: full_extent,
+            size: trace_extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -216,7 +230,7 @@ impl SsrFeature {
         });
         let history_meta = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SSR History Meta"),
-            size: full_extent,
+            size: trace_extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -232,7 +246,7 @@ impl SsrFeature {
             history_meta.create_view(&wgpu::TextureViewDescriptor::default()),
         ));
 
-        self.full_resolution = (width, height);
+        self.trace_resolution = trace_resolution;
         self.invalidate_history();
     }
 
@@ -405,7 +419,10 @@ impl SsrFeature {
                 ctx.device
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("SSR Merge Pipeline Layout"),
-                        bind_group_layouts: &[Some(&gpu_world.layout), self.merge_layout.as_deref()],
+                        bind_group_layouts: &[
+                            Some(&gpu_world.layout),
+                            self.merge_layout.as_deref(),
+                        ],
                         immediate_size: 0,
                     });
 
@@ -435,10 +452,12 @@ impl SsrFeature {
         size: (u32, u32),
     ) {
         self.ensure_layouts(ctx.device);
-        self.ensure_history_buffers(ctx.device, size.0, size.1);
-        self.sync_history_flags(ssr_uniforms);
 
         let uniforms = *ssr_uniforms.read();
+        let half_resolution = uniforms.denoise_params.y != 0;
+        self.ensure_history_buffers(ctx.device, size.0, size.1, half_resolution);
+        self.sync_history_flags(ssr_uniforms);
+
         let max_steps = uniforms.frame_params.y;
         self.ensure_pipelines(ctx, max_steps);
         self.prepared_max_steps = max_steps;
@@ -482,13 +501,12 @@ impl SsrFeature {
             self.temporal_pipeline
                 .expect("SSR temporal pipeline missing"),
         );
-        let spatial_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.spatial_pipeline
-                .expect("SSR spatial pipeline missing"),
-        );
-        let merge_pipeline = ctx.pipeline_cache.get_render_pipeline(
-            self.merge_pipeline.expect("SSR merge pipeline missing"),
-        );
+        let spatial_pipeline = ctx
+            .pipeline_cache
+            .get_render_pipeline(self.spatial_pipeline.expect("SSR spatial pipeline missing"));
+        let merge_pipeline = ctx
+            .pipeline_cache
+            .get_render_pipeline(self.merge_pipeline.expect("SSR merge pipeline missing"));
 
         let raw_layout = self.raw_layout.as_ref().unwrap();
         let temporal_layout = self.temporal_layout.as_ref().unwrap();
@@ -503,6 +521,8 @@ impl SsrFeature {
         let blue_noise_sampler = self.blue_noise_sampler.as_ref().unwrap();
         let reflection_history_view = self.reflection_history_view.as_ref().unwrap();
         let history_meta_view = self.history_meta_view.as_ref().unwrap();
+        let trace_width = reflection_history_view.texture().width();
+        let trace_height = reflection_history_view.texture().height();
 
         let reflection_history_desc = persistent_texture_desc(
             reflection_history_view.texture().width(),
@@ -521,8 +541,8 @@ impl SsrFeature {
 
         let outputs = ctx.with_group("SSR_System", |ctx| {
             let raw_desc = TextureDesc::new_2d(
-                ctx.frame_config.width,
-                ctx.frame_config.height,
+                trace_width,
+                trace_height,
                 SSR_TEXTURE_FORMAT,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             );
@@ -558,8 +578,8 @@ impl SsrFeature {
             });
 
             let temporal_desc = TextureDesc::new_2d(
-                ctx.frame_config.width,
-                ctx.frame_config.height,
+                trace_width,
+                trace_height,
                 SSR_TEXTURE_FORMAT,
                 wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
@@ -615,8 +635,8 @@ impl SsrFeature {
                 });
 
             let clean_desc = TextureDesc::new_2d(
-                ctx.frame_config.width,
-                ctx.frame_config.height,
+                trace_width,
+                trace_height,
                 SSR_TEXTURE_FORMAT,
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             );
@@ -683,21 +703,22 @@ impl SsrFeature {
                 (node, out)
             });
 
-            ctx.graph.add_pass("SSR_Save_History_Reflection", |builder| {
-                builder.read_texture(temporal_reflection);
-                let history_out = builder.write_external_texture(
-                    "SSR_History_Reflection_Write",
-                    reflection_history_desc,
-                    reflection_history_view,
-                );
-                (
-                    CopyTextureNode {
-                        src: temporal_reflection,
-                        dst: history_out,
-                    },
-                    (),
-                )
-            });
+            ctx.graph
+                .add_pass("SSR_Save_History_Reflection", |builder| {
+                    builder.read_texture(temporal_reflection);
+                    let history_out = builder.write_external_texture(
+                        "SSR_History_Reflection_Write",
+                        reflection_history_desc,
+                        reflection_history_view,
+                    );
+                    (
+                        CopyTextureNode {
+                            src: temporal_reflection,
+                            dst: history_out,
+                        },
+                        (),
+                    )
+                });
 
             ctx.graph.add_pass("SSR_Save_History_Meta", |builder| {
                 builder.read_texture(temporal_meta);
@@ -729,10 +750,17 @@ impl SsrFeature {
 
 #[cfg(test)]
 mod tests {
-    use super::{SsrFeature, SSR_HISTORY_FLAG_VALID};
+    use super::{SSR_HISTORY_FLAG_VALID, SsrFeature, ssr_trace_resolution};
     use myth_resources::ssr::SsrSettings;
 
     const CAMERA_CUT_FLAG: u32 = 1 << 1;
+
+    #[test]
+    fn computes_trace_resolution_from_quality_budget() {
+        assert_eq!(ssr_trace_resolution(1, 1, true), (1, 1));
+        assert_eq!(ssr_trace_resolution(1920, 1080, true), (960, 540));
+        assert_eq!(ssr_trace_resolution(2560, 1440, false), (2560, 1440));
+    }
 
     #[test]
     fn sync_history_flags_clears_stale_history_bit() {
@@ -968,10 +996,7 @@ impl<'a> PassNode<'a> for SsrMergeNode<'a> {
     }
 }
 
-fn texture_entry(
-    binding: u32,
-    sample_type: wgpu::TextureSampleType,
-) -> wgpu::BindGroupLayoutEntry {
+fn texture_entry(binding: u32, sample_type: wgpu::TextureSampleType) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -984,10 +1009,7 @@ fn texture_entry(
     }
 }
 
-fn sampler_entry(
-    binding: u32,
-    ty: wgpu::SamplerBindingType,
-) -> wgpu::BindGroupLayoutEntry {
+fn sampler_entry(binding: u32, ty: wgpu::SamplerBindingType) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,

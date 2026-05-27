@@ -31,17 +31,71 @@ fn linearize_depth(z: f32) -> f32 {
     return u_ssr.temporal_params.z / max(z, 0.0001);
 }
 
+struct SurfaceSample {
+    depth: f32,
+    normal_packed: vec4<f32>,
+};
+
+fn sample_surface_nearest(uv: vec2<f32>) -> SurfaceSample {
+    return SurfaceSample(
+        textureSampleLevel(t_depth, s_point, uv, 0u),
+        textureSampleLevel(t_normal, s_point, uv, 0.0)
+    );
+}
+
+fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
+    let reflection_extent = vec2<i32>(textureDimensions(t_reflection));
+    let full_extent = vec2<i32>(i32(u_ssr.full_resolution.x), i32(u_ssr.full_resolution.y));
+    if (all(reflection_extent == full_extent)) {
+        return sample_surface_nearest(uv);
+    }
+
+    let full_extent_f = vec2<f32>(full_extent);
+    let full_pixel = uv * full_extent_f - vec2<f32>(0.5, 0.5);
+    let base_coord = clamp(
+        vec2<i32>(floor(full_pixel)),
+        vec2<i32>(0, 0),
+        full_extent - vec2<i32>(2, 2)
+    );
+
+    var best_depth = -1.0;
+    var best_normal = vec4<f32>(0.0);
+    for (var y: i32 = 0; y <= 1; y++) {
+        for (var x: i32 = 0; x <= 1; x++) {
+            let coord = base_coord + vec2<i32>(x, y);
+            let depth = textureLoad(t_depth, coord, 0);
+            let normal = textureLoad(t_normal, coord, 0);
+            if (normal.a < 0.5 || depth <= 0.0) {
+                continue;
+            }
+
+            if (depth > best_depth) {
+                best_depth = depth;
+                best_normal = normal;
+            }
+        }
+    }
+
+    if (best_depth <= 0.0) {
+        return sample_surface_nearest(uv);
+    }
+
+    return SurfaceSample(best_depth, best_normal);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let extent = vec2<i32>(textureDimensions(t_reflection));
+    let reflection_inv_extent = 1.0 / vec2<f32>(extent);
     let center_pixel = clamp(vec2<i32>(in.position.xy), vec2<i32>(0, 0), extent - vec2<i32>(1, 1));
     let center = textureLoad(t_reflection, center_pixel, 0);
     if (center.a <= 1e-4) {
         return vec4<f32>(0.0);
     }
 
-    let center_depth = textureSampleLevel(t_depth, s_point, in.uv, 0u);
-    let center_normal_packed = textureSampleLevel(t_normal, s_point, in.uv, 0.0);
+    let center_surface = sample_surface_conservative(in.uv);
+    let center_depth = center_surface.depth;
+    let center_normal_packed = center_surface.normal_packed;
     if (center_depth <= 0.0 || center_normal_packed.a < 0.5) {
         return center;
     }
@@ -85,9 +139,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 continue;
             }
 
-            let sample_uv = (vec2<f32>(sample_pixel) + vec2<f32>(0.5, 0.5)) * u_ssr.full_resolution.zw;
-            let sample_depth = textureSampleLevel(t_depth, s_point, sample_uv, 0u);
-            let sample_normal_packed = textureSampleLevel(t_normal, s_point, sample_uv, 0.0);
+            let sample_uv = (vec2<f32>(sample_pixel) + vec2<f32>(0.5, 0.5)) * reflection_inv_extent;
+            let sample_surface = sample_surface_conservative(sample_uv);
+            let sample_depth = sample_surface.depth;
+            let sample_normal_packed = sample_surface.normal_packed;
             if (sample_depth <= 0.0 || sample_normal_packed.a < 0.5) {
                 continue;
             }
