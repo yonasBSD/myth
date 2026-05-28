@@ -44,7 +44,7 @@ fn depth_to_linear(z: f32) -> f32 {
 }
 
 fn jitter_uv_offset() -> vec2<f32> {
-    return vec2<f32>(-0.5, 0.5) * u_render_state.jitter;
+    return vec2<f32>(0.5, -0.5) * u_render_state.jitter;
 }
 
 fn jittered_to_unjittered_uv(uv: vec2<f32>) -> vec2<f32> {

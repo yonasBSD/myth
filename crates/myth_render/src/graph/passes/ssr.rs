@@ -152,14 +152,15 @@ impl SsrFeature {
             entries: &[
                 texture_entry(0, wgpu::TextureSampleType::Float { filterable: true }),
                 texture_entry(1, wgpu::TextureSampleType::Float { filterable: true }),
-                texture_entry(2, wgpu::TextureSampleType::Depth),
-                texture_entry(3, wgpu::TextureSampleType::Float { filterable: true }),
+                texture_entry(2, wgpu::TextureSampleType::Float { filterable: true }),
+                texture_entry(3, wgpu::TextureSampleType::Depth),
                 texture_entry(4, wgpu::TextureSampleType::Float { filterable: true }),
-                texture_entry(5, wgpu::TextureSampleType::Float { filterable: false }),
-                texture_entry(6, wgpu::TextureSampleType::Float { filterable: true }),
-                sampler_entry(7, wgpu::SamplerBindingType::Filtering),
-                sampler_entry(8, wgpu::SamplerBindingType::NonFiltering),
-                uniform_entry(9),
+                texture_entry(5, wgpu::TextureSampleType::Float { filterable: true }),
+                texture_entry(6, wgpu::TextureSampleType::Float { filterable: false }),
+                texture_entry(7, wgpu::TextureSampleType::Float { filterable: true }),
+                sampler_entry(8, wgpu::SamplerBindingType::Filtering),
+                sampler_entry(9, wgpu::SamplerBindingType::NonFiltering),
+                uniform_entry(10),
             ],
         });
 
@@ -290,9 +291,17 @@ impl SsrFeature {
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
             });
+            let trace_target = ColorTargetKey::from(wgpu::ColorTargetState {
+                format: SSR_TEXTURE_FORMAT,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            });
 
-            let key =
-                FullscreenPipelineKey::fullscreen(hash, smallvec::smallvec![color_target], None);
+            let key = FullscreenPipelineKey::fullscreen(
+                hash,
+                smallvec::smallvec![color_target, trace_target],
+                None,
+            );
 
             let pipeline = ctx.pipeline_cache.get_or_create_fullscreen(
                 ctx.device,
@@ -306,10 +315,21 @@ impl SsrFeature {
         }
 
         if self.temporal_pipeline.is_none() {
+            let global_state_key = (ctx.render_state.id, ctx.extracted_scene.scene_id);
+            let gpu_world = ctx
+                .resource_manager
+                .get_global_state(global_state_key.0, global_state_key.1)
+                .expect("SSR: GpuGlobalState must exist");
+
             let mut options = ShaderCompilationOptions::default();
             options.add_define(
                 "struct_definitions",
                 SsrUniforms::wgsl_struct_def("SsrUniforms").as_str(),
+            );
+            options.inject_code("binding_code", &gpu_world.binding_wgsl);
+            options.inject_code(
+                "scene_lighting_structs",
+                myth_resources::uniforms::scene_lighting_structs_wgsl(),
             );
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
@@ -322,7 +342,10 @@ impl SsrFeature {
                 ctx.device
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("SSR Temporal Pipeline Layout"),
-                        bind_group_layouts: &[self.temporal_layout.as_deref()],
+                        bind_group_layouts: &[
+                            Some(&gpu_world.layout),
+                            self.temporal_layout.as_deref(),
+                        ],
                         immediate_size: 0,
                     });
 
@@ -547,35 +570,41 @@ impl SsrFeature {
                 wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             );
 
-            let raw_reflection: TextureNodeId = ctx.graph.add_pass("SSR_Trace", |builder| {
-                builder.read_texture(scene_depth);
-                builder.read_texture(scene_normals);
-                builder.read_texture(current_color);
-                builder.read_texture(scene_hiz);
-                builder.read_texture(material_mrt);
-                builder.read_texture(specular_mrt);
+            let (raw_reflection, raw_trace_data): (TextureNodeId, TextureNodeId) =
+                ctx.graph.add_pass("SSR_Trace", |builder| {
+                    builder.read_texture(scene_depth);
+                    builder.read_texture(scene_normals);
+                    builder.read_texture(current_color);
+                    builder.read_texture(scene_hiz);
+                    builder.read_texture(material_mrt);
+                    builder.read_texture(specular_mrt);
 
-                let uniforms =
-                    builder.read_external_buffer("SSR_Uniforms", uniforms_desc, uniforms_buffer);
-                let out = builder.create_texture("SSR_Raw_Reflection", raw_desc);
-                let node = SsrTraceNode {
-                    scene_depth,
-                    scene_normals,
-                    scene_color: current_color,
-                    scene_hiz,
-                    material_mrt,
-                    specular_mrt,
-                    uniforms,
-                    blue_noise_view,
-                    blue_noise_sampler,
-                    output_tex: out,
-                    pipeline: raw_pipeline,
-                    layout: raw_layout,
-                    transient_bg: None,
-                };
+                    let uniforms = builder.read_external_buffer(
+                        "SSR_Uniforms",
+                        uniforms_desc,
+                        uniforms_buffer,
+                    );
+                    let out = builder.create_texture("SSR_Raw_Reflection", raw_desc);
+                    let trace_out = builder.create_texture("SSR_Raw_TraceData", raw_desc);
+                    let node = SsrTraceNode {
+                        scene_depth,
+                        scene_normals,
+                        scene_color: current_color,
+                        scene_hiz,
+                        material_mrt,
+                        specular_mrt,
+                        uniforms,
+                        blue_noise_view,
+                        blue_noise_sampler,
+                        output_reflection: out,
+                        output_trace_data: trace_out,
+                        pipeline: raw_pipeline,
+                        layout: raw_layout,
+                        transient_bg: None,
+                    };
 
-                (node, out)
-            });
+                    (node, (out, trace_out))
+                });
 
             let temporal_desc = TextureDesc::new_2d(
                 trace_width,
@@ -600,6 +629,7 @@ impl SsrFeature {
                     );
 
                     builder.read_texture(raw_reflection);
+                    builder.read_texture(raw_trace_data);
                     builder.read_texture(scene_depth);
                     builder.read_texture(scene_normals);
                     builder.read_texture(velocity);
@@ -617,6 +647,7 @@ impl SsrFeature {
 
                     let node = SsrTemporalNode {
                         raw_reflection,
+                        raw_trace_data,
                         reflection_history,
                         scene_depth,
                         scene_normals,
@@ -800,7 +831,8 @@ struct SsrTraceNode<'a> {
     uniforms: BufferNodeId,
     blue_noise_view: &'a Tracked<wgpu::TextureView>,
     blue_noise_sampler: &'a Tracked<wgpu::Sampler>,
-    output_tex: TextureNodeId,
+    output_reflection: TextureNodeId,
+    output_trace_data: TextureNodeId,
     pipeline: &'a wgpu::RenderPipeline,
     layout: &'a Tracked<wgpu::BindGroupLayout>,
     transient_bg: Option<&'a wgpu::BindGroup>,
@@ -826,12 +858,15 @@ impl<'a> PassNode<'a> for SsrTraceNode<'a> {
     }
 
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut wgpu::CommandEncoder) {
-        let output = ctx.get_color_attachment(self.output_tex, RenderTargetOps::DontCare, None);
+        let attachments = [
+            ctx.get_color_attachment(self.output_reflection, RenderTargetOps::DontCare, None),
+            ctx.get_color_attachment(self.output_trace_data, RenderTargetOps::DontCare, None),
+        ];
         let global_bg = ctx.baked_lists.global_bind_group;
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("SSR Trace Pass"),
-            color_attachments: &[output],
+            color_attachments: &attachments,
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -847,6 +882,7 @@ impl<'a> PassNode<'a> for SsrTraceNode<'a> {
 
 struct SsrTemporalNode<'a> {
     raw_reflection: TextureNodeId,
+    raw_trace_data: TextureNodeId,
     reflection_history: TextureNodeId,
     scene_depth: TextureNodeId,
     scene_normals: TextureNodeId,
@@ -866,15 +902,16 @@ impl<'a> PassNode<'a> for SsrTemporalNode<'a> {
         self.transient_bg = Some(
             crate::myth_bind_group!(ctx, self.layout, Some("SSR Temporal BG"), [
                 0 => self.raw_reflection,
-                1 => self.reflection_history,
-                2 => self.scene_depth,
-                3 => self.scene_normals,
-                4 => self.history_meta,
-                5 => self.velocity,
-                6 => self.material_mrt,
-                7 => CommonSampler::LinearClamp,
-                8 => CommonSampler::NearestClamp,
-                9 => self.uniforms,
+                1 => self.raw_trace_data,
+                2 => self.reflection_history,
+                3 => self.scene_depth,
+                4 => self.scene_normals,
+                5 => self.history_meta,
+                6 => self.velocity,
+                7 => self.material_mrt,
+                8 => CommonSampler::LinearClamp,
+                9 => CommonSampler::NearestClamp,
+                10 => self.uniforms,
             ]),
         );
     }
@@ -884,6 +921,7 @@ impl<'a> PassNode<'a> for SsrTemporalNode<'a> {
             ctx.get_color_attachment(self.output_reflection, RenderTargetOps::DontCare, None),
             ctx.get_color_attachment(self.output_meta, RenderTargetOps::DontCare, None),
         ];
+        let global_bg = ctx.baked_lists.global_bind_group;
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("SSR Temporal Pass"),
@@ -895,7 +933,8 @@ impl<'a> PassNode<'a> for SsrTemporalNode<'a> {
         });
 
         rpass.set_pipeline(self.pipeline);
-        rpass.set_bind_group(0, self.transient_bg.expect("SSR temporal BG missing"), &[]);
+        rpass.set_bind_group(0, global_bg, &[]);
+        rpass.set_bind_group(1, self.transient_bg.expect("SSR temporal BG missing"), &[]);
         rpass.draw(0..3, 0..1);
     }
 }

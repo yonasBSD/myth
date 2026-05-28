@@ -34,12 +34,21 @@ fn linearize_depth(z: f32) -> f32 {
 struct SurfaceSample {
     depth: f32,
     normal_packed: vec4<f32>,
+    coord: vec2<i32>,
 };
 
 fn sample_surface_nearest(uv: vec2<f32>) -> SurfaceSample {
+    let full_extent = vec2<i32>(i32(u_ssr.full_resolution.x), i32(u_ssr.full_resolution.y));
+    let full_pixel = uv * vec2<f32>(full_extent) - vec2<f32>(0.5, 0.5);
+    let coord = clamp(
+        vec2<i32>(round(full_pixel)),
+        vec2<i32>(0, 0),
+        full_extent - vec2<i32>(1, 1)
+    );
     return SurfaceSample(
-        textureSampleLevel(t_depth, s_point, uv, 0u),
-        textureSampleLevel(t_normal, s_point, uv, 0.0)
+        textureLoad(t_depth, coord, 0),
+        textureLoad(t_normal, coord, 0),
+        coord
     );
 }
 
@@ -60,6 +69,7 @@ fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
 
     var best_depth = -1.0;
     var best_normal = vec4<f32>(0.0);
+    var best_coord = base_coord;
     for (var y: i32 = 0; y <= 1; y++) {
         for (var x: i32 = 0; x <= 1; x++) {
             let coord = base_coord + vec2<i32>(x, y);
@@ -72,6 +82,7 @@ fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
             if (depth > best_depth) {
                 best_depth = depth;
                 best_normal = normal;
+                best_coord = coord;
             }
         }
     }
@@ -80,7 +91,7 @@ fn sample_surface_conservative(uv: vec2<f32>) -> SurfaceSample {
         return sample_surface_nearest(uv);
     }
 
-    return SurfaceSample(best_depth, best_normal);
+    return SurfaceSample(best_depth, best_normal, best_coord);
 }
 
 @fragment
@@ -100,7 +111,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return center;
     }
 
-    let center_material = textureSampleLevel(t_material_data, s_point, in.uv, 0.0);
+    let center_material = textureLoad(t_material_data, center_surface.coord, 0);
     let roughness = center_material.a;
     if (roughness > u_ssr.shading_params.x) {
         return vec4<f32>(0.0);
