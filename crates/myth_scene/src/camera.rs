@@ -28,6 +28,8 @@ pub enum DebugViewMode {
     SsgiDenoised = 7,
     SsrRaw = 8,
     SsrResolved = 9,
+    SsrTraceDiagnostic = 13,
+    SsrTraceState = 14,
     // Material attribute modes (shader override)
     Albedo = 10,
     Roughness = 11,
@@ -50,6 +52,8 @@ impl DebugViewMode {
             Self::SsgiDenoised => "SSGI Denoised Indirect",
             Self::SsrRaw => "SSR Raw Reflection",
             Self::SsrResolved => "SSR Resolved Reflection",
+            Self::SsrTraceDiagnostic => "SSR Trace Consistency Diagnostic",
+            Self::SsrTraceState => "SSR Trace State Diagnostic",
             Self::Albedo => "Albedo (Material)",
             Self::Roughness => "Roughness (Material)",
             Self::Metalness => "Metalness (Material)",
@@ -60,14 +64,47 @@ impl DebugViewMode {
     #[inline]
     #[must_use]
     pub const fn is_post_process(self) -> bool {
-        (self as u32) >= 1 && (self as u32) <= 9
+        matches!(
+            self,
+            Self::SSAO
+                | Self::Normal
+                | Self::Velocity
+                | Self::Depth
+                | Self::ClusterHeatmap
+                | Self::SsgiRaw
+                | Self::SsgiDenoised
+                | Self::SsrRaw
+                | Self::SsrResolved
+                | Self::SsrTraceDiagnostic
+                | Self::SsrTraceState
+        )
+    }
+
+    /// WGSL `view_mode` value for post-process debug overlays.
+    #[inline]
+    #[must_use]
+    pub const fn post_process_view_mode(self) -> Option<u32> {
+        match self {
+            Self::SSAO => Some(1),
+            Self::Normal => Some(2),
+            Self::Velocity => Some(3),
+            Self::Depth => Some(4),
+            Self::ClusterHeatmap => Some(5),
+            Self::SsgiRaw => Some(6),
+            Self::SsgiDenoised => Some(7),
+            Self::SsrRaw => Some(8),
+            Self::SsrResolved => Some(9),
+            Self::SsrTraceDiagnostic => Some(10),
+            Self::SsrTraceState => Some(11),
+            _ => None,
+        }
     }
 
     /// Returns `true` for modes that use shader-override (material attribute) visualisation.
     #[inline]
     #[must_use]
     pub const fn is_material_override(self) -> bool {
-        (self as u32) >= 10
+        matches!(self, Self::Albedo | Self::Roughness | Self::Metalness)
     }
 
     /// All available modes for UI enumeration.
@@ -82,6 +119,8 @@ impl DebugViewMode {
         Self::SsgiDenoised,
         Self::SsrRaw,
         Self::SsrResolved,
+        Self::SsrTraceDiagnostic,
+        Self::SsrTraceState,
         Self::Albedo,
         Self::Roughness,
         Self::Metalness,

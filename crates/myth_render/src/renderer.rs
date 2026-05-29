@@ -770,9 +770,9 @@ impl Renderer {
 
                     let dv = camera.debug_view;
                     let target = DebugViewTarget::from_mode(dv.mode);
-                    if target != DebugViewTarget::None {
+                    if let Some(view_mode) = dv.mode.post_process_view_mode() {
                         let params = DebugViewUniforms {
-                            view_mode: target.view_mode(),
+                            view_mode,
                             custom_scale: dv.custom_scale,
                             z_near: camera.near,
                             z_far: if camera.far.is_infinite() {
@@ -781,10 +781,7 @@ impl Renderer {
                                 camera.far
                             },
                         };
-                        let is_depth = matches!(
-                            target,
-                            DebugViewTarget::SceneDepth | DebugViewTarget::ClusterHeatmap
-                        );
+                        let is_depth = target.is_depth();
                         state.debug_view_pass.extract_and_prepare(
                             &mut extract_ctx,
                             view_format,

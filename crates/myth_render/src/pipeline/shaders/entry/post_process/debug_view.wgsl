@@ -48,6 +48,90 @@ fn tonemap_debug(color: vec3<f32>, exposure: f32) -> vec3<f32> {
     return pow(mapped, vec3<f32>(1.0 / 2.2));
 }
 
+fn debug_world_hit_grid(world_pos: vec3<f32>) -> vec3<f32> {
+    let scaled = world_pos * 0.75;
+    let base = fract(vec3<f32>(
+        dot(scaled, vec3<f32>(0.1031, 0.11369, 0.13787)),
+        dot(scaled, vec3<f32>(0.2695, 0.1833, 0.2461)),
+        dot(scaled, vec3<f32>(0.2473, 0.2921, 0.1737))
+    ));
+    let cell = abs(fract(scaled) - vec3<f32>(0.5));
+    let line = 1.0 - smoothstep(0.46, 0.5, min(min(cell.x, cell.y), cell.z));
+    return mix(base, vec3<f32>(1.0), line * 0.85);
+}
+
+fn debug_trace_texel_diagnostic(diag: vec4<f32>) -> vec3<f32> {
+    let delta_pixels = diag.xy;
+    let error_pixels = diag.z;
+    let direction = clamp(delta_pixels * 0.5 + vec2<f32>(0.5, 0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    let magnitude = clamp(error_pixels / 1.5, 0.0, 1.0);
+    let axis_emphasis = clamp(abs(delta_pixels) / 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
+
+    let direction_color = vec3<f32>(direction.x, direction.y, 1.0 - 0.5 * (direction.x + direction.y));
+    let magnitude_color = heatmap_color(magnitude);
+    let axis_overlay = vec3<f32>(axis_emphasis.x, axis_emphasis.y, max(axis_emphasis.x, axis_emphasis.y));
+
+    var color = mix(vec3<f32>(0.02, 0.04, 0.08), magnitude_color, magnitude);
+    color = mix(color, direction_color, 0.45);
+    color = mix(color, axis_overlay, 0.20 * step(0.02, error_pixels));
+    return color;
+}
+
+fn debug_trace_state(diag: vec4<f32>) -> vec3<f32> {
+    let stage_value = diag.w;
+    let stage = u32(floor(stage_value + 1e-3));
+    let near_clip_active = fract(stage_value) > 0.25;
+
+    var color = vec3<f32>(0.0);
+    switch stage {
+        case 1u: {
+            color = vec3<f32>(0.18, 0.18, 0.18);
+        }
+        case 2u: {
+            color = vec3<f32>(0.86, 0.16, 0.68);
+        }
+        case 3u: {
+            color = vec3<f32>(0.14, 0.86, 0.92);
+        }
+        case 4u: {
+            color = vec3<f32>(0.94, 0.90, 0.24);
+        }
+        case 5u: {
+            color = vec3<f32>(0.74, 0.22, 0.92);
+        }
+        case 6u: {
+            color = vec3<f32>(0.18, 0.50, 1.0);
+        }
+        case 7u: {
+            color = vec3<f32>(1.0, 0.58, 0.12);
+        }
+        case 8u: {
+            color = vec3<f32>(1.0, 0.78, 0.22);
+        }
+        case 9u: {
+            color = vec3<f32>(1.0, 0.22, 0.32);
+        }
+        case 10u: {
+            color = vec3<f32>(0.96, 0.88, 0.18);
+        }
+        case 11u: {
+            color = vec3<f32>(0.20, 0.94, 0.36);
+        }
+        case 12u: {
+            color = vec3<f32>(0.96, 0.36, 0.78);
+        }
+        default: {
+            color = vec3<f32>(0.0);
+        }
+    }
+
+    if (near_clip_active) {
+        color = mix(color, vec3<f32>(0.18, 0.96, 1.0), 0.45);
+    }
+
+    return color;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     $$ if IS_DEPTH
@@ -163,7 +247,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let overlay = mix(vec3<f32>(0.08, 0.16, 0.44), vec3<f32>(0.28, 0.96, 0.36), confidence);
             return vec4<f32>(mix(mapped, overlay, 0.18), 1.0);
         }
-        // Mode 8: SSR raw reflection hit confidence
+        // Mode 8: SSR raw reflection confidence
         case 8u: {
             let mapped = tonemap_debug(tex_color.rgb, uniforms.custom_scale);
             let confidence = clamp(tex_color.a, 0.0, 1.0);
@@ -176,6 +260,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let confidence = clamp(tex_color.a, 0.0, 1.0);
             let overlay = mix(vec3<f32>(0.05, 0.10, 0.20), vec3<f32>(0.30, 0.92, 0.86), confidence);
             return vec4<f32>(mix(mapped, overlay, 0.18), 1.0);
+        }
+        // Mode 10: SSR trace consistency diagnostic
+        case 10u: {
+            if (tex_color.a <= 1e-4) {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+            return vec4<f32>(debug_trace_texel_diagnostic(tex_color), 1.0);
+        }
+        // Mode 11: SSR trace state diagnostic
+        case 11u: {
+            if (tex_color.a <= 1e-4) {
+                return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            }
+            return vec4<f32>(debug_trace_state(tex_color), 1.0);
         }
         // Default: colour pass-through
         default: {

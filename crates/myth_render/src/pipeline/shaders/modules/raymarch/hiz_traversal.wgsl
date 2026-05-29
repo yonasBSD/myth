@@ -19,13 +19,14 @@ struct HiZTraceConfig {
 struct RaymarchResult {
     hit: bool,
     uv: vec2<f32>,
+    view_pos: vec3<f32>,
     depth: f32,
     scene_depth: f32,
     iteration_count: u32,
 };
 
 fn hiz_trace_miss(iteration_count: u32) -> RaymarchResult {
-    return RaymarchResult(false, vec2<f32>(0.0), 0.0, 0.0, iteration_count);
+    return RaymarchResult(false, vec2<f32>(0.0), vec3<f32>(0.0), 0.0, 0.0, iteration_count);
 }
 
 fn hiz_depth_to_linear(near_plane: f32, depth: f32) -> f32 {
@@ -90,6 +91,7 @@ fn hiz_refine_hit(
     var right = end_t;
     var found = false;
     var hit_uv = vec2<f32>(0.0);
+    var hit_view_pos = vec3<f32>(0.0);
     var hit_depth = 0.0;
     var hit_scene_depth = 0.0;
 
@@ -110,12 +112,8 @@ fn hiz_refine_hit(
             left = mid;
         } else {
             right = mid;
-            let refined_pixel = clamp(
-                pixel,
-                vec2<f32>(0.5, 0.5),
-                config.screen_size - vec2<f32>(0.5, 0.5),
-            );
-            hit_uv = refined_pixel / config.screen_size;
+            hit_uv = (vec2<f32>(coord) + vec2<f32>(0.5)) / config.screen_size;
+            hit_view_pos = hiz_ray_view_position(segment, mid);
             hit_depth = ray_depth;
             hit_scene_depth = scene_depth;
             found = true;
@@ -126,7 +124,7 @@ fn hiz_refine_hit(
         return hiz_trace_miss(iteration_count);
     }
 
-    return RaymarchResult(true, hit_uv, hit_depth, hit_scene_depth, iteration_count);
+    return RaymarchResult(true, hit_uv, hit_view_pos, hit_depth, hit_scene_depth, iteration_count);
 }
 
 fn trace_screen_space_ray_hiz(
@@ -195,7 +193,7 @@ fn trace_screen_space_ray_hiz(
                     continue;
                 }
 
-                let refine_result = hiz_refine_hit(
+                return hiz_refine_hit(
                     segment,
                     config,
                     depth_texture,
@@ -203,14 +201,6 @@ fn trace_screen_space_ray_hiz(
                     boundary_t,
                     iter + 1u,
                 );
-
-                if (refine_result.hit) {
-                    return refine_result;
-                }
-
-                current_t = boundary_t;
-                continue;
-
             }
 
             current_mip -= 1u;

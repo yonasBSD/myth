@@ -677,6 +677,10 @@ impl<'a> FrameComposer<'a> {
             #[cfg(feature = "debug_view")]
             let mut dbg_ssr_resolved: Option<crate::graph::core::TextureNodeId> = None;
             #[cfg(feature = "debug_view")]
+            let mut dbg_ssr_trace_diagnostic: Option<
+                crate::graph::core::TextureNodeId,
+            > = None;
+            #[cfg(feature = "debug_view")]
             let mut dbg_clustered_params: Option<crate::graph::core::BufferNodeId> = None;
             #[cfg(feature = "debug_view")]
             let mut dbg_clustered_records: Option<crate::graph::core::BufferNodeId> = None;
@@ -890,6 +894,7 @@ impl<'a> FrameComposer<'a> {
                             {
                                 dbg_ssr_raw = Some(ssr_out.raw_reflection);
                                 dbg_ssr_resolved = Some(ssr_out.clean_reflection);
+                                dbg_ssr_trace_diagnostic = ssr_out.raw_diagnostic;
                             }
 
                             active_color = ssr_out.merged_color;
@@ -1047,13 +1052,11 @@ impl<'a> FrameComposer<'a> {
                         DebugViewTarget::SsgiDenoised => dbg_ssgi_denoised,
                         DebugViewTarget::SsrRaw => dbg_ssr_raw,
                         DebugViewTarget::SsrResolved => dbg_ssr_resolved,
+                        DebugViewTarget::SsrTraceDebug => dbg_ssr_trace_diagnostic,
                         _ => None,
                     };
 
-                    let is_depth = matches!(
-                        target,
-                        DebugViewTarget::SceneDepth | DebugViewTarget::ClusterHeatmap
-                    );
+                    let is_depth = target.is_depth();
 
                     if let Some(src) = source {
                         let clustered = if target == DebugViewTarget::ClusterHeatmap {

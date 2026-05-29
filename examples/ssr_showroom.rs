@@ -40,7 +40,10 @@ fn toggle_taa(mode: AntiAliasingMode) -> AntiAliasingMode {
 fn next_debug_mode(current: DebugViewMode) -> DebugViewMode {
     match current {
         DebugViewMode::None => DebugViewMode::SsrRaw,
-        DebugViewMode::SsrRaw => DebugViewMode::SsrResolved,
+        // DebugViewMode::SsrRaw => DebugViewMode::SsrTraceDiagnostic,
+        // DebugViewMode::SsrTraceDiagnostic => DebugViewMode::SsrTraceState,
+        DebugViewMode::SsrRaw => DebugViewMode::SsrTraceState,
+        DebugViewMode::SsrTraceState => DebugViewMode::SsrResolved,
         _ => DebugViewMode::None,
     }
 }
@@ -63,7 +66,7 @@ struct Showpiece {
 }
 
 struct SsrShowroomDemo {
-    controls: OrbitControls,
+    // controls: OrbitControls,
     fps_counter: FpsCounter,
     accent_lights: Vec<AccentLight>,
     showpieces: Vec<Showpiece>,
@@ -394,7 +397,7 @@ impl AppHandler for SsrShowroomDemo {
         {
             camera.debug_view.custom_scale = 1.3;
         }
-        let camera_pos = Vec3::new(0.0, 3.8, 11.2);
+        let camera_pos = Vec3::new(0.0, 3.8, 15.2);
         let camera_target = Vec3::new(0.0, 1.7, -0.8);
         let cam = scene.add_camera(camera);
         scene
@@ -403,16 +406,16 @@ impl AppHandler for SsrShowroomDemo {
             .look_at(camera_target);
         scene.active_camera = Some(cam);
 
-        let mut controls = OrbitControls::new(camera_pos, camera_target);
-        controls.min_distance = 6.0;
-        controls.max_distance = 18.0;
-        controls.pan_speed = 0.85;
-        controls.rotate_speed = 0.12;
+        // let mut controls = OrbitControls::new(camera_pos, camera_target);
+        // controls.min_distance = 6.0;
+        // controls.max_distance = 18.0;
+        // controls.pan_speed = 0.85;
+        // controls.rotate_speed = 0.001;
 
         Self::print_help();
 
         Self {
-            controls,
+            // controls,
             fps_counter: FpsCounter::new(),
             accent_lights,
             showpieces,
@@ -476,10 +479,10 @@ impl AppHandler for SsrShowroomDemo {
                 .set_rotation(rotation);
         }
 
-        if let Some((transform, camera)) = scene.query_main_camera_bundle() {
-            self.controls
-                .update(transform, &engine.input, camera.fov(), frame.dt);
-        }
+        // if let Some((transform, camera)) = scene.query_main_camera_bundle() {
+        //     self.controls
+        //         .update(transform, &engine.input, camera.fov(), frame.dt);
+        // }
 
         if let Some(fps) = self.fps_counter.update() {
             #[cfg(feature = "debug_view")]

@@ -36,6 +36,7 @@ pub enum DebugViewTarget {
     SsgiDenoised,
     SsrRaw,
     SsrResolved,
+    SsrTraceDebug,
 }
 
 #[cfg(feature = "debug_view")]
@@ -57,36 +58,15 @@ impl DebugViewTarget {
             DebugViewMode::SsgiDenoised => Self::SsgiDenoised,
             DebugViewMode::SsrRaw => Self::SsrRaw,
             DebugViewMode::SsrResolved => Self::SsrResolved,
+            DebugViewMode::SsrTraceDiagnostic | DebugViewMode::SsrTraceState => Self::SsrTraceDebug,
             _ => Self::None,
         }
     }
 
-    /// WGSL `view_mode` uniform value for the debug shader.
-    ///
-    /// | Mode | Mapping |
-    /// |------|---------|    /// | 1    | SSAO → single-channel grayscale |
-    /// | 2    | Normal → signed vector remap |
-    /// | 3    | Velocity → directional colour |
-    /// | 4    | Depth → linearised reverse-Z |
-    /// | 5    | Cluster heatmap |
-    /// | 6    | SSGI raw indirect |
-    /// | 7    | SSGI denoised indirect |
-    /// | 8    | SSR raw reflection |
-    /// | 9    | SSR resolved reflection |
+    /// Returns `true` when the source texture is a depth attachment.
     #[must_use]
-    pub const fn view_mode(self) -> u32 {
-        match self {
-            Self::None => 0,
-            Self::SsaoRaw => 1,
-            Self::SceneNormal => 2,
-            Self::Velocity => 3,
-            Self::SceneDepth => 4,
-            Self::ClusterHeatmap => 5,
-            Self::SsgiRaw => 6,
-            Self::SsgiDenoised => 7,
-            Self::SsrRaw => 8,
-            Self::SsrResolved => 9,
-        }
+    pub const fn is_depth(self) -> bool {
+        matches!(self, Self::SceneDepth | Self::ClusterHeatmap)
     }
 }
 
