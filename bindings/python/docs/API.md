@@ -246,6 +246,22 @@ If no active camera is set, nothing is rendered.
 | `set_ssao_radius(value)` | Tune SSAO radius |
 | `set_ssao_bias(value)` | Tune SSAO bias |
 | `set_ssao_intensity(value)` | Tune SSAO intensity |
+| `set_ssgi(enabled, quality=None, intensity=None, max_distance=None, thickness=None)` | Convenience SSGI toggle and tuning |
+| `set_ssgi_enabled(enabled)` | Toggle SSGI |
+| `set_ssgi_quality(value)` | Select an SSGI quality preset |
+| `set_ssgi_intensity(value)` | Tune indirect light intensity |
+| `set_ssgi_max_distance(value)` | Tune SSGI trace distance |
+| `set_ssgi_thickness(value)` | Tune thickness rejection |
+| `set_ssgi_max_steps(value)` | Tune SSGI trace steps |
+| `set_ssgi_atrous_passes(value)` | Tune SSGI denoiser passes |
+| `set_ssr(enabled, quality=None, intensity=None, max_distance=None, thickness=None, spatial_radius=None)` | Convenience SSR toggle and tuning |
+| `set_ssr_enabled(enabled)` | Toggle SSR |
+| `set_ssr_quality(value)` | Select an SSR quality preset |
+| `set_ssr_intensity(value)` | Tune reflection intensity |
+| `set_ssr_max_distance(value)` | Tune SSR trace distance |
+| `set_ssr_thickness(value)` | Tune thickness rejection |
+| `set_ssr_max_steps(value)` | Tune SSR trace steps |
+| `set_ssr_spatial_radius(value)` | Tune SSR spatial cleanup radius |
 | `set_tone_mapping_mode(mode)` | Change tone-mapper |
 | `set_tone_mapping(mode, exposure=None, gamma=None)` | Tone-mapper + exposure/gamma |
 
@@ -258,6 +274,14 @@ Supported tone-mapping strings:
 - `"aces"`
 - `"agx"`
 - `"agx_punchy"`
+
+Supported SSGI/SSR quality strings:
+
+- `"low"`
+- `"medium"`
+- `"high"`
+- `"ultra"`
+- `"custom"`
 
 ### Animation helpers
 

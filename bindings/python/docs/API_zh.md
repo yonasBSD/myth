@@ -246,6 +246,22 @@ scene.active_camera = camera_node
 | set_ssao_radius(value) | 设置 SSAO 半径 |
 | set_ssao_bias(value) | 设置 SSAO 偏移 |
 | set_ssao_intensity(value) | 设置 SSAO 强度 |
+| set_ssgi(enabled, quality=None, intensity=None, max_distance=None, thickness=None) | 一次性切换并设置 SSGI |
+| set_ssgi_enabled(enabled) | 开关 SSGI |
+| set_ssgi_quality(value) | 设置 SSGI 质量预设 |
+| set_ssgi_intensity(value) | 设置间接光强度 |
+| set_ssgi_max_distance(value) | 设置 SSGI 最大追踪距离 |
+| set_ssgi_thickness(value) | 设置厚度判定值 |
+| set_ssgi_max_steps(value) | 设置 SSGI 追踪步数 |
+| set_ssgi_atrous_passes(value) | 设置 SSGI A-Trous 降噪轮数 |
+| set_ssr(enabled, quality=None, intensity=None, max_distance=None, thickness=None, spatial_radius=None) | 一次性切换并设置 SSR |
+| set_ssr_enabled(enabled) | 开关 SSR |
+| set_ssr_quality(value) | 设置 SSR 质量预设 |
+| set_ssr_intensity(value) | 设置反射强度 |
+| set_ssr_max_distance(value) | 设置 SSR 最大追踪距离 |
+| set_ssr_thickness(value) | 设置厚度判定值 |
+| set_ssr_max_steps(value) | 设置 SSR 追踪步数 |
+| set_ssr_spatial_radius(value) | 设置 SSR 空间清理半径 |
 | set_tone_mapping_mode(mode) | 切换 tone mapper |
 | set_tone_mapping(mode, exposure=None, gamma=None) | 同时设置 tone mapper 与曝光/伽马 |
 
@@ -258,6 +274,14 @@ scene.active_camera = camera_node
 - "aces"
 - "agx"
 - "agx_punchy"
+
+支持的 SSGI / SSR 质量字符串：
+
+- "low"
+- "medium"
+- "high"
+- "ultra"
+- "custom"
 
 ### 动画辅助方法
 

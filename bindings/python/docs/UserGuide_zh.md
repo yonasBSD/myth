@@ -19,7 +19,7 @@
 先记住两条规则：
 
 - App 和 Renderer 在不传 render_path 时默认走基础渲染路径。
-- bloom、色调映射、SSAO、Gaussian splatting 这类能力应显式使用 RenderPath.HIGH_FIDELITY。
+- bloom、色调映射、SSAO、SSGI、SSR、Gaussian splatting 这类能力应显式使用 RenderPath.HIGH_FIDELITY。
 
 ---
 

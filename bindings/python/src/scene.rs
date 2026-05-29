@@ -4,6 +4,7 @@
 use myth_engine::NodeHandle;
 use myth_engine::math::{Quat, Vec3};
 use myth_engine::resources::tone_mapping::AgxLook;
+use myth_engine::resources::{SsgiQuality, SsrQuality};
 use pyo3::prelude::*;
 
 use myth_engine::ToneMappingMode;
@@ -15,6 +16,32 @@ use crate::camera::{PyOrthographicCamera, PyPerspectiveCamera, get_camera_compon
 use crate::light::{PyDirectionalLight, PyPointLight, PySpotLight, get_light_component};
 use crate::texture::PyTextureHandle;
 use crate::{extract_geometry_handle, extract_material_handle, with_active_scene, with_engine};
+
+fn parse_ssgi_quality(quality: &str) -> PyResult<SsgiQuality> {
+    match quality.to_lowercase().as_str() {
+        "low" => Ok(SsgiQuality::Low),
+        "medium" => Ok(SsgiQuality::Medium),
+        "high" => Ok(SsgiQuality::High),
+        "ultra" => Ok(SsgiQuality::Ultra),
+        "custom" => Ok(SsgiQuality::Custom),
+        _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "unsupported SSGI quality: {quality} (use 'low', 'medium', 'high', 'ultra', or 'custom')"
+        ))),
+    }
+}
+
+fn parse_ssr_quality(quality: &str) -> PyResult<SsrQuality> {
+    match quality.to_lowercase().as_str() {
+        "low" => Ok(SsrQuality::Low),
+        "medium" => Ok(SsrQuality::Medium),
+        "high" => Ok(SsrQuality::High),
+        "ultra" => Ok(SsrQuality::Ultra),
+        "custom" => Ok(SsrQuality::Custom),
+        _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "unsupported SSR quality: {quality} (use 'low', 'medium', 'high', 'ultra', or 'custom')"
+        ))),
+    }
+}
 
 // ============================================================================
 // PyScene — A thin proxy wrapping the *active* scene.
@@ -296,6 +323,150 @@ impl PyScene {
 
     fn set_ssao_intensity(&self, intensity: f32) -> PyResult<()> {
         with_active_scene(|scene| scene.ssao.set_intensity(intensity))?;
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    // SSGI
+    // ----------------------------------------------------------------
+
+    /// Convenience: enable/disable SSGI with optional quality and core tuning.
+    #[pyo3(signature = (enabled, quality=None, intensity=None, max_distance=None, thickness=None))]
+    fn set_ssgi(
+        &self,
+        enabled: bool,
+        quality: Option<&str>,
+        intensity: Option<f32>,
+        max_distance: Option<f32>,
+        thickness: Option<f32>,
+    ) -> PyResult<()> {
+        let quality = quality.map(parse_ssgi_quality).transpose()?;
+        with_active_scene(|scene| {
+            scene.ssgi.set_enabled(enabled);
+            if let Some(q) = quality {
+                scene.ssgi.set_quality(q);
+            }
+            if let Some(v) = intensity {
+                scene.ssgi.set_intensity(v);
+            }
+            if let Some(v) = max_distance {
+                scene.ssgi.set_max_distance(v);
+            }
+            if let Some(v) = thickness {
+                scene.ssgi.set_thickness(v);
+            }
+        })?;
+        Ok(())
+    }
+
+    fn set_ssgi_enabled(&self, enabled: bool) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_enabled(enabled))?;
+        Ok(())
+    }
+
+    fn set_ssgi_quality(&self, quality: &str) -> PyResult<()> {
+        let quality = parse_ssgi_quality(quality)?;
+        with_active_scene(|scene| scene.ssgi.set_quality(quality))?;
+        Ok(())
+    }
+
+    fn set_ssgi_intensity(&self, intensity: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_intensity(intensity))?;
+        Ok(())
+    }
+
+    fn set_ssgi_max_distance(&self, max_distance: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_max_distance(max_distance))?;
+        Ok(())
+    }
+
+    fn set_ssgi_thickness(&self, thickness: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_thickness(thickness))?;
+        Ok(())
+    }
+
+    fn set_ssgi_max_steps(&self, max_steps: u32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_max_steps(max_steps))?;
+        Ok(())
+    }
+
+    fn set_ssgi_atrous_passes(&self, passes: u32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssgi.set_atrous_passes(passes))?;
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------
+    // SSR
+    // ----------------------------------------------------------------
+
+    /// Convenience: enable/disable SSR with optional quality and core tuning.
+    #[pyo3(signature = (enabled, quality=None, intensity=None, max_distance=None, thickness=None, spatial_radius=None))]
+    fn set_ssr(
+        &self,
+        enabled: bool,
+        quality: Option<&str>,
+        intensity: Option<f32>,
+        max_distance: Option<f32>,
+        thickness: Option<f32>,
+        spatial_radius: Option<u32>,
+    ) -> PyResult<()> {
+        let quality = quality.map(parse_ssr_quality).transpose()?;
+        with_active_scene(|scene| {
+            scene.screen_space.enable_ssr = enabled;
+            if let Some(q) = quality {
+                scene.ssr.set_quality(q);
+            }
+            if let Some(v) = intensity {
+                scene.ssr.set_intensity(v);
+            }
+            if let Some(v) = max_distance {
+                scene.ssr.set_max_distance(v);
+            }
+            if let Some(v) = thickness {
+                scene.ssr.set_thickness(v);
+            }
+            if let Some(v) = spatial_radius {
+                scene.ssr.set_spatial_radius(v);
+            }
+        })?;
+        Ok(())
+    }
+
+    fn set_ssr_enabled(&self, enabled: bool) -> PyResult<()> {
+        with_active_scene(|scene| {
+            scene.screen_space.enable_ssr = enabled;
+        })?;
+        Ok(())
+    }
+
+    fn set_ssr_quality(&self, quality: &str) -> PyResult<()> {
+        let quality = parse_ssr_quality(quality)?;
+        with_active_scene(|scene| scene.ssr.set_quality(quality))?;
+        Ok(())
+    }
+
+    fn set_ssr_intensity(&self, intensity: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssr.set_intensity(intensity))?;
+        Ok(())
+    }
+
+    fn set_ssr_max_distance(&self, max_distance: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssr.set_max_distance(max_distance))?;
+        Ok(())
+    }
+
+    fn set_ssr_thickness(&self, thickness: f32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssr.set_thickness(thickness))?;
+        Ok(())
+    }
+
+    fn set_ssr_max_steps(&self, max_steps: u32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssr.set_max_steps(max_steps))?;
+        Ok(())
+    }
+
+    fn set_ssr_spatial_radius(&self, radius: u32) -> PyResult<()> {
+        with_active_scene(|scene| scene.ssr.set_spatial_radius(radius))?;
         Ok(())
     }
 

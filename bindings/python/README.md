@@ -83,7 +83,7 @@ app.run()
 Notes for the current bindings:
 
 - `App` and `Renderer` default to the basic render path if you omit `render_path`.
-- Use `RenderPath.HIGH_FIDELITY` explicitly for bloom, tone mapping, SSAO, IBL-heavy scenes, and all 3D Gaussian splatting examples.
+- Use `RenderPath.HIGH_FIDELITY` explicitly for bloom, tone mapping, SSAO, SSGI, SSR, IBL-heavy scenes, and all 3D Gaussian splatting examples.
 - `OrbitControls.update(...)` expects the camera node and `frame.dt`.
 
 ---
@@ -162,6 +162,18 @@ pixels = renderer.readback_pixels()
 
 For continuous capture, use `create_readback_stream(...)`, `try_submit(...)`, and `try_recv_into(...)`.
 
+### Screen-space lighting
+
+```python
+scene.set_ssgi(True, quality="high", intensity=1.0, max_distance=6.0)
+scene.set_ssgi_atrous_passes(2)
+
+scene.set_ssr(True, quality="high", intensity=1.0, spatial_radius=1)
+scene.set_ssr_max_steps(24)
+```
+
+Use the headless smoke test in `examples/headless_screen_space_test.py` for a compact end-to-end setup, or `examples/screen_space_demo.py` for an interactive scene.
+
 ### 3D Gaussian splatting
 
 ```python
@@ -200,6 +212,7 @@ The examples directory reflects the current binding surface:
 | `examples/demo.py` | Basic scene setup, mesh creation, orbit controls |
 | `examples/earth.py` | Textures and layered scene composition |
 | `examples/bloom_demo.py` | High-fidelity post-processing |
+| `examples/screen_space_demo.py` | Interactive SSGI/SSR tuning |
 | `examples/video_texture.py` | Dynamic texture updates |
 | `examples/custom_shader_material.py` | Custom mesh materials via `ShaderMaterial` |
 | `examples/custom_post_fx.py` | Named shader templates and reusable fullscreen post passes |
@@ -213,6 +226,7 @@ The examples directory reflects the current binding surface:
 | `examples/headless_simple_test.py` | Minimal offscreen render |
 | `examples/headless_stream_test.py` | Readback stream usage |
 | `examples/headless_readback_test.py` | Direct pixel readback |
+| `examples/headless_screen_space_test.py` | Headless SSGI/SSR smoke test |
 
 ---
 

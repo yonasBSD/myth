@@ -19,7 +19,7 @@ The current Python API is easiest to understand as five layers:
 Two practical rules matter immediately:
 
 - App and Renderer default to the basic render path if you omit render_path.
-- Advanced effects such as bloom, tone mapping, SSAO, and Gaussian splatting should use RenderPath.HIGH_FIDELITY explicitly.
+- Advanced effects such as bloom, tone mapping, SSAO, SSGI, SSR, and Gaussian splatting should use RenderPath.HIGH_FIDELITY explicitly.
 
 ---
 

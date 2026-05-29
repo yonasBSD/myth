@@ -737,6 +737,97 @@ class Scene:
         """Set SSAO intensity."""
         ...
 
+    def set_ssgi(
+        self,
+        enabled: bool,
+        quality: Optional[str] = None,
+        intensity: Optional[float] = None,
+        max_distance: Optional[float] = None,
+        thickness: Optional[float] = None,
+    ) -> None:
+        """Enable/disable Screen-Space Global Illumination with optional core tuning.
+
+        Supported quality strings: ``'low'``, ``'medium'``, ``'high'``, ``'ultra'``, ``'custom'``.
+        """
+        ...
+
+    def set_ssgi_enabled(self, enabled: bool) -> None:
+        """Enable or disable Screen-Space Global Illumination."""
+        ...
+
+    def set_ssgi_quality(self, quality: str) -> None:
+        """Set the SSGI quality preset.
+
+        Supported values: ``'low'``, ``'medium'``, ``'high'``, ``'ultra'``, ``'custom'``.
+        """
+        ...
+
+    def set_ssgi_intensity(self, intensity: float) -> None:
+        """Set SSGI indirect lighting intensity."""
+        ...
+
+    def set_ssgi_max_distance(self, max_distance: float) -> None:
+        """Set the maximum SSGI trace distance."""
+        ...
+
+    def set_ssgi_thickness(self, thickness: float) -> None:
+        """Set the SSGI thickness rejection value."""
+        ...
+
+    def set_ssgi_max_steps(self, max_steps: int) -> None:
+        """Set the SSGI trace step budget."""
+        ...
+
+    def set_ssgi_atrous_passes(self, passes: int) -> None:
+        """Set the number of SSGI A-Trous denoiser passes."""
+        ...
+
+    def set_ssr(
+        self,
+        enabled: bool,
+        quality: Optional[str] = None,
+        intensity: Optional[float] = None,
+        max_distance: Optional[float] = None,
+        thickness: Optional[float] = None,
+        spatial_radius: Optional[int] = None,
+    ) -> None:
+        """Enable/disable Screen-Space Reflections with optional core tuning.
+
+        Supported quality strings: ``'low'``, ``'medium'``, ``'high'``, ``'ultra'``, ``'custom'``.
+        """
+        ...
+
+    def set_ssr_enabled(self, enabled: bool) -> None:
+        """Enable or disable Screen-Space Reflections."""
+        ...
+
+    def set_ssr_quality(self, quality: str) -> None:
+        """Set the SSR quality preset.
+
+        Supported values: ``'low'``, ``'medium'``, ``'high'``, ``'ultra'``, ``'custom'``.
+        """
+        ...
+
+    def set_ssr_intensity(self, intensity: float) -> None:
+        """Set SSR reflection intensity."""
+        ...
+
+    def set_ssr_max_distance(self, max_distance: float) -> None:
+        """Set the maximum SSR trace distance."""
+        ...
+
+    def set_ssr_thickness(self, thickness: float) -> None:
+        """Set the SSR thickness rejection value."""
+        ...
+
+    def set_ssr_max_steps(self, max_steps: int) -> None:
+        """Set the SSR trace step budget."""
+        ...
+
+    def set_ssr_spatial_radius(self, radius: int) -> None:
+        """Set the SSR spatial cleanup radius."""
+        ...
+
     def set_tone_mapping_mode(self, mode: str) -> None:
         """Set the tone mapping mode.
 
