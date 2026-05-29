@@ -236,9 +236,9 @@ Myth currently has two topologies:
 | Path | Best for |
 | --- | --- |
 | `RenderPath::BasicForward` | Lightweight forward scenes, lower-end devices, simple tools |
-| `RenderPath::HighFidelity` | PBR, HDR, bloom, tone mapping, SSAO, TAA, procedural sky, 3DGS |
+| `RenderPath::HighFidelity` | PBR, HDR, bloom, tone mapping, SSR, SSAO, SSGI, TAA, procedural sky, 3DGS |
 
-Practical rule: if you need any advanced post-processing or Gaussian splatting, use `RenderPath::HighFidelity`.
+Practical rule: if you need any advanced post-processing, or Gaussian splatting, use `RenderPath::HighFidelity`.
 
 ---
 
@@ -410,7 +410,7 @@ This order mirrors the engine's current architecture from basic scene setup thro
 
 - No active camera means `engine.compose_frame()` returns `None` and nothing is rendered.
 - `SceneExt` spawn helpers require `&engine.assets`; older call patterns without the asset server are stale.
-- If you need bloom, tone mapping, SSAO, procedural sky, or 3DGS, pick `RenderPath::HighFidelity` explicitly.
+- If you need SSR, SSGI, bloom, tone mapping, SSAO, procedural sky, or 3DGS, pick `RenderPath::HighFidelity` explicitly.
 - In custom loops, call `engine.resize(...)` on window resize and `engine.maybe_prune()` after rendering.
 - Treat the examples directory as the source of truth when older prose and code disagree.
 
