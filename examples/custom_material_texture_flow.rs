@@ -2,7 +2,7 @@
 //! name = "Custom Material - Texture Flow"
 //! category = "Materials"
 //! description = "Custom material that samples a texture with animated UV distortion and layered flow lighting."
-//! order = 133
+//! order = 323
 //!
 
 //! Custom Material Example — Texture Flow Panels

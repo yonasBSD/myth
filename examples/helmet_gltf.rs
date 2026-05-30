@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "glTF Helmet"
-//! category = "Scenes & glTF"
+//! category = "Materials"
 //! description = "Loads the DamagedHelmet sample and frames it with orbit controls."
-//! order = 610
+//! order = 330
 //!
 
 use myth::prelude::*;

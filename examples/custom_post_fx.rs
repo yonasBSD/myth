@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Custom Post-FX Pass"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "A fully custom RenderGraph post-process node adding chromatic split, edge glow, and scanline treatment to an emissive scene."
 //! instructions = "Space: toggle custom post pass"
-//! order = 181
+//! order = 442
 //!
 
 use myth::prelude::*;

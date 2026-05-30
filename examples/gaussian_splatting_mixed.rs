@@ -1,6 +1,6 @@
 //! [gallery]
 //! name = "3DGS Mesh Occlusion"
-//! category = "Advanced"
+//! category = "Gaussian Splatting"
 //! description = "Shows depth-based occlusion between a 3D Gaussian Splatting asset and regular mesh geometry in the same render graph."
 //! order = 510
 //! features = ["3dgs", "gaussian-npz"]

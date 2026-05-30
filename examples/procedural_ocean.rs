@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Procedural Ocean"
-//! category = "Showcase"
+//! category = "Environment"
 //! description = "A fullscreen procedural ocean rendered through a reusable custom pass, with live controls and a neutral output chain for the reference look."
-//! order = 183
+//! order = 428
 //!
 
 use std::any::Any;

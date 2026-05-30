@@ -90,9 +90,9 @@ cargo xtask build-app <app_id>
 ```rust
 //! [gallery]
 //! name = "Hello Triangle"
-//! category = "Basics"
-//! description = "A basic wgpu triangle example."
-//! order = 10
+//! category = "Foundations"
+//! description = "Minimal textured triangle that exercises the core render path."
+//! order = 100
 //! web = true
 //! features = ["some_optional_feature"]
 
@@ -112,7 +112,7 @@ fn main() {
 ```toml
 [package.metadata.gallery]
 name = "GLTF Viewer"
-category = "Tools"
+category = "Apps: Viewers & Tools"
 description = "A full-featured GLTF model viewer."
 order = 1
 web = true

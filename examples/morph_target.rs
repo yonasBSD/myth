@@ -2,7 +2,7 @@
 //! name = "Morph Target"
 //! category = "Animation"
 //! description = "Morph target playback demo with animation mixer inspection."
-//! order = 520
+//! order = 210
 //!
 
 use myth::prelude::*;

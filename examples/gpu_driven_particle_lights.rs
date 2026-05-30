@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "GPU-Driven Particle Lights"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "A dual-track lighting demo: CPU directional + CPU accent lights + a GPU swarm merged inside the RDG local-light track."
 //! instructions = "4096 GPU point lights + CPU accent lights\nPress Space to toggle GPU local-light injection\nDrag to orbit"
-//! order = 366
+//! order = 414
 //!
 
 use std::f32::consts::FRAC_PI_2;

@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Clustered Light Rings"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "A correctness-focused clustered-lighting scene with animated rings of coloured point lights orbiting a PBR material study."
-//! order = 360
+//! order = 400
 //!
 
 use std::f32::consts::TAU;

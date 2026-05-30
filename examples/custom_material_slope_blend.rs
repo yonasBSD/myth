@@ -2,7 +2,7 @@
 //! name = "Custom Material - Slope Blend"
 //! category = "Materials"
 //! description = "Environment-style material with height and slope based surface accumulation under a golden-hour sky."
-//! order = 136
+//! order = 327
 //!
 
 //! Custom Material Example — Slope Blend Landscape Study

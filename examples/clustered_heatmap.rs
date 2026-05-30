@@ -1,10 +1,10 @@
 //! [gallery]
 //! name = "Cluster Heatmap"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "A standalone clustered-lighting heatmap scene that visualises per-cluster light density across a deep multi-light corridor."
 //! instructions = "1008 Point Lights\nPress H to toggle heatmap/final image\nInspect near/far cluster density bands"
 //! features = ["debug_view"]
-//! order = 364
+//! order = 460
 //!
 
 #[cfg(feature = "debug_view")]

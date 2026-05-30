@@ -2,7 +2,7 @@
 //! name = "Procedural Sky"
 //! category = "Environment"
 //! description = "Interactive day-night atmosphere demo with celestial controls and UI overlay."
-//! order = 240
+//! order = 422
 //!
 
 use std::any::Any;

@@ -2,7 +2,7 @@
 //! name = "Custom Material - Detail Surface"
 //! category = "Materials"
 //! description = "Production-style textured surface using albedo, normal and emissive mask inputs in a dark tech showroom."
-//! order = 135
+//! order = 326
 //!
 
 //! Custom Material Example — Detail Surface Showroom

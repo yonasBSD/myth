@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Bloom"
-//! category = "Post-Processing"
+//! category = "Post Effects"
 //! description = "Interactive bloom tuning demo driven by a glTF character and HDR lighting."
 //! instructions = "B       - Toggle bloom on/off\n1/2     - Decrease/increase bloom strength\n3/4     - Decrease/increase bloom radius\nK       - Toggle Karis average\nUp/Down - Adjust exposure\nMouse   - Orbit camera"
-//! order = 310
+//! order = 440
 //!
 
 //! Physically-Based Bloom Example

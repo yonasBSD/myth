@@ -2,7 +2,7 @@
 //! name = "PBR Box"
 //! category = "Materials"
 //! description = "Physically based material test with checker albedo and image-based lighting."
-//! order = 120
+//! order = 305
 //!
 
 use myth::prelude::*;

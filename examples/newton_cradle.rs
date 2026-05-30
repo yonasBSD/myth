@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Newton Cradle"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic desk toy built from a node hierarchy, animated swings, and dynamic shadows."
-//! order = 150
+//! order = 460
 //!
 
 use myth::prelude::*;

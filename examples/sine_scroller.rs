@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Sine Scroller + Copper Bars"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic demoscene scroller rendered into a dynamic texture with animated copper bars and CRT staging."
-//! order = 179
+//! order = 454
 //!
 
 use myth::prelude::*;

@@ -89,9 +89,9 @@ For single-file examples located in the `examples/` directory, add a TOML block 
 ```rust
 //! [gallery]
 //! name = "Hello Triangle"
-//! category = "Basics"
-//! description = "A basic wgpu triangle example."
-//! order = 10
+//! category = "Foundations"
+//! description = "Minimal textured triangle that exercises the core render path."
+//! order = 100
 //! web = true
 //! features = ["some_optional_feature"]
 
@@ -111,7 +111,7 @@ For standalone crates in the `demo_apps/` directory, define the metadata in the 
 ```toml
 [package.metadata.gallery]
 name = "GLTF Viewer"
-category = "Tools"
+category = "Apps: Viewers & Tools"
 description = "A full-featured GLTF model viewer."
 order = 1
 web = true

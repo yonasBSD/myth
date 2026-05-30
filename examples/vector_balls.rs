@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Vector Balls"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic demoscene-style vector balls following layered Lissajous paths with bloom-heavy neon staging."
-//! order = 178
+//! order = 456
 //!
 
 use std::f32::consts::TAU;

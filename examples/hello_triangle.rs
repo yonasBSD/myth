@@ -2,7 +2,7 @@
 //! name = "Hello Triangle"
 //! category = "Foundations"
 //! description = "Minimal textured triangle that exercises the core render path."
-//! order = 10
+//! order = 100
 //!
 
 use myth::prelude::*;

@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Feedback Portal"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Recursive feedback portal rendered into a dynamic texture and framed by a neon gate."
-//! order = 180
+//! order = 462
 //!
 
 use std::f32::consts::TAU;

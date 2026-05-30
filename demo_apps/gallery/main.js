@@ -33,6 +33,7 @@ async function initGallery() {
     const btnStandalone = document.getElementById("btn-standalone");
     const hintPanel = document.getElementById("hint-panel");
     const hintLines = document.getElementById("hint-lines");
+    const runtimeStatusBar = document.getElementById("runtime-status-bar");
 
     // Render navigation
     navMenu.innerHTML = manifest
@@ -69,7 +70,24 @@ async function initGallery() {
 
     window.addEventListener("message", (event) => {
         const data = event.data;
-        if (data?.channel !== GALLERY_CHANNEL || data.state !== "ready") {
+        if (data?.channel !== GALLERY_CHANNEL) {
+            return;
+        }
+
+        if (data.state === "status_update") {
+            if (typeof data.text === "string" && data.text) {
+                showRuntimeStatus(data.text);
+            } else {
+                hideRuntimeStatus();
+            }
+            return;
+        }
+
+        if (data.state === "mounted" || data.state === "error") {
+            hideRuntimeStatus();
+        }
+
+        if (data.state !== "ready") {
             return;
         }
 
@@ -133,6 +151,24 @@ async function initGallery() {
         hintLines.innerHTML = "";
     }
 
+    function showRuntimeStatus(message) {
+        if (!runtimeStatusBar) {
+            return;
+        }
+
+        runtimeStatusBar.textContent = message;
+        runtimeStatusBar.classList.remove("hidden");
+    }
+
+    function hideRuntimeStatus() {
+        if (!runtimeStatusBar) {
+            return;
+        }
+
+        runtimeStatusBar.classList.add("hidden");
+        runtimeStatusBar.textContent = "";
+    }
+
     function selectEntry(entry, pushHistory) {
         // Update active state in nav
         navMenu.querySelectorAll(".example-item").forEach((el) => {
@@ -140,6 +176,7 @@ async function initGallery() {
         });
 
         hideHintPanel();
+        hideRuntimeStatus();
 
         // Update URL via History API
         const url = new URL(window.location.href);
@@ -256,8 +293,23 @@ async function initViewer() {
         }, 120);
     }
 
+    const handleRuntimeStatus = (event) => {
+        const detail = event.detail ?? {};
+        const text = typeof detail.text === "string" ? detail.text.trim() : "";
+        if (!text) {
+            return;
+        }
+
+        sendToGallery({
+            state: "status_update",
+            text,
+            exampleId: activeEntry?.id ?? exampleId,
+        });
+    };
+
     window.addEventListener("myth-loading-progress", handleLoadingProgress);
     window.addEventListener("myth-scene-ready", handleSceneReady, { once: true });
+    window.addEventListener("myth-status-update", handleRuntimeStatus);
 
     updateProgress("Resolving manifest...", 5);
     sendToGallery({
@@ -277,6 +329,7 @@ async function initViewer() {
     if (!entry || !entry.web_supported || entry.type !== "iframe") {
         window.removeEventListener("myth-loading-progress", handleLoadingProgress);
         window.removeEventListener("myth-scene-ready", handleSceneReady);
+        window.removeEventListener("myth-status-update", handleRuntimeStatus);
         clearInterval(elapsedTimer);
         updateProgress("Entry not available", 100, { force: true });
         sendToGallery({
@@ -320,6 +373,7 @@ async function initViewer() {
     } catch (error) {
         window.removeEventListener("myth-loading-progress", handleLoadingProgress);
         window.removeEventListener("myth-scene-ready", handleSceneReady);
+        window.removeEventListener("myth-status-update", handleRuntimeStatus);
         clearInterval(elapsedTimer);
         elapsedEl.textContent = formatDuration(performance.now() - bootStart);
         updateProgress("Boot failed", 100, { force: true });

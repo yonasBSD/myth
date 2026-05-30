@@ -3,7 +3,7 @@
 //! category = "Materials"
 //! description = "Classic turntable-style material study covering clearcoat, sheen, iridescence, anisotropy, transmission, and dispersion under HDR lighting."
 //! instructions = "1-6 focus a material station\nR overview\nSpace toggle auto rotation"
-//! order = 130
+//! order = 310
 //!
 
 use std::f32::consts::PI;

@@ -1,8 +1,8 @@
 //! [gallery]
-//! name = "Custom Material - Template Geometry Aurora Gate"
+//! name = "Custom Material - Aurora Gate"
 //! category = "Materials"
 //! description = "A full-template material demo built around custom Geometry attributes that auto-map into VertexInput and HAS_* shader defines."
-//! order = 134
+//! order = 325
 //!
 
 use std::f32::consts::{FRAC_PI_2, TAU};

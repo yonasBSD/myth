@@ -509,21 +509,18 @@ body.sidebar-open .sidebar-toggle {
    ======================================== */
 
 .hint-panel {
-    position: fixed;
-    top: 24px;
-    right: 24px;
-    z-index: 55;
-    width: min(460px, calc(100vw - 32px));
-    max-height: calc(100vh - 120px);
+    width: 100%;
+    max-height: calc(100vh - 100px);
     padding: 16px 18px 18px;
     border: 1px solid var(--line-accent);
     border-radius: 14px;
+
     background:
-        linear-gradient(155deg, rgba(6, 8, 10, 0.95), rgba(14, 17, 20, 0.9)),
-        radial-gradient(circle at top right, rgba(0, 229, 255, 0.14), transparent 46%);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(18px) saturate(120%);
-    pointer-events: none;
+        linear-gradient(155deg, rgba(6, 8, 10, 0.45), rgba(14, 17, 20, 0.35)),
+        radial-gradient(circle at top right, rgba(0, 229, 255, 0.12), transparent 46%);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(14px) saturate(140%);
+    
     opacity: 0;
     transform: translateY(-10px);
     transition: opacity 240ms ease, transform 240ms ease, box-shadow 240ms ease;
@@ -580,4 +577,47 @@ body.sidebar-open .sidebar-toggle {
     color: var(--text);
     white-space: pre-wrap;
     text-wrap: pretty;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+.top-right-widgets {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 55;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+    width: min(460px, calc(100vw - 32px));
+    pointer-events: none;
+}
+
+.status-bar {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    background: rgba(10, 10, 10, 0.5);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transition: opacity 200ms ease, transform 200ms ease;
+    pointer-events: auto;
+}
+
+.status-bar.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-6px);
+}
+
+@media (max-width: 768px) {
+    .status-bar {
+        bottom: 80px;
+        left: 12px;
+        max-width: calc(100vw - 24px);
+    }
 }

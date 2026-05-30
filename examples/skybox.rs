@@ -2,8 +2,8 @@
 //! name = "Skybox & Backgrounds"
 //! category = "Environment"
 //! description = "Compares solid, gradient, panoramic, cubemap, and procedural background modes."
-//! instructions = "1 — Solid color (hardware clear)\n2 — Gradient\n3 — Planar Texture\n4 — Equirectangular HDR panorama\n5 — Cubemap Skybox\n6 — Procedural Sky (Hillaire 2020)\nH — Toggle HighFidelity/BasicForward"
-//! order = 220
+//! instructions = "1 - Solid color (hardware clear)\n2 - Gradient\n3 - Planar Texture\n4 - Equirectangular HDR panorama\n5 - Cubemap Skybox\n6 - Procedural Sky (Hillaire 2020)\nH - Toggle HighFidelity/BasicForward"
+//! order = 420
 //!
 
 //! Skybox / Background Demo

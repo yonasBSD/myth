@@ -2,7 +2,7 @@
 //! name = "HDR Environment"
 //! category = "Environment"
 //! description = "Loads an HDR environment and a glTF asset to demonstrate image-based lighting."
-//! order = 230
+//! order = 426
 //!
 
 use myth::prelude::*;

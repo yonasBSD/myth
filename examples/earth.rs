@@ -2,7 +2,7 @@
 //! name = "Earth"
 //! category = "Environment"
 //! description = "Layered Earth rendering with day, night, normal, and cloud textures."
-//! order = 210
+//! order = 424
 //!
 
 use myth::prelude::*;

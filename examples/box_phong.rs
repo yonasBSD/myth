@@ -2,7 +2,7 @@
 //! name = "Phong Box"
 //! category = "Materials"
 //! description = "Classic Blinn-Phong shaded cube with a generated checker texture."
-//! order = 110
+//! order = 300
 //!
 
 use myth::prelude::*;

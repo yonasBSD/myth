@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "SSR Showroom"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "Mirror-finished floor, animated emissive accents, and polished hero props for validating screen-space reflections, quality presets, and debug overlays."
 //! instructions = "Press T to toggle SSR\nPress Y to toggle TAA\nPress Q to cycle SSR quality\nPress G to cycle SSR debug views"
-//! order = 367
+//! order = 412
 //! features = ["debug_view"]
 //!
 

@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Clustered Forward Stress"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "A stress scene with hundreds of animated point lights to inspect clustered forward-lighting scalability."
-//! order = 365
+//! order = 450
 //!
 
 use std::f32::consts::TAU;

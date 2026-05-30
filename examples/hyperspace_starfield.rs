@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Hyperspace Starfield"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic warp-speed starfield with a neon jump gate, bloom, and hundreds of animated streaks."
 //! instructions = "Space: engage hyperdrive"
-//! order = 175
+//! order = 452
 //!
 
 use std::f32::consts::TAU;

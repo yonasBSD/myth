@@ -2,7 +2,7 @@
 //! name = "Custom Material - Radar Sweep"
 //! category = "Materials"
 //! description = "Procedural radar plane with animated rings, grid lines and a rotating sweep beam."
-//! order = 131
+//! order = 321
 //!
 
 //! Custom Material Example — Radar Sweep

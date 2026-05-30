@@ -2,7 +2,7 @@
 //! name = "Skinning"
 //! category = "Animation"
 //! description = "Skinned character animation sample with orbit camera and glTF playback."
-//! order = 510
+//! order = 200
 //!
 
 #[cfg(not(target_arch = "wasm32"))]

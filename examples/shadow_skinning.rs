@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Shadow Skinning"
-//! category = "Shadows"
+//! category = "Animation"
 //! description = "Skinned animation rendered with shadow-casting lighting and ground contact."
-//! order = 440
+//! order = 220
 //!
 
 #[cfg(not(target_arch = "wasm32"))]

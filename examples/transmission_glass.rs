@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Transmission & Dispersion"
-//! category = "Materials"
+//! category = "Post Effects"
 //! description = "Classic glass showcase with clear, tinted, frosted, and prismatic transmission materials over a patterned HDR-lit stage."
 //! instructions = "1-4 focus a glass preset\nR overview\nSpace toggle orbit light"
-//! order = 135
+//! order = 444
 //!
 
 use myth::prelude::*;

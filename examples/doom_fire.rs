@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Doom Fire"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic fire effect rendered through a Rust-side dynamic texture update loop."
 //! instructions = "Left/Right: change wind\nSpace: toggle turbo burn\nEnter: reset wind"
-//! order = 170
+//! order = 446
 //!
 
 use myth::prelude::*;

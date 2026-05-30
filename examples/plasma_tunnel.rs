@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Plasma Tunnel"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic procedural plasma tunnel rendered with a custom shader, neon portal ring, and bloom-heavy staging."
-//! order = 176
+//! order = 450
 //!
 
 use std::f32::consts::FRAC_PI_2;

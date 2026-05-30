@@ -1,9 +1,9 @@
-//! [gallery]
-//! name = "Shadow Basic"
-//! category = "Shadows"
-//! description = "Minimal directional shadow map setup with a rotating box and receiver plane."
-//! order = 410
-//!
+// // ! [gallery]
+// // ! name = "Shadow Basic"
+// // ! category = "Lighting & GI"
+// // ! description = "Minimal directional shadow map setup with a rotating box and receiver plane."
+// // ! order = 416
+// // !
 
 use myth::prelude::*;
 use myth_dev_utils::FpsCounter;

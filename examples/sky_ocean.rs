@@ -2,7 +2,7 @@
 //! name = "Sky Ocean"
 //! category = "Environment"
 //! description = "Procedural sky and reusable ocean compositing fused into a single day-night scene with synchronized solar-time controls."
-//! order = 241
+//! order = 430
 //!
 
 use std::any::Any;

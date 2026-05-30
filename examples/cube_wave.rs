@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Cube Wave"
-//! category = "Showcase"
+//! category = "Foundations"
 //! description = "A classic wave-field of animated cubes that highlights transform updates, lighting, and scene scale."
-//! order = 160
+//! order = 140
 //!
 
 use myth::prelude::*;

@@ -22,10 +22,16 @@
         </a>
     </div>
 
-    <aside id="hint-panel" class="hint-panel hidden" role="status" aria-live="polite" aria-label="Controls panel">
-        <div class="hint-panel-label">CONTROLS</div>
-        <div id="hint-lines" class="hint-panel-lines"></div>
-    </aside>
+    <div class="top-right-widgets">
+        <div id="runtime-status-bar" class="status-bar hidden"></div>
+
+        <div id="hint-panel" class="hint-panel hidden">
+            <div class="hint-panel-label">CONTROLS</div>
+            <div id="hint-lines" class="hint-panel-lines"></div>
+        </div>
+    </div>
+
+    <div id="runtime-status-bar" class="status-bar hidden" role="status" aria-live="polite"></div>
 
     <!-- Sidebar toggle (visible when sidebar is closed) -->
     <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Open navigation">

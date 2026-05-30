@@ -1,6 +1,6 @@
 //! [gallery]
 //! name = "3D Gaussian Splatting Viewer"
-//! category = "Advanced"
+//! category = "Gaussian Splatting"
 //! description = "Interactive 3DGS viewer with a bundled startup cloud and custom NPZ/PLY loading."
 //! order = 520
 //! features = ["3dgs", "gaussian-npz"]

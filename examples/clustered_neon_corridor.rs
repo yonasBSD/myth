@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Clustered Neon Corridor"
-//! category = "Lighting"
+//! category = "Lighting & GI"
 //! description = "A visually dense corridor with layered coloured point lights, glossy materials, and overlapping pools of clustered lighting."
-//! order = 362
+//! order = 402
 //!
 
 use std::f32::consts::{FRAC_PI_2, TAU};

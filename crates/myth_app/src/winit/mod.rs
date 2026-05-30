@@ -56,6 +56,9 @@ extern "C" {
 impl WindowTrait for Window {
     fn set_title(&self, title: &str) {
         Window::set_title(self, title);
+
+        #[cfg(target_arch = "wasm32")]
+        crate::platform::web::update_status_text(title);
     }
 
     fn inner_size(&self) -> Vec2 {

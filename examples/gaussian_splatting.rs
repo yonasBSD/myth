@@ -1,6 +1,6 @@
 //! [gallery]
 //! name = "3D Gaussian Splatting"
-//! category = "Advanced"
+//! category = "Gaussian Splatting"
 //! description = "Loads and renders a 3D Gaussian Splatting point cloud from an NPZ file."
 //! order = 500
 //! features = ["3dgs", "gaussian-npz"]

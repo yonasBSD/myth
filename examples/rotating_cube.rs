@@ -2,7 +2,7 @@
 //! name = "Rotating Cube"
 //! category = "Foundations"
 //! description = "Single unlit cube with the smallest possible animated scene setup."
-//! order = 20
+//! order = 110
 //!
 
 use myth::prelude::*;

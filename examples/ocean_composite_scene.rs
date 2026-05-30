@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Ocean Composite Scene"
-//! category = "Showcase"
+//! category = "Environment"
 //! description = "A depth-aware procedural ocean composited behind a lit 3D lookout scene through the reusable ocean helper."
-//! order = 184
+//! order = 432
 //!
 
 use std::any::Any;

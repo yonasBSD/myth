@@ -2,7 +2,7 @@
 //! name = "Custom Material - Triplanar"
 //! category = "Materials"
 //! description = "Production-style triplanar projection with studio lighting, HDR environment and sculptural forms."
-//! order = 134
+//! order = 324
 //!
 
 //! Custom Material Example — Triplanar Studio Surface

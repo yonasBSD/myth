@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "All Shadows"
-//! category = "Shadows"
+//! category = "Lighting & GI"
 //! description = "Combined directional, spot, and point-light shadow casting in one scene."
-//! order = 430
+//! order = 418
 //!
 
 use myth::prelude::*;

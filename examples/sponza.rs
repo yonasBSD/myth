@@ -1,8 +1,8 @@
 //! [gallery]
 //! name = "Sponza (SSAO & Shadows)"
-//! category = "Scenes & glTF"
+//! category = "Lighting & GI"
 //! description = "Large streamed glTF scene used to stress-test lighting and traversal."
-//! order = 620
+//! order = 419
 //!
 
 use myth::prelude::*;

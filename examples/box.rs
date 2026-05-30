@@ -2,7 +2,7 @@
 //! name = "Textured Box"
 //! category = "Foundations"
 //! description = "Textured cube with orbit controls and per-frame scene callbacks."
-//! order = 30
+//! order = 120
 //!
 
 use myth::prelude::*;
@@ -36,7 +36,7 @@ impl AppHandler for TexturedBox {
         let controls = OrbitControls::new(Vec3::new(0.0, 3.0, 10.0), Vec3::ZERO);
 
         scene.on_update(move |scene, _input, _dt| {
-            // 旋转立方体
+            // Rotate cube.
             if let Some(node) = scene.get_node_mut(cube_node_id) {
                 let rot_y = Quat::from_rotation_y(0.02);
                 let rot_x = Quat::from_rotation_x(0.01);
@@ -49,7 +49,7 @@ impl AppHandler for TexturedBox {
 
     fn update(&mut self, engine: &mut Engine, _window: &dyn Window, frame: &FrameState) {
         let scene = engine.scene_manager.active_scene_mut().unwrap();
-        // 轨道控制器
+        // Orbit controls.
         if let Some((transform, camera)) = scene.query_main_camera_bundle() {
             self.controls
                 .update(transform, &engine.input, camera.fov(), frame.dt);

@@ -2,7 +2,7 @@
 //! name = "Custom Material - Hologram"
 //! category = "Materials"
 //! description = "Animated hologram material with custom uniforms, vertex displacement and transparent scan effects."
-//! order = 130
+//! order = 320
 //!
 
 //! Custom Material Example — Hologram Energy Field

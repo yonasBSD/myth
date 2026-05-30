@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Rubik Mini Game"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Playable 3x3 Rubik's cube with keyboard turns and orbit camera controls."
 //! instructions = "U D L R F B: turn a face clockwise\nHold Shift: inverse turn\nSpace: scramble from solved state\nEnter: reset to solved state"
-//! order = 140
+//! order = 458
 //!
 
 use std::collections::VecDeque;

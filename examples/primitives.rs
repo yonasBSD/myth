@@ -3,7 +3,7 @@
 //! category = "Foundations"
 //! description = "Classic showroom for SceneExt spawn_* helpers, covering box, sphere, plane, cylinder, cone, and torus primitives with focusable stations."
 //! instructions = "1-6 focus a primitive\nR overview\nSpace toggle auto rotation"
-//! order = 40
+//! order = 130
 //!
 
 use std::f32::consts::{FRAC_PI_2, PI};

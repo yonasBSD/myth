@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "Digital Rain"
-//! category = "Showcase"
+//! category = "Post Effects"
 //! description = "Classic digital rain wall rendered through a dynamic texture, neon screens, and a dark cyber stage."
 //! instructions = "Space: glitch burst"
-//! order = 177
+//! order = 448
 //!
 
 use myth::prelude::*;

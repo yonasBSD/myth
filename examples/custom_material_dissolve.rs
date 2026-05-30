@@ -2,7 +2,7 @@
 //! name = "Custom Material - Dissolve"
 //! category = "Materials"
 //! description = "Animated dissolve material with procedural noise, glowing edges and vertex breakup."
-//! order = 132
+//! order = 322
 //!
 
 //! Custom Material Example — Dissolve Energy Shell
