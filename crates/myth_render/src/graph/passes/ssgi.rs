@@ -623,7 +623,7 @@ impl SsgiFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_raw"),
+                ShaderSource::File("entry/features/ssgi/raw"),
                 &options,
             );
 
@@ -664,7 +664,7 @@ impl SsgiFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_temporal"),
+                ShaderSource::File("entry/features/ssgi/temporal"),
                 &options,
             );
 
@@ -711,7 +711,7 @@ impl SsgiFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_atrous_blur"),
+                ShaderSource::File("entry/features/ssgi/atrous_blur"),
                 &options,
             );
 
@@ -750,7 +750,7 @@ impl SsgiFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssgi_merge"),
+                ShaderSource::File("entry/features/ssgi/merge"),
                 &options,
             );
 

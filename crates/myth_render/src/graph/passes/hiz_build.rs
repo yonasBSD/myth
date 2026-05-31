@@ -175,7 +175,7 @@ impl HiZFeature {
         if self.init_pipeline.is_none() {
             let (module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/hiz_init"),
+                ShaderSource::File("entry/utility/hiz/init"),
                 &ShaderCompilationOptions::default(),
             );
 
@@ -200,7 +200,7 @@ impl HiZFeature {
         if self.downsample_pipeline.is_none() {
             let (module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/hiz_downsample"),
+                ShaderSource::File("entry/utility/hiz/downsample"),
                 &ShaderCompilationOptions::default(),
             );
 

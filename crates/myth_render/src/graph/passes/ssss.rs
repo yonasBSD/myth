@@ -207,7 +207,7 @@ impl SsssFeature {
 
             let (hor_shader, hor_hash) = ctx.shader_manager.get_or_compile(
                 device,
-                ShaderSource::File("entry/post_process/ssss"),
+                ShaderSource::File("entry/features/ssss/blur"),
                 &shader_defines,
             );
 
@@ -239,7 +239,7 @@ impl SsssFeature {
 
             let (vert_shader, vert_hash) = ctx.shader_manager.get_or_compile(
                 device,
-                ShaderSource::File("entry/post_process/ssss"),
+                ShaderSource::File("entry/features/ssss/blur"),
                 &vert_defines,
             );
 

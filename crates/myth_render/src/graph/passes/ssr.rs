@@ -288,7 +288,7 @@ impl SsrFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssr_trace"),
+                ShaderSource::File("entry/features/ssr/trace"),
                 &options,
             );
 
@@ -352,7 +352,7 @@ impl SsrFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssr_temporal"),
+                ShaderSource::File("entry/features/ssr/temporal"),
                 &options,
             );
 
@@ -402,7 +402,7 @@ impl SsrFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssr_spatial_filter"),
+                ShaderSource::File("entry/features/ssr/spatial_filter"),
                 &options,
             );
 
@@ -452,7 +452,7 @@ impl SsrFeature {
 
             let (module, hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/ssr_merge"),
+                ShaderSource::File("entry/features/ssr/merge"),
                 &options,
             );
 
