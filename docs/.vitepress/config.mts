@@ -53,15 +53,15 @@ function sidebarZh() {
   ]
 }
 
-// ── Chinese blog sidebar ────────────────────────────────
-function sidebarBlogZh() {
+// ── Chinese articles sidebar ────────────────────────────────
+function sidebarArticlesZh() {
   return [
     {
       text: '技术文章',
       collapsed: false,
       items: [
-        { text: '文章列表', link: '/blog/' },
-        { text: '构建基于 SSA 的声明式渲染图', link: '/blog/render-graph-design' }
+        { text: '文章列表', link: '/articles/' },
+        { text: '构建基于 SSA 的声明式渲染图', link: '/articles/render-graph-design' }
       ]
     }
   ]
@@ -108,15 +108,15 @@ function sidebarEn() {
   ]
 }
 
-// ── English blog sidebar ───────────────────────────────
-function sidebarBlogEn() {
+// ── English articles sidebar ───────────────────────────────
+function sidebarArticlesEn() {
   return [
     {
       text: 'Articles',
       collapsed: false,
       items: [
-        { text: 'All Articles', link: '/en/blog/' },
-        { text: 'Building an SSA-based Declarative Render Graph', link: '/en/blog/render-graph-design' }
+        { text: 'All Articles', link: '/en/articles/' },
+        { text: 'Building an SSA-based Declarative Render Graph', link: '/en/articles/render-graph-design' }
       ]
     }
   ]
@@ -134,6 +134,17 @@ export default withMermaid(
     // Build the docs site into the shared workspace `dist/`, where the Gallery
     // is nested under `dist/gallery/` (see [workspace.metadata.gallery]).
     outDir: '../dist',
+
+    // The Gallery is a separately-built static sub-app living at
+    // `dist/gallery/`. By default Vite wipes the whole `outDir` before each
+    // build, which would delete that (slow-to-rebuild) gallery. Disabling
+    // `emptyOutDir` makes the docs build overwrite only its own output and
+    // leave `dist/gallery/` (and anything else) untouched.
+    vite: {
+      build: {
+        emptyOutDir: false
+      }
+    },
 
     head: [
       ['meta', { name: 'theme-color', content: '#4a6f9f' }]
@@ -154,7 +165,7 @@ export default withMermaid(
             { text: '指南', link: '/guide/introduction', activeMatch: '/guide/' },
             { text: '架构', link: '/architecture/rendering-pipeline', activeMatch: '/architecture/' },
             { text: '进阶', link: '/advanced/pbr-materials', activeMatch: '/advanced/' },
-            { text: '博客', link: '/blog/', activeMatch: '/blog/' },
+            { text: '文章', link: '/articles/', activeMatch: '/articles/' },
             { text: 'Gallery', link: GALLERY_LINK, target: '_self' },
             {
               text: '更多',
@@ -165,7 +176,7 @@ export default withMermaid(
             }
           ],
           sidebar: {
-            '/blog/': sidebarBlogZh(),
+            '/articles/': sidebarArticlesZh(),
             '/': sidebarZh()
           },
           outline: { label: '本页大纲', level: [2, 3] },
@@ -182,7 +193,7 @@ export default withMermaid(
           },
           footer: {
             message: '基于 MIT / Apache-2.0 双协议发布 · 用 🦀 Rust 构建',
-            copyright: 'Copyright © 2024-present Myth Engine Contributors'
+            copyright: 'Copyright © 2026-present Pan Xinmiao'
           }
         }
       },
@@ -195,7 +206,7 @@ export default withMermaid(
             { text: 'Guide', link: '/en/guide/introduction', activeMatch: '/en/guide/' },
             { text: 'Architecture', link: '/en/architecture/rendering-pipeline', activeMatch: '/en/architecture/' },
             { text: 'Advanced', link: '/en/advanced/pbr-materials', activeMatch: '/en/advanced/' },
-            { text: 'Blog', link: '/en/blog/', activeMatch: '/en/blog/' },
+            { text: 'Articles', link: '/en/articles/', activeMatch: '/en/articles/' },
             { text: 'Gallery', link: GALLERY_LINK, target: '_self' },
             {
               text: 'More',
@@ -206,7 +217,7 @@ export default withMermaid(
             }
           ],
           sidebar: {
-            '/en/blog/': sidebarBlogEn(),
+            '/en/articles/': sidebarArticlesEn(),
             '/en/': sidebarEn()
           },
           outline: { label: 'On this page', level: [2, 3] },
@@ -216,7 +227,7 @@ export default withMermaid(
           },
           footer: {
             message: 'Released under the MIT / Apache-2.0 dual license · Built with 🦀 Rust',
-            copyright: 'Copyright © 2024-present Myth Engine Contributors'
+            copyright: 'Copyright © 2026-present Pan Xinmiao'
           }
         }
       }

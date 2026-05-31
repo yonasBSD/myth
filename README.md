@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](LICENSE)
 [![WebGPU Ready](https://img.shields.io/badge/WebGPU-Ready-green.svg)](https://gpuweb.github.io/gpuweb/)
 
-[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/)
+[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/public/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
 [**📖 Documentation**](https://panxinmiao.github.io/myth/) | [**🖼️ Gallery**](https://panxinmiao.github.io/myth/gallery/) | [**💡 Examples**](examples/)
 
@@ -241,7 +241,7 @@ Experience the engine directly in your browser (Chrome/Edge 113+ required for We
 - **[glTF Viewer & Inspector](https://panxinmiao.github.io/myth/gallery/gltf_viewer/)**: Drag & drop your own .glb files.
 - **[glTF Sample Models](https://panxinmiao.github.io/myth/gallery/gltf_shower/)**: Explore multiple official glTF assets from Khronos rendered with Myth.
 
-![Web Editor Preview](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/inspector.gif)
+![Web Editor Preview](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/public/images/inspector.gif)
 
 
 ## Quick Start

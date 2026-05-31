@@ -7,7 +7,7 @@ export default {
   extends: DefaultTheme,
   Layout() {
     return h(DefaultTheme.Layout, null, {
-      // Replace the static hero image with a looping engine-rendered video.
+      // An engine-rendered demo video in the hero image area (right side).
       'home-hero-image': () => h(HeroVideo)
     })
   }

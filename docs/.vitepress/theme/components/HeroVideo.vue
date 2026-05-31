@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { withBase } from 'vitepress'
 
-const videoSrc = withBase('/media/demo.mp4')
+// Transparent-background assets rendered offline by the `hero_capture`
+// example (see scripts/build-hero-video.ps1). The WebM carries a real alpha
+// channel (VP9) so it blends into both the light and dark themes; the PNG
+// poster is the universal fallback (e.g. Safari, which ignores VP9 alpha).
+const videoSrc = withBase('/media/demo.webm')
 const poster = withBase('/images/hero.png')
 </script>
 
@@ -25,49 +29,37 @@ const poster = withBase('/images/hero.png')
 .hero-video {
   position: relative;
   width: 100%;
-  max-width: 540px;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 1 / 1;
   margin: 0 auto;
 }
 
+/* The media has a transparent background, so no frame/shadow/fill — it must
+   blend straight into the page in both light and dark mode. */
 .hero-video__media {
   position: relative;
   z-index: 1;
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  border-radius: 20px;
-  box-shadow:
-    0 18px 60px -12px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.06) inset;
-  background: var(--vp-c-bg-soft);
+  object-fit: contain;
+  background: transparent;
 }
 
-/* Soft brand-colored glow behind the video, echoing the VitePress hero blur. */
+/* Soft brand-colored aura behind the character, echoing the VitePress hero
+   blur. Kept subtle so it reads well on both themes. */
 .hero-video__glow {
   position: absolute;
-  inset: -14% -10%;
+  inset: 8% 6% 2%;
   z-index: 0;
   border-radius: 50%;
-  filter: blur(72px);
-  opacity: 0.55;
+  filter: blur(80px);
+  opacity: 0.4;
   background-image: linear-gradient(
     -45deg,
     var(--vp-c-brand-3) 30%,
     var(--vp-c-brand-1) 70%
+    /* #bd34fe 50%,
+    #47caff 50% */
   );
-}
-
-@media (max-width: 960px) {
-  .hero-video {
-    max-width: 420px;
-    margin-top: 16px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hero-video__media {
-    /* Respect users who prefer no motion: the poster still conveys the visual. */
-  }
 }
 </style>

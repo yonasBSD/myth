@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](LICENSE)
 [![WebGPU Ready](https://img.shields.io/badge/WebGPU-Ready-green.svg)](https://gpuweb.github.io/gpuweb/)
 
-[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/)
+[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/public/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
 [**📖 文档**](https://panxinmiao.github.io/myth/) | [**🖼️ 画廊**](https://panxinmiao.github.io/myth/gallery/) | [**💡 示例代码**](examples/)
 

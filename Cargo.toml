@@ -167,7 +167,7 @@ homepage.workspace = true
 
 exclude = [
     "examples/assets/*",
-    "docs/images/*",
+    "docs/*",
     ".github/*",
     ".gitignore",
     ".vscode/*",
