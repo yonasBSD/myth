@@ -25,7 +25,8 @@ use rustc_hash::FxHashMap;
 use crate::core::gpu::{CommonSampler, ResourceState, Tracked};
 use crate::graph::composer::GraphBuilderContext;
 use crate::graph::core::{
-    ExecuteContext, ExtractContext, PassNode, RawBufferBinding, RenderTargetOps, TextureNodeId,
+    ExecuteContext, ExtractContext, PassNode, RawBufferBinding, RawSamplerBinding, RenderTargetOps,
+    TextureNodeId,
 };
 use crate::graph::passes::atmosphere::ProceduralSkyboxResources;
 use crate::pipeline::{
@@ -128,6 +129,11 @@ impl SkyboxVariant {
         moon_texture: bool,
     ) {
         defines.set(self.shader_define_key(), "1");
+        if self == Self::Gradient {
+            // Wire blue-noise dithering for the gradient banding fix; the shader
+            // keeps a procedural-hash fallback when the texture is unavailable.
+            defines.set("USE_BLUE_NOISE", "1");
+        }
         if self == Self::Procedural {
             match starbox_kind {
                 ProceduralStarboxKind::None => {}
@@ -170,18 +176,47 @@ struct ProceduralMoonView<'a> {
 
 fn create_uniform_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Skybox Layout (NoTex)"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+        label: Some("Skybox Layout (Gradient)"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            // Blue-noise dithering source for the gradient banding fix.
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: blue_noise_view_dimension(),
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
     })
+}
+
+/// View dimension of the system blue-noise texture: a temporally-layered array
+/// when `advanced_noise` is enabled, otherwise a single 64×64 slice.
+fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
+    if cfg!(feature = "advanced_noise") {
+        wgpu::TextureViewDimension::D2Array
+    } else {
+        wgpu::TextureViewDimension::D2
+    }
 }
 
 fn create_texture_layout(
@@ -796,10 +831,27 @@ impl SkyboxFeature {
                 params_gpu.buffer.clone()
             };
 
+            // Clone the system blue-noise view/sampler into owned locals so they
+            // can be bound without holding a borrow of `ctx` across the mutable
+            // `build_bind_group` call.
+            let blue_noise_view = ctx.resource_manager.system_textures.blue_noise.clone();
+            let blue_noise_view_id = blue_noise_view.id();
+            let blue_noise_sampler = ctx
+                .resource_manager
+                .system_textures
+                .blue_noise_sampler
+                .clone();
+            let blue_noise_sampler_id = blue_noise_sampler.id();
+
             ctx.build_bind_group(layout, Some("Skybox BG (Gradient)"))
                 .bind_raw_buffer(
                     0,
                     RawBufferBinding::new(&params_buffer, bg_uniforms_resource_id, None),
+                )
+                .bind_texture_view_with_id(1, &blue_noise_view, blue_noise_view_id)
+                .bind_raw_sampler(
+                    2,
+                    RawSamplerBinding::new(&blue_noise_sampler, blue_noise_sampler_id),
                 )
                 .build()
                 .clone()

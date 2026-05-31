@@ -23,8 +23,8 @@
 //! cargo run --release --example hero_capture
 //! ```
 
-use myth::prelude::*;
 use myth::ToneMappingMode;
+use myth::prelude::*;
 use myth::resources::tone_mapping::AgxLook;
 
 const ASSET_PATH: &str = match option_env!("MYTH_ASSET_PATH") {
@@ -104,7 +104,9 @@ fn main() {
         // DISABLED: those passes write to every pixel (grain even adds colored
         // noise to fully-transparent areas), which would break the strict
         // "subject only" transparency we need for the homepage hero.
-        scene.tone_mapping.set_mode(ToneMappingMode::AgX(AgxLook::None));
+        scene
+            .tone_mapping
+            .set_mode(ToneMappingMode::AgX(AgxLook::None));
         scene.tone_mapping.set_exposure(1.0);
         scene.tone_mapping.set_contrast(1.1);
         scene.tone_mapping.set_saturation(1.05);
@@ -163,8 +165,7 @@ fn main() {
             if let Some(mesh) = scene.meshes.get(model_node) {
                 if let Some(material) = engine.assets.materials.get(mesh.material) {
                     if let Some(pbr) = material.as_physical() {
-                        if let Some(new_id) =
-                            engine.assets.sss_registry.write().add(&skin_profile)
+                        if let Some(new_id) = engine.assets.sss_registry.write().add(&skin_profile)
                         {
                             pbr.set_sss_id(Some(new_id));
                         }
@@ -191,7 +192,11 @@ fn main() {
     }
 
     // Frame count = exactly one animation loop (falls back to 5s if static).
-    let loop_seconds = if anim_duration > 0.05 { anim_duration } else { 5.0 };
+    let loop_seconds = if anim_duration > 0.05 {
+        anim_duration
+    } else {
+        5.0
+    };
     let mut total_frames = (loop_seconds * fps).round() as usize;
     if frame_cap > 0 {
         total_frames = total_frames.min(frame_cap);
@@ -225,5 +230,8 @@ fn main() {
         engine.update(dt);
     }
 
-    println!("Done. {total_frames} frames written to {}", out_dir.display());
+    println!(
+        "Done. {total_frames} frames written to {}",
+        out_dir.display()
+    );
 }

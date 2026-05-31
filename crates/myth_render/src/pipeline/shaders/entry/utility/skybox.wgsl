@@ -66,6 +66,22 @@ $$ if SKYBOX_PLANAR
 @group(1) @binding(2) var s_skybox: sampler;
 $$ endif
 
+// Blue-noise dithering source for the gradient banding fix (Feature-owned).
+// Guarded by `USE_BLUE_NOISE`; when the texture is not bound the gradient path
+// falls back to a procedural hash so the shader still compiles/works.
+$$ if SKYBOX_GRADIENT
+$$ if USE_BLUE_NOISE is defined
+$$ if HIGH_END_NOISE is defined
+@group(1) @binding(1) var t_blue_noise: texture_2d_array<f32>;
+$$ else
+@group(1) @binding(1) var t_blue_noise: texture_2d<f32>;
+$$ endif
+@group(1) @binding(2) var s_blue_noise: sampler;
+
+{$ include 'entry/utility/blue_noise' $}
+$$ endif
+$$ endif
+
 $$ if SKYBOX_PROCEDURAL
 {$ include "entry/utility/atmosphere/celestial_bodies" $}
 $$ endif
@@ -109,8 +125,15 @@ $$ if SKYBOX_GRADIENT
     color = mix(u_params.color_bottom, u_params.color_top, t);
 
     // Add Dithering to reduce banding in gradients, especially at low precision (e.g. 8-bit displays)
-    let noise = fract(sin(dot(in.position.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-    color += (noise - 0.5) / 255.0;
+$$ if USE_BLUE_NOISE is defined
+    // Static blue-noise dither: high-frequency, no periodic structure, and not
+    // temporally animated so a static sky stays flicker-free.
+    let dither = get_blue_noise(vec2<u32>(in.position.xy), 0u).r;
+$$ else
+    // Fallback: procedural hash (used when no blue-noise texture is bound).
+    let dither = fract(sin(dot(in.position.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+$$ endif
+    color += (dither - 0.5) / 255.0;
 $$ endif
 
 $$ if SKYBOX_CUBE or SKYBOX_EQUIRECT

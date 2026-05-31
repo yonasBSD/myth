@@ -21,6 +21,24 @@ var lut_texture: texture_3d<f32>;
 var lut_sampler: sampler;
 $$ endif
 
+// Blue-noise dithering source for Film Grain (Feature-owned). Bindings 4/5 are
+// fixed regardless of LUT presence so the layout never collides with the LUT
+// slots above. Guarded by `USE_BLUE_NOISE`; when absent the shader falls back to
+// a procedural hash so it still compiles/works without the texture bound.
+$$ if USE_BLUE_NOISE is defined
+$$ if HIGH_END_NOISE is defined
+@group(1) @binding(4)
+var t_blue_noise: texture_2d_array<f32>;
+$$ else
+@group(1) @binding(4)
+var t_blue_noise: texture_2d<f32>;
+$$ endif
+@group(1) @binding(5)
+var s_blue_noise: sampler;
+
+{$ include 'entry/utility/blue_noise' $}
+$$ endif
+
 // Group 2: Transient RDG textures (PassNode-owned, per-frame)
 @group(2) @binding(0)
 var color_tex: texture_2d<f32>;
@@ -99,8 +117,16 @@ $$ endif
 
     // 6. Film Grain
     if (u_effect.film_grain > 0.001) {
+$$ if USE_BLUE_NOISE is defined
+        // Animated blue-noise grain: spatially high-frequency + temporally
+        // rotated, free of the periodic banding the hash-based version exhibits.
+        let grain_frame = u32(u_render_state.time * 60.0);
+        let noise = get_blue_noise(vec2<u32>(varyings.position.xy), grain_frame).r;
+$$ else
+        // Fallback: procedural hash (used when no blue-noise texture is bound).
         let seed = u_render_state.time_cycle_2pi * 100.0;
         let noise = fract(sin(dot(uv, vec2<f32>(12.9898, 78.233)) + seed) * 43758.5453);
+$$ endif
         let grain = (noise - 0.5) * u_effect.film_grain;
         rgb = rgb + grain;
     }

@@ -37,6 +37,16 @@ use myth_resources::uniforms::WgslStruct;
 /// Pipeline cache key: (mode, output_format, has_lut).
 type PipelineCacheKey = (ToneMappingMode, wgpu::TextureFormat, bool);
 
+/// View dimension of the system blue-noise texture: a temporally-layered array
+/// when `advanced_noise` is enabled, otherwise a single 64×64 slice.
+fn blue_noise_view_dimension() -> wgpu::TextureViewDimension {
+    if cfg!(feature = "advanced_noise") {
+        wgpu::TextureViewDimension::D2Array
+    } else {
+        wgpu::TextureViewDimension::D2
+    }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Feature (long-lived, stored in RenderFeatures)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -129,15 +139,39 @@ impl ToneMappingFeature {
             count: None,
         };
 
-        // Base static layout (Group 1): sampler + uniforms
+        // Blue-noise dithering source for Film Grain (fixed bindings 4/5 so they
+        // never collide with the optional LUT slots 2/3).
+        let blue_noise_tex_entry = wgpu::BindGroupLayoutEntry {
+            binding: 4,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: blue_noise_view_dimension(),
+                multisampled: false,
+            },
+            count: None,
+        };
+        let blue_noise_sampler_entry = wgpu::BindGroupLayoutEntry {
+            binding: 5,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
+
+        // Base static layout (Group 1): sampler + uniforms + blue noise
         self.static_layout_base = Some(Tracked::new(device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 label: Some("ToneMap Static Layout (base, G1)"),
-                entries: &[sampler_entry, uniform_entry],
+                entries: &[
+                    sampler_entry,
+                    uniform_entry,
+                    blue_noise_tex_entry,
+                    blue_noise_sampler_entry,
+                ],
             },
         )));
 
-        // LUT static layout (Group 1): sampler + uniforms + LUT texture + LUT sampler
+        // LUT static layout (Group 1): sampler + uniforms + LUT texture + LUT sampler + blue noise
         let lut_entries = [
             sampler_entry,
             uniform_entry,
@@ -157,6 +191,8 @@ impl ToneMappingFeature {
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            blue_noise_tex_entry,
+            blue_noise_sampler_entry,
         ];
 
         self.static_layout_lut = Some(Tracked::new(device.create_bind_group_layout(
@@ -276,6 +312,8 @@ impl ToneMappingFeature {
                 .resource_manager
                 .sampler_registry
                 .get_common(CommonSampler::LinearClamp);
+            let blue_noise_view = &ctx.resource_manager.system_textures.blue_noise;
+            let blue_noise_sampler = &ctx.resource_manager.system_textures.blue_noise_sampler;
             let layout = self.current_static_layout(has_lut);
 
             let mut entries = vec![
@@ -299,6 +337,16 @@ impl ToneMappingFeature {
                     resource: wgpu::BindingResource::Sampler(sampler),
                 });
             }
+
+            // Blue-noise dithering source for Film Grain (fixed bindings 4/5).
+            entries.push(wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(blue_noise_view),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(blue_noise_sampler),
+            });
 
             self.static_bg = Some(ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ToneMap Static BG (G1)"),
@@ -343,6 +391,9 @@ impl ToneMappingFeature {
         if has_lut {
             defines.set("USE_LUT", "1");
         }
+        // Blue-noise Film Grain is always wired (the system blue-noise texture is
+        // always resident); the shader keeps a procedural-hash fallback for safety.
+        defines.set("USE_BLUE_NOISE", "1");
 
         let gpu_world = ctx
             .resource_manager
