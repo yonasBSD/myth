@@ -126,13 +126,13 @@ Current builder methods:
 
 | Method | Purpose |
 | --- | --- |
-| App::new() | Create a builder with default title and render settings |
-| .with_title(...) | Set window title |
-| .with_init_config(...) | Configure static GPU initialization |
-| .with_settings(...) | Configure runtime render path and presentation settings |
-| .with_inner_size(width, height) | Native-only initial window size |
-| .with_canvas_id(...) | WASM-only canvas selection |
-| .run::<H>() | Start the event loop with an AppHandler |
+| `App::new()` | Create a builder with default title and render settings |
+| `.with_title(...)` | Set window title |
+| `.with_init_config(...)` | Configure static GPU initialization |
+| `.with_settings(...)` | Configure runtime render path and presentation settings |
+| `.with_inner_size(width, height)` | Native-only initial window size |
+| `.with_canvas_id(...)` | WASM-only canvas selection |
+| `.run::<H>()` | Start the event loop with an AppHandler |
 
 ### AppHandler
 
@@ -402,7 +402,7 @@ RendererSettings is runtime-mutable and currently exposes:
 
 ### FrameComposer
 
-Engine::compose_frame() returns Option<FrameComposer<'_>>. It returns None when there is no active scene or active camera. Once you have a composer, the standard flow is:
+Engine::compose_frame() returns `Option<FrameComposer<'_>>`. It returns None when there is no active scene or active camera. Once you have a composer, the standard flow is:
 
 ```rust
 let Some(composer) = engine.compose_frame() else {
@@ -412,7 +412,7 @@ let Some(composer) = engine.compose_frame() else {
 composer.render();
 ```
 
-To inject custom passes, override AppHandler::render() and work on the composer directly:
+To inject custom passes, override `AppHandler::render()` and work on the composer directly:
 
 ```rust
 fn render(&mut self, engine: &mut Engine, _window: &dyn Window) {

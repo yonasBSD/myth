@@ -2,6 +2,9 @@
 /target_ra
 /debug
 /dist
+/node_modules
+docs/.vitepress/dist
+docs/.vitepress/cache
 
 # Python bindings (bindings/python/)
 bindings/python/target/
