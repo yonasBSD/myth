@@ -12,9 +12,9 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](LICENSE)
 [![WebGPU Ready](https://img.shields.io/badge/WebGPU-Ready-green.svg)](https://gpuweb.github.io/gpuweb/)
 
-[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/showcase)
+[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
-[**演示案例**](https://panxinmiao.github.io/myth/) | [**示例代码**](examples/)
+[**📖 文档**](https://panxinmiao.github.io/myth/) | [**🖼️ 画廊**](https://panxinmiao.github.io/myth/gallery/) | [**💡 示例代码**](examples/)
 
 </div>
 
@@ -88,7 +88,7 @@ Myth 使用了严格的基于 SSA 的 RenderGraph，因此引擎能够：
 
 所有这些都无需手动设置内存屏障。
 
-深入了解：[docs/RenderGraph_zh.md](https://github.com/panxinmiao/myth/blob/main/docs/RenderGraph_zh.md)
+深入了解：[构建基于 SSA 的声明式渲染图](https://panxinmiao.github.io/myth/blog/render-graph-design)
 
 以下是 Myth 引擎在渲染复杂帧时，自动生成的 RenderGraph 的真实拓扑转储：
 
@@ -239,9 +239,10 @@ flowchart TD
 
 直接在你的浏览器中体验引擎（WebGPU 需要 Chrome/Edge 113+）：
 
-  - **[Showcase (首页)](https://panxinmiao.github.io/myth/showcase)**：高性能渲染展示。
-  - **[glTF 查看器与检查器](https://panxinmiao.github.io/myth/gltf_viewer)**：拖拽你自己的 .glb 文件进行查看。
-  - **[glTF 示例模型](https://panxinmiao.github.io/myth/gltf_shower)**：浏览多个使用 Myth 渲染的 Khronos 官方 glTF 资产。
+  - **[画廊 Gallery](https://panxinmiao.github.io/myth/gallery/)**：在一处浏览全部示例与演示应用。
+  - **[Showcase](https://panxinmiao.github.io/myth/gallery/showcase/)**：高性能渲染展示。
+  - **[glTF 查看器与检查器](https://panxinmiao.github.io/myth/gallery/gltf_viewer/)**：拖拽你自己的 .glb 文件进行查看。
+  - **[glTF 示例模型](https://panxinmiao.github.io/myth/gallery/gltf_shower/)**：浏览多个使用 Myth 渲染的 Khronos 官方 glTF 资产。
 
 ## 快速开始
 

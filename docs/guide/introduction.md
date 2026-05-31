@@ -23,3 +23,9 @@ Myth 的引擎底层不仅是一个渲染器，更是一个**图编译器**。
 ::: tip 适用场景
 Myth 非常适合需要**高度定制化渲染管线**、**AI Agent 驱动的 3D 数字生命**展示，以及需要嵌入到其他系统中的高性能图形模块。
 :::
+
+## 下一步
+
+- 想立刻动手？ → [快速开始](/guide/quick-start)
+- 想纵览全部能力？ → [核心特性总览](/guide/features)
+- 想理解底层架构？ → [Render Graph 渲染图](/architecture/render-graph)

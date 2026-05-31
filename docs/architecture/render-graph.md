@@ -27,7 +27,7 @@ let pass_out = graph.add_pass("Some_Pass", |builder| {
 
 ```
 
-## 2. 编译器的魔法：零开销、全自动
+## 2. 编译期优化：零开销、全自动
 
 图编译器的生命周期被严格划分为：**Setup (声明) -> Compilation (编译) -> Preparation (准备) -> Execution (执行)**。
 

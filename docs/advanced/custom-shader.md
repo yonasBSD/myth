@@ -81,3 +81,8 @@ let node = post_pass.build_node(
 ```
 
 这种设计让编译器能够“看透”你的自定义后处理节点，并智能地在上下游管线之间复用物理内存。
+
+## 下一步
+
+- 理解钩子插入的帧合成顺序 → [渲染路径与帧合成](/architecture/rendering-pipeline)
+- 理解底层资源调度 → [Render Graph 渲染图](/architecture/render-graph)

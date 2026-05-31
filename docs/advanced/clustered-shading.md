@@ -36,3 +36,8 @@ composer.inject_gpu_local_lights(move |ctx| {
 ```
 
 引擎内部会自动处理路由逻辑，智能地将纯 CPU 光源、纯 GPU 光源或两者的合并轨道送入后续的 Clustered Lighting 计算中，实现零开销的无缝回退与整合。
+
+## 下一步
+
+- 为场景添加天空与阴影 → [程序化天空与大气](/advanced/procedural-sky)
+- 注入自定义 GPU Pass → [自定义 Shader 与后处理](/advanced/custom-shader)

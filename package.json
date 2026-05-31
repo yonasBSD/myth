@@ -12,7 +12,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "site:build": "vitepress build docs && cargo xtask build-gallery --release",
+    "site:preview": "vitepress preview docs"
   },
   "repository": {
     "type": "git",

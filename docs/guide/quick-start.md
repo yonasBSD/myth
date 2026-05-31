@@ -8,15 +8,19 @@
 
 ```toml
 [dependencies]
-myth = { git = "[https://github.com/panxinmiao/myth](https://github.com/panxinmiao/myth)", branch = "main" }
+# 从 crates.io 获取稳定版本
+myth-engine = "0.2.0"
 
+# 或从 GitHub 获取最新主分支
+# myth-engine = { git = "https://github.com/panxinmiao/myth", branch = "main" }
 ```
 
 ::: info Feature Flags (特性开关)
-Myth 采用模块化设计。在实际开发中，你可能需要根据需求启用以下特性：
+Myth 采用模块化设计，许多重型能力默认隐藏在 Feature Flag 之后以保持极致轻量。在实际开发中，你可能需要根据需求启用以下特性：
 
 * `gltf`: 加载 glTF 和 GLB 格式的模型资产
 * `3dgs`: 启用 3D 高斯溅射（Gaussian Splatting）渲染支持
+* `gaussian-npz`: 支持加载压缩的 NPZ 格式高斯点云
 * `debug_view`: 开启调试视图和渲染图检查器辅助工具
 :::
 
@@ -88,3 +92,23 @@ cargo run --release
 ::: tip 渲染路径 (Render Path) 选择
 我们在 `main` 函数中指定了 `RenderPath::HighFidelity`。如果你的场景只需要非常基础的前向渲染，且运行在低端设备上，可以切换为 `RenderPath::BasicForward`。但如果你需要 PBR、泛光(Bloom)、SSAO 或 3DGS 特性，请始终保持在 `HighFidelity` 高保真管线下。
 :::
+
+## 4. 运行官方示例
+
+仓库内置了 50+ 个覆盖各类特性的示例。克隆仓库后可直接运行：
+
+```bash
+# 运行单个示例（如地球 Demo）
+cargo run --example earth --release
+
+# 运行独立 App（如 glTF Viewer）
+cargo run -p gltf_viewer --release
+```
+
+关于 Web/WASM 示例的构建，请参考 [myth xtask 指南](https://github.com/panxinmiao/myth/blob/main/xtask/README.md)。
+
+## 下一步
+
+- 理解引擎的四层心智模型 → [场景与节点系统](/guide/scene-graph)
+- 加载模型并播放动画 → [资产、glTF 与动画](/guide/assets-animation)
+- 纵览全部能力 → [核心特性总览](/guide/features)

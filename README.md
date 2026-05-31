@@ -12,9 +12,9 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](LICENSE)
 [![WebGPU Ready](https://img.shields.io/badge/WebGPU-Ready-green.svg)](https://gpuweb.github.io/gpuweb/)
 
-[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/showcase)
+[![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
-[**Gallery**](https://panxinmiao.github.io/myth) | [**Examples**](examples/)
+[**📖 Documentation**](https://panxinmiao.github.io/myth/) | [**🖼️ Gallery**](https://panxinmiao.github.io/myth/gallery/) | [**💡 Examples**](examples/)
 
 </div>
 
@@ -87,7 +87,7 @@ Myth uses a strict SSA-based RenderGraph, so the engine can:
 
 All without manual barriers.
 
-Deep dive: [docs/RenderGraph.md](https://github.com/panxinmiao/myth/blob/main/docs/RenderGraph.md)
+Deep dive: [Building an SSA-Based Declarative Render Graph](https://panxinmiao.github.io/myth/en/blog/render-graph-design)
 
 Here is an actual, auto-generated dump of Myth Engine's RenderGraph during a complex frame:
 
@@ -236,9 +236,10 @@ flowchart TD
 
 Experience the engine directly in your browser (Chrome/Edge 113+ required for WebGPU):
 
-- **[Showcase (Home)](https://panxinmiao.github.io/myth/showcase)**: High-performance rendering showcase.
-- **[glTF Viewer & Inspector](https://panxinmiao.github.io/myth/gltf_viewer)**: Drag & drop your own .glb files.
-- **[glTF Sample Models](https://panxinmiao.github.io/myth/gltf_shower)**: Explore multiple official glTF assets from Khronos rendered with Myth.
+- **[Gallery](https://panxinmiao.github.io/myth/gallery/)**: Browse every example and demo app in one place.
+- **[Showcase](https://panxinmiao.github.io/myth/gallery/showcase/)**: High-performance rendering showcase.
+- **[glTF Viewer & Inspector](https://panxinmiao.github.io/myth/gallery/gltf_viewer/)**: Drag & drop your own .glb files.
+- **[glTF Sample Models](https://panxinmiao.github.io/myth/gallery/gltf_shower/)**: Explore multiple official glTF assets from Khronos rendered with Myth.
 
 ![Web Editor Preview](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/images/inspector.gif)
 
@@ -317,6 +318,25 @@ For building and running Web/WASM examples, please refer to the [myth xtask Guid
 ### Python Bindings
 Myth Engine also provides Python bindings for rapid prototyping and scientific visualization.
 See [Python Bindings](https://github.com/panxinmiao/myth/tree/main/bindings/python) for installation and examples.
+
+## Documentation
+
+Full documentation lives on the project site, available in **English** and **简体中文**:
+
+- **[Guide](https://panxinmiao.github.io/myth/guide/introduction)** — getting started, scenes, assets & animation, Python.
+- **[Architecture](https://panxinmiao.github.io/myth/architecture/rendering-pipeline)** — render paths, the SSA Render Graph, asset pipeline, material system.
+- **[Advanced Rendering](https://panxinmiao.github.io/myth/advanced/pbr-materials)** — PBR, clustered lighting, post-processing, procedural sky, 3DGS, custom shaders, headless rendering.
+- **[Blog](https://panxinmiao.github.io/myth/blog/)** — in-depth design articles.
+
+### Building the Site Locally
+
+The site (VitePress docs at the root + Gallery under `/gallery/`) builds with a single command:
+
+```bash
+npm install
+npm run site:build      # builds ./dist (docs at /, Gallery at /gallery/)
+npm run site:preview    # preview the combined site locally
+```
 
 ## License
 

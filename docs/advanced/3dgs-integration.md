@@ -43,3 +43,8 @@ Myth 对 3DGS 的集成解决了目前业界的几个痛点：
 
 1. **深度测试 (Depth Testing)：** 高斯点云在进行光栅化时，会读取 PBR 不透明几何体（Opaque Pass）生成的深度缓冲，从而实现传统 3D 模型与高斯溅射场景的完美空间遮挡。
 2. **色彩空间合成：** 引擎在执行投影与协方差计算时，严格校准了颜色转换逻辑。确保点云的输出结果能以正确的线性颜色空间与 PBR 场景融合，最终统一交由 Bloom 和 Tone Mapping 节点处理，杜绝了突兀的色差问题。
+
+## 下一步
+
+- 理解 3DGS 在帧中的插入位置 → [渲染路径与帧合成](/architecture/rendering-pipeline)
+- 在线体验 3DGS Demo → [Gallery](https://panxinmiao.github.io/myth)
