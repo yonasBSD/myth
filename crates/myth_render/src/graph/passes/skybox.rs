@@ -792,7 +792,6 @@ impl SkyboxFeature {
                     .build(),
                 None => builder.build(),
             }
-            .clone()
         } else if variant.needs_texture() {
             let Some((tex_view, tex_view_resource_key)) = texture_view else {
                 self.current_bind_group = None;
@@ -818,7 +817,6 @@ impl SkyboxFeature {
                 .bind_texture_view_with_id(1, &tex_view, tex_view_resource_key)
                 .bind_sampler_by_id(2, sampler_id)
                 .build()
-                .clone()
         } else {
             let bg_uniforms_resource_id =
                 bg_uniforms_resource_id.expect("Skybox params resource id must exist");
@@ -854,7 +852,6 @@ impl SkyboxFeature {
                     RawSamplerBinding::new(&blue_noise_sampler, blue_noise_sampler_id),
                 )
                 .build()
-                .clone()
         };
 
         self.current_bind_group = Some(bind_group.clone());

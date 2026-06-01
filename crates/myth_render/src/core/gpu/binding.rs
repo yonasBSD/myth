@@ -576,31 +576,31 @@ impl ResourceManager {
         );
 
         // Resolve env_map from GpuEnvironment cache
-        let env_map_source = if matches!(
-            extracted_scene.background,
-            myth_scene::background::BackgroundMode::Procedural(_)
-        ) || extracted_scene.envvironment.has_env_map()
-        {
-            self.gpu_environment(extracted_scene.scene_id).map_or_else(
-                || TextureHandle::dummy_env_map().into(),
-                |gpu_env| {
-                    TextureSource::Attachment(
-                        gpu_env.base_cube_view.id(),
-                        wgpu::TextureViewDimension::Cube,
-                    )
-                },
-            )
-        } else {
-            TextureHandle::dummy_env_map().into()
-        };
+        // let env_map_source = if matches!(
+        //     extracted_scene.background,
+        //     myth_scene::background::BackgroundMode::Procedural(_)
+        // ) || extracted_scene.envvironment.has_env_map()
+        // {
+        //     self.gpu_environment(extracted_scene.scene_id).map_or_else(
+        //         || TextureHandle::dummy_env_map().into(),
+        //         |gpu_env| {
+        //             TextureSource::Attachment(
+        //                 gpu_env.base_cube_view.id(),
+        //                 wgpu::TextureViewDimension::Cube,
+        //             )
+        //         },
+        //     )
+        // } else {
+        //     TextureHandle::dummy_env_map().into()
+        // };
 
-        builder.add_texture(
-            "env_map",
-            Some(env_map_source),
-            wgpu::TextureSampleType::Float { filterable: true },
-            wgpu::TextureViewDimension::Cube,
-            wgpu::ShaderStages::FRAGMENT,
-        );
+        // builder.add_texture(
+        //     "env_map",
+        //     Some(env_map_source),
+        //     wgpu::TextureSampleType::Float { filterable: true },
+        //     wgpu::TextureViewDimension::Cube,
+        //     wgpu::ShaderStages::FRAGMENT,
+        // );
 
         // Resolve pmrem_map from GpuEnvironment cache
         let pmrem_source = if matches!(

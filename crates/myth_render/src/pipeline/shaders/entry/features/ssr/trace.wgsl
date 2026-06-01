@@ -369,7 +369,16 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
 
     let hit_color = textureSampleLevel(t_scene_color, s_linear, trace.uv, 0.0).rgb;
     let metalness = specular_data.a;
-    let f0 = mix(vec3<f32>(0.04), material_data.rgb, metalness);
+    // material_data.rgb stores diffuse_color = baseColor * (1 - metalness), not the
+    // raw baseColor. Feeding it straight into the F0 mix collapses the reflectance of
+    // metals toward zero (mix(0.04, baseColor*(1-m), m) -> 0 as m -> 1), which makes
+    // reflections on dark metallic surfaces vanish. Recover baseColor first.
+    let base_color = clamp(
+        material_data.rgb / max(1.0 - metalness, 1e-3),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0)
+    );
+    let f0 = mix(vec3<f32>(0.04), base_color, metalness);
     let v_dot_h = saturate(dot(view_dir, half_vector));
     let alpha = max(roughness * roughness, 0.001);
     let g1_v = smith_ggx_g1(saturate(dot(view_normal, view_dir)), alpha);

@@ -54,7 +54,7 @@ impl SimpleForwardFeature {
         prepared_skybox: Option<PreparedSkyboxDraw<'a>>,
         shadow_tex: Option<TextureNodeId>,
         shadow_cube_tex: Option<TextureNodeId>,
-        env_map_tex: Option<TextureNodeId>,
+        // env_map_tex: Option<TextureNodeId>,
         pmrem_tex: Option<TextureNodeId>,
         scene_lighting: ClusteredScreenBindings,
     ) {
@@ -81,9 +81,9 @@ impl SimpleForwardFeature {
             if let Some(shadow_cube) = shadow_cube_tex {
                 builder.read_texture(shadow_cube);
             }
-            if let Some(env_map) = env_map_tex {
-                builder.read_texture(env_map);
-            }
+            // if let Some(env_map) = env_map_tex {
+            //     builder.read_texture(env_map);
+            // }
             if let Some(pmrem) = pmrem_tex {
                 builder.read_texture(pmrem);
             }

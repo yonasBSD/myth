@@ -205,7 +205,7 @@ pub(crate) struct AtmosphereGraphOutput {
     pub sky_view: TextureNodeId,
     pub transmittance: TextureNodeId,
     pub bake_params: BufferNodeId,
-    pub baked_base_cube: Option<TextureNodeId>,
+    // pub baked_base_cube: Option<TextureNodeId>,
 }
 
 impl AtmosphereGraphOutput {
@@ -547,7 +547,7 @@ impl AtmosphereFeature {
                 sky_view,
                 transmittance,
                 bake_params: bake_params_buf,
-                baked_base_cube: bake_environment.then_some(base_cube),
+                // baked_base_cube: bake_environment.then_some(base_cube),
             }
         })
     }

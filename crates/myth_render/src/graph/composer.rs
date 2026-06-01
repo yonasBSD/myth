@@ -568,7 +568,7 @@ impl<'a> FrameComposer<'a> {
                     compute_state: gpu_env.source_ready.then_some(&gpu_env.compute_state),
                 });
 
-            let mut env_dependency_base = None;
+            // let mut env_dependency_base = None;
             let mut env_dependency_pmrem = None;
             let mut procedural_skybox_dependencies = [None, None];
             let mut atmosphere_transmittance = None;
@@ -600,7 +600,7 @@ impl<'a> FrameComposer<'a> {
                                     atmosphere_output.skybox_dependencies();
                                 atmosphere_transmittance = Some(atmosphere_output.transmittance);
                                 atmosphere_bake_params = Some(atmosphere_output.bake_params);
-                                env_dependency_base = atmosphere_output.baked_base_cube;
+                                // env_dependency_base = atmosphere_output.baked_base_cube;
                                 env_dependency_pmrem = self
                                     .ctx
                                     .ibl_pass
@@ -616,7 +616,7 @@ impl<'a> FrameComposer<'a> {
                             }
                         }
                         CubeSourceType::Equirectangular | CubeSourceType::Cubemap => {
-                            env_dependency_base = self.ctx.equirect_to_cube_pass.add_to_graph(
+                            self.ctx.equirect_to_cube_pass.add_to_graph(
                                 c,
                                 scene_id,
                                 env.source_type,
@@ -784,7 +784,7 @@ impl<'a> FrameComposer<'a> {
                             ssao_output,
                             shadow_output.shadow_2d,
                             shadow_output.shadow_cube,
-                            env_dependency_base,
+                            // env_dependency_base,
                             env_dependency_pmrem,
                             scene_lighting,
                         );
@@ -857,7 +857,7 @@ impl<'a> FrameComposer<'a> {
                                 opaque_out
                                     .material_mrt
                                     .expect("SSGI requires opaque material MRT"),
-                                env_dependency_pmrem.or(env_dependency_base),
+                                env_dependency_pmrem,
                                 taa_history_view,
                             );
 
@@ -1146,7 +1146,7 @@ impl<'a> FrameComposer<'a> {
                         prepared_skybox,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
-                        env_dependency_base,
+                        // env_dependency_base,
                         env_dependency_pmrem,
                         scene_lighting,
                     );
