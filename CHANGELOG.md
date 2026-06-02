@@ -17,7 +17,7 @@
   - **Robust Hit Validation:** Includes thickness-aware hit rejection to reduce light leaking on thin surfaces and grazing-angle intersections.
   - **Scalable Quality Tiers:** Provides Low / Medium / High / Ultra presets to scale ray budget and denoiser cost across desktop and constrained hardware targets.
 
-- Added a **procedural sky system** powered by a physically-based atmospheric scattering model (Hillaire 2020), enabling high-quality real-time sky rendering with procedural celestial bodies (sun, moon, and stars).
+- Introduced a **procedural sky system** powered by a physically-based atmospheric scattering model (Hillaire 2020), enabling high-quality real-time sky rendering with procedural celestial bodies (sun, moon, and stars).
 Also includes a `DayNightCycle` component for dynamic time progression, automatically syncing the trajectories of the sun, moon, and star field with scene parameters.
 
 - Overhauled the **RenderGraph** into a more complete typed-resource system: buffers and textures are now first-class SSA resources with unified dependency tracking, zero-cost typed node handles, and transient power-of-two buffer pooling for aggressive VRAM reuse.
@@ -48,6 +48,7 @@ Also migrated major compute-heavy paths such as 3D Gaussian Splatting, atmospher
 - Added "dynamic image/texture" support, via `Image::new_dynamic` and `AssetServer::update_dynamic_texture`. This provides a simple API for real-time updating of texture content from CPU data (without allocation), ideal for video streaming, dynamic UI elements, or procedural textures.
 - Added some custom material examples to the Gallery, showcasing the use of custom shader code and material definitions.
 - Added some primitive geometry constructors to the API, such as `create_cone`, `create_cylinder`, `create_torus`, etc.
+- Added `LIGHT_FLAG_IS_SUN`/`LIGHT_FLAG_IS_MOON` flags to the `Light` struct, allowing the renderer to identify and treat directional lights as celestial bodies for sky rendering and IBL purposes. Now sunlight correctly considers the atmospheric scattering effects from the procedural sky system.
 
 ### Fixed
 - Fixed an issue of UnlitMaterial UV transform not taking effect.

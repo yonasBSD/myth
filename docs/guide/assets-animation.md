@@ -39,7 +39,7 @@ fn update(&mut self, engine: &mut Engine, _window: &dyn Window, _frame: &FrameSt
 ```
 
 ::: warning ⚠️ 警惕异步时序陷阱
-在程序启动的前几帧，模型尚未完成 GPU 上传是常态。任何强依赖几何数据立即存在的逻辑（蒙皮、阴影剔除、AABB 计算）都应通过 `Option` 或就绪检查保护，否则会出现闪烁、阴影撕裂或骨骼乱飞等隐蔽 Bug。详见 [异步资源与加载管线](/architecture/asset-pipeline)。
+在程序启动的前几帧，模型可能尚未完成 GPU 上传。应注意就绪检查保护，否则会出现闪烁、阴影撕裂等隐蔽 Bug。详见 [异步资源与加载管线](/architecture/asset-pipeline)。
 :::
 
 ## 3. 播放动画

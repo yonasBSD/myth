@@ -39,7 +39,7 @@ fn update(&mut self, engine: &mut Engine, _window: &dyn Window, _frame: &FrameSt
 ```
 
 ::: warning ⚠️ Beware of Async Timing Pitfalls
-During the first few frames after startup, it is normal for a model to not have finished its GPU upload. Any logic that strictly depends on geometry data existing immediately (skinning, shadow culling, AABB computation) should be guarded by an `Option` or readiness check, otherwise you'll get subtle bugs like flickering, shadow tearing, or exploding skeletons. See [Async Asset Pipeline](/en/architecture/asset-pipeline) for details.
+During the first few frames after startup, models may not have finished uploading to the GPU. Be sure to perform readiness checks to avoid subtle bugs like flickering or shadow tearing. See [Async Asset Pipeline](/en/architecture/asset-pipeline) for details.
 :::
 
 ## 3. Playing Animations

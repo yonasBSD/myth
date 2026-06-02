@@ -35,12 +35,9 @@ Myth's loading pipeline is **fully asynchronous**. This means that when you call
 ::: warning ⚠️ Important Pitfall: Beware of "First Few Frames" Timing
 Because model loading is asynchronous, **it is normal for a model to not be fully loaded into the scene during the first few frames after startup.**
 
-If your low-level logic strictly depends on geometry data existing immediately, you must explicitly handle this async timing. Typical pitfalls include:
+If your low-level logic strictly depends on geometry data existing immediately, you must explicitly handle this async timing. 
 
-1. **Skinning:** Trying to forcibly update bone-weight buffers that haven't finished uploading on the first frame.
-2. **Shadows:** The shadow system attempting culling or drawing when a model's bounding box (AABB) or vertices aren't ready yet.
-
-This timing mismatch often doesn't panic outright; instead it manifests as extremely subtle rendering bugs (sudden flickering, shadow tearing, or exploding skeletons). Best practice: in your `on_update` loop, always confirm resource readiness via `Option` or validity checks before running logic that deeply depends on geometry data.
+This timing mismatch often doesn't panic outright; instead it manifests as extremely subtle rendering bugs (sudden flickering, shadow tearing). Best practice: in your `on_update` loop, always confirm resource readiness via `Option` or asset state checks before running logic that depends on the asset being fully loaded.
 :::
 
 ## 3. Practical Guide
