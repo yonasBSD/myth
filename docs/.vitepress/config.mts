@@ -166,7 +166,7 @@ export default withMermaid(
             { text: '架构', link: '/architecture/rendering-pipeline', activeMatch: '/architecture/' },
             { text: '进阶', link: '/advanced/pbr-materials', activeMatch: '/advanced/' },
             { text: '文章', link: '/articles/', activeMatch: '/articles/' },
-            { text: 'Gallery', link: GALLERY_LINK, target: '_self' },
+            { text: 'Gallery', link: '/gallery/', target: '_self' },
             {
               text: '更多',
               items: [
@@ -208,7 +208,7 @@ export default withMermaid(
             { text: 'Architecture', link: '/en/architecture/rendering-pipeline', activeMatch: '/en/architecture/' },
             { text: 'Advanced', link: '/en/advanced/pbr-materials', activeMatch: '/en/advanced/' },
             { text: 'Articles', link: '/en/articles/', activeMatch: '/en/articles/' },
-            { text: 'Gallery', link: GALLERY_LINK, target: '_self' },
+            { text: 'Gallery', link: '/gallery/', target: '_self' },
             {
               text: 'More',
               items: [
