@@ -1,6 +1,6 @@
 # Articles
 
-In-depth long-form writing on the internal design of Myth Engine. These articles cover the architecture, trade-offs, and measured data behind the engine's core subsystems — for developers who want to understand *why* things are designed the way they are.
+Articles about Myth Engine's design, architecture, or implementation details.
 
 ## All Articles
 

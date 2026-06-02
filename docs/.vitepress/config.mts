@@ -171,7 +171,8 @@ export default withMermaid(
               text: '更多',
               items: [
                 { text: 'Examples 示例', link: `${GITHUB_REPO}/tree/main/examples` },
-                { text: 'Python 绑定', link: `${GITHUB_REPO}/tree/main/bindings/python` }
+                { text: 'Python 绑定', link: `${GITHUB_REPO}/tree/main/bindings/python` },
+                { text: 'Change Log', link: `${GITHUB_REPO}/tree/main/CHANGELOG.md` },
               ]
             }
           ],
@@ -192,7 +193,7 @@ export default withMermaid(
             text: '在 GitHub 上编辑此页'
           },
           footer: {
-            message: '基于 MIT / Apache-2.0 双协议发布 · 用 🦀 Rust 构建',
+            message: '基于 MIT / Apache-2.0 双协议发布',
             copyright: 'Copyright © 2026-present Pan Xinmiao'
           }
         }
@@ -212,7 +213,8 @@ export default withMermaid(
               text: 'More',
               items: [
                 { text: 'Examples', link: `${GITHUB_REPO}/tree/main/examples` },
-                { text: 'Python Bindings', link: `${GITHUB_REPO}/tree/main/bindings/python` }
+                { text: 'Python Bindings', link: `${GITHUB_REPO}/tree/main/bindings/python` },
+                { text: 'Change Log', link: `${GITHUB_REPO}/tree/main/CHANGELOG.md` },
               ]
             }
           ],
@@ -226,7 +228,7 @@ export default withMermaid(
             text: 'Edit this page on GitHub'
           },
           footer: {
-            message: 'Released under the MIT / Apache-2.0 dual license · Built with 🦀 Rust',
+            message: 'Released under the MIT / Apache-2.0 dual license',
             copyright: 'Copyright © 2026-present Pan Xinmiao'
           }
         }

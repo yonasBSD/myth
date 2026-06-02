@@ -19,4 +19,4 @@ Write-Host ''
 Write-Host 'Done. Full site is in ./dist' -ForegroundColor Green
 Write-Host '  - Docs site : dist/index.html'
 Write-Host '  - Gallery   : dist/gallery/index.html'
-Write-Host 'Preview locally with: npm run site:preview'
+Write-Host 'Preview locally with: npm run docs:preview'
