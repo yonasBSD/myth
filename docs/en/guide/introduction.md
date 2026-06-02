@@ -10,7 +10,7 @@ Modern graphics APIs (WebGPU, Vulkan, DirectX 12) are extraordinarily powerful â
 
 On the other hand, when all you need is a **lean, high-performance rendering library**, all-in-one heavyweight engines like Bevy or Godot often feel *too heavy*.
 
-Myth was born to fill that gap. We refuse to compromise: through a strict low-level architecture, Myth stays lightweight while squeezing out extreme hardware performance (easily exceeding 4500+ FPS in typical scenes).
+Myth was born to fill that gap. We refuse to compromise: through a strict low-level architecture, Myth stays lightweight while squeezing out extreme hardware performance.
 
 ## Core Design Philosophy
 

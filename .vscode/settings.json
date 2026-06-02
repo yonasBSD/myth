@@ -1,10 +1,12 @@
 {
     "files.exclude": {
+        "debug/**": true,
         "target_ra/**": true,
         "target_wasm/**": true,
         "target/**": true,
         "bindings/python/target/**": true,
         "bindings/python/target_ra/**": true,
+        "node_modules/**": true,
     },
     
     // "rust-analyzer.cargo.target": "wasm32-unknown-unknown",

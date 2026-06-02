@@ -14,7 +14,7 @@
 
 [![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/public/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
-[**📖 文档**](https://panxinmiao.github.io/myth/) | [**🖼️ 画廊**](https://panxinmiao.github.io/myth/gallery/) | [**💡 示例代码**](examples/)
+[**📖 主页**](https://panxinmiao.github.io/myth/) | [**🖼️ 在线体验**](https://panxinmiao.github.io/myth/gallery/) | [**💡 示例代码**](examples/)
 
 </div>
 
@@ -239,7 +239,7 @@ flowchart TD
 
 直接在你的浏览器中体验引擎（WebGPU 需要 Chrome/Edge 113+）：
 
-  - **[画廊 Gallery](https://panxinmiao.github.io/myth/gallery/)**：在一处浏览全部示例与演示应用。
+  - **[在线体验](https://panxinmiao.github.io/myth/gallery/)**：浏览全部示例与演示应用。
   - **[Showcase](https://panxinmiao.github.io/myth/gallery/showcase/)**：高性能渲染展示。
   - **[glTF 查看器与检查器](https://panxinmiao.github.io/myth/gallery/gltf_viewer/)**：拖拽你自己的 .glb 文件进行查看。
   - **[glTF 示例模型](https://panxinmiao.github.io/myth/gallery/gltf_shower/)**：浏览多个使用 Myth 渲染的 Khronos 官方 glTF 资产。
