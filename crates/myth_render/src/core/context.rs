@@ -69,20 +69,19 @@ impl WgpuContext {
     /// Preserve user-provided limits, but always request the adapter's full
     /// compute workgroup storage budget so compute pipelines can specialize to
     /// the real shared-memory ceiling of the active backend.
-    fn requested_limits_for_adapter(
-        init_config: &RendererInitConfig,
-        adapter: &wgpu::Adapter,
-    ) -> wgpu::Limits {
-        let mut required_limits = init_config.required_limits.clone();
-        required_limits.max_storage_buffers_per_shader_stage =
-            adapter.limits().max_storage_buffers_per_shader_stage;
-        required_limits.max_compute_workgroup_storage_size =
-            adapter.limits().max_compute_workgroup_storage_size;
-        required_limits.max_storage_buffer_binding_size =
-            adapter.limits().max_storage_buffer_binding_size;
-        required_limits.max_buffer_size = adapter.limits().max_buffer_size;
-        required_limits
-    }
+    // fn requested_limits_for_adapter(
+    //     init_config: &RendererInitConfig,
+    //     adapter: &wgpu::Adapter,
+    // ) -> wgpu::Limits {
+    //     let mut required_limits = init_config.required_limits.clone();
+    //     required_limits.max_storage_buffers_per_shader_stage =
+    //         adapter.limits().max_storage_buffers_per_shader_stage;
+    //     required_limits.max_compute_workgroup_storage_size =
+    //         adapter.limits().max_compute_workgroup_storage_size;
+    //     required_limits.max_storage_buffer_binding_size =
+    //         adapter.limits().max_storage_buffer_binding_size;
+    //     required_limits
+    // }
 
     pub async fn new<W>(
         window: W,
@@ -139,13 +138,13 @@ impl WgpuContext {
 
         log::debug!("Selected Surface Format: {surface_format:?}");
 
-        let required_limits = Self::requested_limits_for_adapter(init_config, &adapter);
+        // let required_limits = Self::requested_limits_for_adapter(init_config, &adapter);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: init_config.required_features,
-                required_limits,
+                required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
             })
@@ -234,13 +233,13 @@ impl WgpuContext {
         log::debug!("Backend (headless): {:?}", info.backend);
         log::debug!("Device: {}", info.name);
 
-        let required_limits = Self::requested_limits_for_adapter(init_config, &adapter);
+        // let required_limits = Self::requested_limits_for_adapter(init_config, &adapter);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Headless Device"),
                 required_features: init_config.required_features,
-                required_limits,
+                required_limits: adapter.limits(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
             })

@@ -127,6 +127,8 @@ export default withMermaid(
     title: 'Myth Engine',
     description: '极致性能的轻量级 Rust 渲染引擎 · A high-performance, lightweight Rust rendering engine',
 
+    appearance: 'dark',
+
     base: BASE,
     lastUpdated: true,
     cleanUrls: true,

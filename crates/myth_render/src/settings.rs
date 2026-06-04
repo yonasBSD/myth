@@ -221,9 +221,8 @@ pub struct RendererInitConfig {
     /// Use with caution on WebGPU targets where feature support varies.
     pub required_features: wgpu::Features,
 
-    /// Required wgpu limits (max buffer sizes, binding counts, etc.).
-    pub required_limits: wgpu::Limits,
-
+    // /// Required wgpu limits (max buffer sizes, binding counts, etc.).
+    // pub required_limits: wgpu::Limits,
     /// Depth buffer texture format.
     ///
     /// Defaults to `Depth32Float` — pure 32-bit floating-point depth with
@@ -236,9 +235,9 @@ impl Default for RendererInitConfig {
     fn default() -> Self {
         Self {
             backends: None,
-            power_preference: wgpu::PowerPreference::HighPerformance,
+            power_preference: wgpu::PowerPreference::None,
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
+            // required_limits: wgpu::Limits::default(),
             depth_format: wgpu::TextureFormat::Depth32Float,
         }
     }
