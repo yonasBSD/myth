@@ -11,8 +11,9 @@
     2. Encodes the frames into docs/public/media/demo.webm with a real alpha
        channel (VP9) at the same 30 fps, so the animation plays at its natural
        speed and loops seamlessly. This is what the homepage <video> plays.
-    3. Copies a representative frame to docs/public/images/hero.png as the
-       poster / Safari fallback (Safari does not honour VP9 alpha in <video>).
+    3. Encodes the frames into docs/public/media/demo.mov with a real alpha
+       channel (HEVC) at the same 30 fps, for Safari and other platforms that
+       do not support VP9 alpha.
 
 .PARAMETER SkipRender
     Reuse the existing PNG sequence and only run the ffmpeg encode step.
@@ -71,6 +72,13 @@ Write-Host "Encoding transparent WebM (VP9, yuva420p, ${fps}fps, ${outRes}px) ->
     -c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 40 -deadline good -cpu-used 2 `
     -row-mt 1 -vf "scale=${outRes}:${outRes}" -r $fps -an $webm
 if ($LASTEXITCODE -ne 0) { throw 'WebM encode failed' }
+
+$mov = Join-Path $mediaDir 'demo.mov'
+Write-Host "Encoding transparent MOV (HEVC, yuva420p, ${fps}fps, ${outRes}px) -> $mov"
+& $ffmpeg -y -framerate $fps -i (Join-Path $framesDir 'frame_%04d.png') `
+    -c:v libx265 -pix_fmt yuva420p -tag:v hvc1 -crf 28 `
+    -vf "scale=${outRes}:${outRes}" -r $fps -an $mov
+if ($LASTEXITCODE -ne 0) { throw 'MOV encode failed' }
 
 # Poster / Safari fallback: a representative mid-animation frame, scaled to
 # match the WebM resolution so it stays transparent and light.

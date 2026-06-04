@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Myth Engine"
-  text: "Building the Rendering Engine for the AI Era"
-  tagline: A cross-platform modern graphics architecture designed for next-gen real-time 3D interactions
+  text: "Next-Gen Rendering in Rust"
+  tagline: Lightweight and cross-platform. Powering real-time 3D and intelligent interactions.
   image:
     src: /images/hero.png
     alt: Myth Engine

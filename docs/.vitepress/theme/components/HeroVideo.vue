@@ -3,9 +3,10 @@ import { withBase } from 'vitepress'
 
 // Transparent-background assets rendered offline by the `hero_capture`
 // example (see scripts/build-hero-video.ps1). The WebM carries a real alpha
-// channel (VP9) so it blends into both the light and dark themes; the PNG
-// poster is the universal fallback (e.g. Safari, which ignores VP9 alpha).
-const videoSrc = withBase('/media/demo.webm')
+// channel (VP9) so it blends into both the light and dark themes; 
+// Safari does not support VP9 alpha, so the MOV is a fallback for that and similar platforms.
+const videoSrcWebm = withBase('/media/demo.webm')
+const videoSrcMov = withBase('/media/demo.mov')
 const poster = withBase('/images/hero.png')
 </script>
 
@@ -14,14 +15,16 @@ const poster = withBase('/images/hero.png')
     <div class="hero-video__glow" aria-hidden="true"></div>
     <video
       class="hero-video__media"
-      :src="videoSrc"
       :poster="poster"
       autoplay
       muted
       loop
       playsinline
       preload="metadata"
-    ></video>
+    >
+      <source :src="videoSrcMov" type='video/mp4; codecs="hvc1"'>
+      <source :src="videoSrcWebm" type="video/webm">
+  </video>
   </div>
 </template>
 

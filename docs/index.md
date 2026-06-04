@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Myth Engine"
-  text: "构建AI时代的渲染引擎"
-  tagline: 跨平台现代图形架构，专为下一代实时 3D 交互设计
+  text: "Rust 原生的下一代渲染引擎"
+  tagline: 轻量且跨平台，为实时 3D 与智能交互提供纯粹动力。
   image:
     src: /images/hero.png
     alt: Myth Engine

@@ -66,6 +66,7 @@ impl AppHandler for HttpGltfExample {
 
         scene.active_camera = Some(cam_node_id);
 
+        // let url = format!("{}Sponza/glTF/Sponza.gltf", ASSET_PATH);
         let url = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/refs/heads/main/Models/Sponza/glTF/Sponza.gltf";
         println!("Loading glTF model from network...");
         let model_prefab = engine.assets.load_gltf(url);
