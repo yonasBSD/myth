@@ -165,7 +165,7 @@ impl App {
     pub fn run<H: AppHandler>(self) -> myth_core::Result<()> {
         let event_loop = EventLoop::new()
             .map_err(|e| Error::Platform(PlatformError::EventLoop(e.to_string())))?;
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(ControlFlow::Wait);
 
         let mut runner = AppRunner::<H>::new(
             self.title,
@@ -188,7 +188,7 @@ impl App {
 
         let event_loop = EventLoop::new()
             .map_err(|e| Error::Platform(PlatformError::EventLoop(e.to_string())))?;
-        event_loop.set_control_flow(ControlFlow::Poll);
+        event_loop.set_control_flow(ControlFlow::Wait);
 
         let runner = AppRunner::<H>::new(
             self.title,
