@@ -572,6 +572,8 @@ $$ endif
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let ocean = textureSample(t_ocean, s_ocean, in.uv).rgb;
+
     $$ if OCEAN_COMPOSITE_RESOLVE is defined
     let size = vec2<i32>(textureDimensions(t_scene_depth));
     let pixel = clamp(vec2<i32>(in.uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
@@ -582,7 +584,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     $$ endif
 
-    let ocean = textureSample(t_ocean, s_ocean, in.uv).rgb;
     return vec4<f32>(ocean, 1.0);
 }
 "#;
