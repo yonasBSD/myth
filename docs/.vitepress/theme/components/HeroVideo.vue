@@ -34,6 +34,7 @@ const poster = withBase('/images/hero.png')
   width: 100%;
   aspect-ratio: 1 / 1;
   margin: 0 auto;
+  background: transparent;
 }
 
 /* The media has a transparent background, so no frame/shadow/fill — it must

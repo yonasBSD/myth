@@ -415,33 +415,6 @@ fn build_logical_buffers(gltf: &gltf::Gltf, raw_buffers: &[Vec<u8>]) -> Result<V
     Ok(logical)
 }
 
-/// Pads vertex data from an arbitrary stride to a 4-byte-aligned stride.
-///
-/// WebGPU requires `array_stride` to be a multiple of 4. When the source data has
-/// a non-aligned stride (e.g. `vec3<i16>` = 6 bytes), this function inserts zero
-/// padding bytes after each vertex element to reach the next multiple of 4.
-fn pad_to_4_byte_alignment(raw: &[u8], count: usize, src_stride: usize) -> Vec<u8> {
-    let dst_stride = (src_stride + 3) & !3;
-    if dst_stride == src_stride {
-        return raw.to_vec();
-    }
-
-    let mut out = vec![0u8; count * dst_stride];
-    for i in 0..count {
-        let src_start = i * src_stride;
-        let dst_start = i * dst_stride;
-
-        let remaining_bytes = raw.len().saturating_sub(src_start);
-        if remaining_bytes == 0 {
-            break;
-        }
-
-        let copy_len = src_stride.min(raw.len() - src_start);
-        out[dst_start..dst_start + copy_len].copy_from_slice(&raw[src_start..src_start + copy_len]);
-    }
-    out
-}
-
 /// Maps a glTF accessor's component type and dimension to the best matching `VertexFormat`.
 ///
 /// For quantized data (`KHR_mesh_quantization` / `EXT_meshopt_compression`), returns
@@ -518,43 +491,54 @@ fn extract_raw_attribute(
     let buffer_idx = view.buffer().index();
     let stride = effective_stride(accessor);
     let count = accessor.count();
-
     let base_offset = view.offset() + accessor.offset();
-    let total_len = if count > 0 {
-        (count - 1) * stride + accessor.size()
-    } else {
-        0
-    };
 
     let buf = logical_buffers.get(buffer_idx)?;
-    let end = base_offset + total_len;
-    if end > buf.len() {
-        log::error!(
-            "Accessor byte range {}..{} exceeds buffer[{}] length {}",
-            base_offset,
-            end,
-            buffer_idx,
-            buf.len()
-        );
-        return None;
-    }
 
-    let raw = &buf[base_offset..end];
     let format = map_quantized_vertex_format(
         accessor.data_type(),
         accessor.dimensions(),
         accessor.normalized(),
     );
 
-    // Ensure 4-byte aligned stride for WebGPU.
-    let aligned_stride = (stride + 3) & !3;
-    let bytes = if aligned_stride == stride {
-        raw.to_vec()
-    } else {
-        pad_to_4_byte_alignment(raw, count, stride)
+    let data_size = accessor.size();
+    let dst_stride = (data_size + 3) & !3;
+
+    let w_bytes = match (
+        accessor.data_type(),
+        accessor.dimensions(),
+        accessor.normalized(),
+    ) {
+        (DataType::I8, Dimensions::Vec3, true) => vec![0x7F],
+        (DataType::U8, Dimensions::Vec3, true) => vec![0xFF],
+        (DataType::I8 | DataType::U8, Dimensions::Vec3, false) => vec![0x01],
+        (DataType::I16, Dimensions::Vec3, true) => vec![0xFF, 0x7F], // Little endian: 32767
+        (DataType::U16, Dimensions::Vec3, true) => vec![0xFF, 0xFF], // Little endian: 65535
+        (DataType::I16 | DataType::U16, Dimensions::Vec3, false) => vec![0x01, 0x00],
+        _ => vec![0u8; dst_stride.saturating_sub(data_size)],
     };
 
-    Some((bytes, aligned_stride, format))
+    let mut out = vec![0u8; count * dst_stride];
+    for i in 0..count {
+        let src_start = base_offset + i * stride;
+        let dst_start = i * dst_stride;
+
+        if src_start + data_size > buf.len() {
+            log::error!("Accessor byte range exceeds buffer length");
+            return None;
+        }
+
+        // Extract the precise data, discarding any potential interleaving "garbage" bytes.
+        out[dst_start..dst_start + data_size]
+            .copy_from_slice(&buf[src_start..src_start + data_size]);
+
+        let pad_len = dst_stride - data_size;
+        if pad_len > 0 && pad_len == w_bytes.len() {
+            out[dst_start + data_size..dst_start + dst_stride].copy_from_slice(&w_bytes);
+        }
+    }
+
+    Some((out, dst_stride, format))
 }
 
 /// Parses the `min`/`max` JSON values from a glTF accessor into a `Vec3`.
@@ -576,8 +560,31 @@ fn parse_accessor_bounds(accessor: &gltf::Accessor) -> Option<(Vec3, Vec3)> {
         }
     };
 
-    let min = parse_vec3(accessor.min()?)?;
-    let max = parse_vec3(accessor.max()?)?;
+    let mut min = parse_vec3(accessor.min()?)?;
+    let mut max = parse_vec3(accessor.max()?)?;
+
+    if accessor.normalized() {
+        let scale = match accessor.data_type() {
+            DataType::I8 => 1.0 / 127.0,
+            DataType::U8 => 1.0 / 255.0,
+            DataType::I16 => 1.0 / 32767.0,
+            DataType::U16 => 1.0 / 65535.0,
+            _ => 1.0,
+        };
+
+        let apply_norm = |v: f32| -> f32 {
+            let norm = v * scale;
+            if matches!(accessor.data_type(), DataType::I8 | DataType::I16) {
+                norm.max(-1.0)
+            } else {
+                norm
+            }
+        };
+
+        min = Vec3::new(apply_norm(min.x), apply_norm(min.y), apply_norm(min.z));
+        max = Vec3::new(apply_norm(max.x), apply_norm(max.y), apply_norm(max.z));
+    }
+
     Some((min, max))
 }
 
