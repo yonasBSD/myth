@@ -20,241 +20,36 @@
 
 ---
 
-> 📢 当前状态：Beta 阶段
->
-> Myth 已进入 Beta 阶段。核心架构已趋于稳定，可用于实际项目。API 仍在演进过程中，可能会有不兼容的变更。
-
 ## 简介
 
-**Myth** 是一款对开发者友好的、使用 **Rust** 编写的高性能 3D 渲染引擎。 
+**Myth** 是一个基于 Rust 和 wgpu 构建的高性能、跨平台 3D 渲染引擎。它旨在提供极致的渲染表现与极简的 API 设计，为开发者带来流畅的编程体验。
 
-它深受 **Three.js** 简洁且符合直觉的 API 设计启发，并基于现代图形 API **wgpu** 构建。Myth 旨在弥合底层图形 API 与高层游戏引擎之间的鸿沟。
+> 获取完整的快速入门教程、API 指南、进阶渲染特性以及底层架构设计，请访问 **[Myth Engine 主页](https://panxinmiao.github.io/myth/)**。
 
-## 为什么选择 Myth？
-
-wgpu 的功能极其强大 —— 但即使是绘制一个简单的场景，也需要编写数百行样板代码。  
-
-而当你仅仅需要一个精简的渲染库时，Bevy 和 Godot 又显得过于笨重。  
-
-Myth 通过引入**严格的基于 SSA（静态单赋值）的渲染图 (RenderGraph)** 解决了这个问题，它将渲染过程视为一个编译器问题：
-- 自动拓扑排序 + 死阶段消除 (Dead-pass elimination)
-- 激进的临时内存别名复用 (完全无需手动管理屏障)
-- 复杂度为 O(n) 的每帧重建，且零内存分配
-
-**一套代码，全平台运行**：  
-原生 (Windows, macOS, Linux, iOS, Android) + WebGPU/WASM + Python 绑定。
+> 无需配置环境，**[直接在浏览器中体验 Myth 引擎的渲染能力](https://panxinmiao.github.io/myth/gallery/)**。
 
 
 ## 核心特性
 
-* **核心架构与平台**
-    * **真正的跨平台，一套代码**：原生 (Windows, macOS, Linux, iOS, Android) + WebGPU/WASM + Python 绑定。
-    * **现代后端**：基于 **wgpu** 构建，全面支持 Vulkan、Metal、DX12 和 WebGPU。
-    * **基于 SSA 的渲染图**：声明式、由编译器驱动的渲染架构。你只需声明拓扑需求，引擎会处理剩下的所有事情：
-        * **自动同步**：零手动内存屏障或布局转换。
-        * **激进的内存别名**：在不同的逻辑阶段之间，完美复用高分辨率的临时物理纹理。
-        * **死阶段消除**：自动剔除无用的渲染工作负载。
-        * **零分配的每帧重建**：每帧都会对整个 DAG（有向无环图）进行评估与编译。
-    * **无头与离线渲染**
-        * **服务端就绪**：无需窗口表面 (Window Surface) 即可全功能运行。非常适合 CI/CD 自动化测试、云端渲染和离线视频生成。
-        * **高吞吐量回读流**：内置基于环形缓冲区 (Ring-buffer) 架构的非阻塞、异步 GPU 到 CPU 像素回读管线，并带有自动背压 (Back-pressure) 与防 OOM 熔断机制。
+* **一处编写，多端运行：** 借助 `wgpu` 的强大能力，Myth 一次编码即可原生运行于 Windows, macOS, Linux，并无缝编译为 WASM 运行于现代浏览器 (WebGPU)。
+* **次世代图形管线：**
+    * 完整支持基于物理的渲染 (PBR)。
+    * 高效的前向集群光照 (Clustered Forward Lighting)。
+    * 包含屏幕空间全局光照 (SSGI)、屏幕空间反射 (SSR) 与 SSAO 等高级后处理矩阵。
+    * **内置 3D 高斯溅射 (3DGS) 渲染支持**，实现高保真的前沿视图合成。
+* **现代渲染图架构：** 核心采用严格的 SSA（静态单赋值）[渲染图架构](https://panxinmiao.github.io/myth/architecture/render-graph)，自动处理复杂的显存复用、管线屏障 (Barriers) 与依赖同步。
+* **丰富的生产力生态：** 完整的 glTF 支持，提供异步资产加载，并原生支持 Python 绑定，满足多种开发流需求。
 
-* **高级渲染与光照**
-    * **基于物理的材质 (PBR)**：强大的 PBR 管线，支持清漆 (Clearcoat)、彩虹色 (Iridescence)、透射 (Transmission)、光泽 (Sheen) 和各向异性 (Anisotropy)。
-    * **集群前向光照**：通过 Compute Shader 为前向渲染通道预分配 cluster 光源列表，适用于高密度动态点光/聚光灯场景。
-    * **基于图像的光照 (IBL)** + **动态阴影 (CSM)**。
-    * **屏幕空间环境光遮蔽 (SSAO) / 屏幕空间反射 (SSR) / 屏幕空间全局光照 (SSGI) / 屏幕空间次表面散射 (SSSS) / 天空盒 (Skybox)**。
-    * **程序化天空系统**：基于物理的散射模型 (Hillaire 2020)，支持程序化天体（太阳、月亮和星空）。内置昼夜循环组件，自动同步太阳、月亮和星空的轨迹。
-
-* **后期处理与特效**
-    * **HDR 管线** + **泛光 (Bloom)** + **色彩分级 (Color Grading)** + **TAA / FXAA / MSAA**。
-
-* **3D 高斯溅射 (3D Gaussian Splatting)**
-    * **混合式 3D 高斯溅射**：GPU 驱动的 3DGS 路径与 PBR RenderGraph 完全集成。
-    * **高性能**：自定义 GPU 基数排序和间接绘制，实现极致的渲染吞吐量。
-    * **物理正确的合成**：准确处理 sRGB/线性颜色空间，与不透明几何体和后期处理（Bloom、Tone Mapping）实现无瑕疵的混合。
-
-* **资产与工具链**
-    * **完整支持 glTF 2.0**（PBR、动画、变形目标）。
-    * **异步资产系统** + **内嵌 egui 检查器**。
-
-## 引擎底层：渲染图编译器 (The Graph Compiler)
-
-Myth 使用了严格的基于 SSA 的 RenderGraph，因此引擎能够：
-
-* 自动调度渲染阶段（拓扑排序）
-* 消除未使用的渲染工作（死渲染过程消除）
-* 激进地复用内存（瞬时别名复用）
-
-所有这些都无需手动设置内存屏障。
-
-深入了解：[构建基于 SSA 的声明式渲染图](https://panxinmiao.github.io/myth/blog/render-graph-design)
-
-以下是 Myth 引擎在渲染复杂帧时，自动生成的 RenderGraph 的真实拓扑转储：
-
-<details>
-<summary><b>点击展开 RenderGraph 拓扑图</b></summary>
-
-```mermaid
-flowchart TD
-    classDef alive fill:#2b3c5a,stroke:#4a6f9f,stroke-width:2px,color:#fff,rx:5,ry:5;
-    classDef dead fill:#222,stroke:#555,stroke-width:2px,stroke-dasharray: 5 5,color:#777,rx:5,ry:5;
-    classDef external_out fill:#5a2b3c,stroke:#9f4a6f,stroke-width:2px,color:#fff;
-    classDef external_in fill:#3c5a2b,stroke:#6f9f4a,stroke-width:2px,color:#fff;
-    P29(["UI_Pass"]):::alive
-    subgraph Shadow ["Shadow"]
-        direction TB
-        P0(["Shadow_Pass"]):::alive
-    end
-    style Shadow fill:#ec489914,stroke:#ec4899,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-    subgraph Scene ["Scene"]
-        direction TB
-        P1(["Pre_Pass"]):::alive
-        P4(["Opaque_Pass"]):::alive
-        P7(["Skybox_Pass"]):::alive
-        P14(["Transparent_Pass"]):::alive
-        subgraph SSAO_System ["SSAO_System"]
-            direction TB
-            P2(["SSAO_Raw"]):::alive
-            P3(["SSAO_Blur"]):::alive
-        end
-        style SSAO_System fill:#3b82f614,stroke:#3b82f6,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-        subgraph SSSS_System ["SSSS_System"]
-            direction TB
-            P5(["SSSS_Blur_H"]):::alive
-            P6(["SSSS_Blur_V"]):::alive
-        end
-        style SSSS_System fill:#10b98114,stroke:#10b981,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-        subgraph TAA_System ["TAA_System"]
-            direction TB
-            P8(["TAA_Resolve"]):::alive
-            P9(["TAA_Save_History_Color"]):::alive
-            P10(["TAA_Save_History_Depth"]):::alive
-            P11(["CAS_Pass"]):::alive
-        end
-        style TAA_System fill:#8b5cf614,stroke:#8b5cf6,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-        subgraph Transmission_Map ["Transmission_Map"]
-            direction TB
-            P12(["Copy_Texture_Pass"]):::alive
-            P13(["Generate_Mipmap_Pass"]):::alive
-        end
-        style Transmission_Map fill:#ec489914,stroke:#ec4899,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-    end
-    style Scene fill:#ef444414,stroke:#ef4444,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-    subgraph PostProcess ["PostProcess"]
-        direction TB
-        P27(["ToneMap_Pass"]):::alive
-        P28(["FXAA_Pass"]):::alive
-        subgraph Bloom_System ["Bloom_System"]
-            direction TB
-            P15(["Bloom_Extract"]):::alive
-            P16(["Bloom_Downsample_1"]):::alive
-            P17(["Bloom_Downsample_2"]):::alive
-            P18(["Bloom_Downsample_3"]):::alive
-            P19(["Bloom_Downsample_4"]):::alive
-            P20(["Bloom_Downsample_5"]):::alive
-            P21(["Bloom_Upsample_4"]):::alive
-            P22(["Bloom_Upsample_3"]):::alive
-            P23(["Bloom_Upsample_2"]):::alive
-            P24(["Bloom_Upsample_1"]):::alive
-            P25(["Bloom_Upsample_0"]):::alive
-            P26(["Bloom_Composite"]):::alive
-        end
-        style Bloom_System fill:#06b6d414,stroke:#06b6d4,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-    end
-    style PostProcess fill:#8b5cf614,stroke:#8b5cf6,stroke-width:2px,stroke-dasharray: 5 5,color:#fff,rx:10,ry:10
-
-    %% --- Data Flow (Edges) ---
-    IN_13[\"TAA_History_Color_Read"\]:::external_in
-    IN_14[\"TAA_History_Depth_Read"\]:::external_in
-    OUT_16[/"TAA_History_Color_Write"/]:::external_out
-    OUT_17[/"TAA_History_Depth_Write"/]:::external_out
-    OUT_35[/"Surface_With_UI"/]:::external_out
-    P0 -->|"Shadow_Array_Map"| P4;
-    P0 -->|"Shadow_Array_Map"| P14;
-    P1 -->|"Scene_Depth"| P2;
-    P1 -->|"Scene_Depth"| P3;
-    P1 -->|"Scene_Depth"| P4;
-    P1 -->|"Scene_Depth"| P5;
-    P1 -->|"Scene_Depth"| P6;
-    P1 -->|"Scene_Depth"| P7;
-    P1 -->|"Scene_Depth"| P8;
-    P1 -->|"Scene_Depth"| P10;
-    P1 -->|"Scene_Depth"| P14;
-    P1 -->|"Scene_Normals"| P2;
-    P1 -->|"Scene_Normals"| P3;
-    P1 -->|"Scene_Normals"| P5;
-    P1 -->|"Scene_Normals"| P6;
-    P1 -->|"Feature_ID"| P5;
-    P1 -->|"Feature_ID"| P6;
-    P1 -->|"Velocity_Buffer"| P8;
-    P2 -->|"SSAO_Raw_Tex"| P3;
-    P3 -->|"SSAO_Output"| P4;
-    P3 -->|"SSAO_Output"| P14;
-    P4 -->|"Scene_Color_HDR"| P5;
-    P4 -->|"Scene_Color_HDR"| P6;
-    P4 -->|"Specular_MRT"| P6;
-    P5 -->|"SSSS_Temp"| P6;
-    P6 ==>|"Scene_Color_SSSS"| P7;
-    P7 ==>|"Scene_Color_Skybox"| P8;
-    IN_13 -.-> P8;
-    IN_14 -.-> P8;
-    P8 -->|"TAA_Resolved"| P9;
-    P8 -->|"TAA_Resolved"| P11;
-    P9 --> OUT_16;
-    P10 --> OUT_17;
-    P11 -->|"CAS_Output"| P12;
-    P11 -->|"CAS_Output"| P14;
-    P12 -->|"Transmission_Tex"| P13;
-    P13 ==>|"Transmission_Tex_Mipmapped"| P14;
-    P14 ==>|"Scene_Color_Transparent"| P15;
-    P14 ==>|"Scene_Color_Transparent"| P26;
-    P15 -->|"Bloom_Mip_0"| P16;
-    P15 -->|"Bloom_Mip_0"| P25;
-    P16 -->|"Bloom_Mip_1"| P17;
-    P16 -->|"Bloom_Mip_1"| P24;
-    P17 -->|"Bloom_Mip_2"| P18;
-    P17 -->|"Bloom_Mip_2"| P23;
-    P18 -->|"Bloom_Mip_3"| P19;
-    P18 -->|"Bloom_Mip_3"| P22;
-    P19 -->|"Bloom_Mip_4"| P20;
-    P19 -->|"Bloom_Mip_4"| P21;
-    P20 -->|"Bloom_Mip_5"| P21;
-    P21 ==>|"Bloom_Up_4"| P22;
-    P22 ==>|"Bloom_Up_3"| P23;
-    P23 ==>|"Bloom_Up_2"| P24;
-    P24 ==>|"Bloom_Up_1"| P25;
-    P25 ==>|"Bloom_Up_0"| P26;
-    P26 -->|"Scene_Color_Bloom"| P27;
-    P27 -->|"LDR_Intermediate"| P28;
-    P28 -->|"Surface_View"| P29;
-    P29 --> OUT_35;
-```
-
-*(* **图例：** *单箭头 `-->` 表示逻辑数据依赖；双箭头 `==>` 表示物理内存别名/原地复用)*
-
-</details>
-
-## 在线独立展示应用
-
-直接在你的浏览器中体验引擎（WebGPU 需要 Chrome/Edge 113+）：
-
-  - **[在线体验](https://panxinmiao.github.io/myth/gallery/)**：浏览全部示例与演示应用。
-  - **[Showcase](https://panxinmiao.github.io/myth/gallery/showcase/)**：高性能渲染展示。
-  - **[glTF 查看器与检查器](https://panxinmiao.github.io/myth/gallery/gltf_viewer/)**：拖拽你自己的 .glb 文件进行查看。
-  - **[glTF 示例模型](https://panxinmiao.github.io/myth/gallery/gltf_shower/)**：浏览多个使用 Myth 渲染的 Khronos 官方 glTF 资产。
+> 查看完整的特性列表，请访问文档的 [Features 页面](https://panxinmiao.github.io/myth/guide/features)。
 
 ## 快速开始
 
-将 `myth-engine` 添加到你的 `Cargo.toml` 中：
+### 安装依赖
 
-```toml
-[dependencies]
-myth-engine = "0.2.0"
+在你的 Rust 项目中，通过 Cargo 引入 Myth：
 
-# 或者从 GitHub 获取最新版本
-# myth-engine = { git = "https://github.com/panxinmiao/myth", branch = "main" }
-
+```bash
+cargo add myth-engine
 ```
 
 ### "Hello World"
@@ -302,24 +97,18 @@ fn main() -> myth::Result<()> {
 }
 ```
 
-### 运行示例
+### 运行环境与示例
 
-克隆仓库并直接运行示例代码：
+Myth 提供了丰富的 Example 供开发者参考。无论你是想在本地 Native 环境运行，还是编译到 Web 端，或者使用 Python 绑定，我们都准备了详尽的指南。
 
-```bash
-# 运行示例（例如 Earth 演示）
-cargo run --example earth --release
-
-# 运行独立应用（例如 glTF 查看器）
-cargo run -p gltf_viewer --release
-```
-构建并运行Web/WASM示例，请参阅 [Myth xtask 指南](xtask/README_zh.md)
+> **[查阅完整的 Quick Start 指南](https://panxinmiao.github.io/myth/guide/quick-start)** 获取详细的构建说明。
 
 ### Python 绑定
 
 Myth 引擎还提供了 Python 绑定，用于快速原型设计和科学可视化。
-有关安装方法和示例，请参阅 [Python Bindings](https://github.com/panxinmiao/myth/tree/main/bindings/python)。
+有关安装方法和示例，请参阅 [Python Bindings](https://panxinmiao.github.io/myth/guide/python)。
 
-## 开源协议
+
+## 开源协议 (License)
 
 本项目采用 **MIT License** 或 **Apache-2.0 License** 双重授权。
