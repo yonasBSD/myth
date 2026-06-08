@@ -120,6 +120,8 @@ pub struct GraphStorage {
     compile_ready_heap: BinaryHeap<ReadyNode>,
     compile_dependency_graph: Vec<SmallVec<[usize; 8]>>,
 
+    compile_max_ext_indices: Vec<usize>,
+
     /// Group-name stack for logical subgraph tagging.
     #[cfg(feature = "rdg_inspector")]
     current_group_stack: Vec<&'static str>,
@@ -146,6 +148,7 @@ impl GraphStorage {
             compile_in_degrees: Vec::new(),
             compile_ready_heap: BinaryHeap::new(),
             compile_dependency_graph: Vec::new(),
+            compile_max_ext_indices: Vec::new(),
             #[cfg(feature = "rdg_inspector")]
             current_group_stack: Vec::new(),
             #[cfg(debug_assertions)]
@@ -538,7 +541,7 @@ impl<'a> RenderGraph<'a> {
 
     /// Creates a versioned alias of `input_id` that shares the same physical
     /// GPU memory.
-    pub fn create_alias_typed<T: GraphResourceType>(
+    pub fn create_alias<T: GraphResourceType>(
         &mut self,
         input_id: ResourceNodeId<T>,
         name: &'static str,
@@ -560,9 +563,9 @@ impl<'a> RenderGraph<'a> {
         ResourceNodeId::from_erased(new_id)
     }
 
-    pub fn create_alias(&mut self, input_id: TextureNodeId, name: &'static str) -> TextureNodeId {
-        self.create_alias_typed(input_id, name)
-    }
+    // pub fn create_alias(&mut self, input_id: TextureNodeId, name: &'static str) -> TextureNodeId {
+    //     self.create_alias_typed(input_id, name)
+    // }
 
     /// Chases the `alias_of` chain to find the root (non-alias) resource.
     #[inline]
@@ -670,18 +673,40 @@ impl<'a> RenderGraph<'a> {
     fn cull_dead_passes(&mut self) {
         self.storage.compile_stack.clear();
 
-        for (i, pass) in self.storage.passes.iter_mut().enumerate() {
+        let res_count = self.storage.resources.len();
+
+        self.storage.compile_max_ext_indices.clear();
+        self.storage.compile_max_ext_indices.resize(res_count, 0);
+
+        for i in 0..res_count {
+            if self.storage.resources[i].is_external {
+                let root_idx = self.resolve_alias_root(i);
+                self.storage.compile_max_ext_indices[root_idx] = i;
+            }
+        }
+
+        let storage = &mut self.storage;
+
+        for (i, pass) in storage.passes.iter_mut().enumerate() {
             pass.reference_count = 0;
             if pass.has_side_effect {
-                self.storage.compile_stack.push(i);
+                storage.compile_stack.push(i);
                 pass.reference_count += 1;
                 continue;
             }
             for write_id in &pass.writes {
-                if self.storage.resources[write_id.index() as usize].is_external {
-                    self.storage.compile_stack.push(i);
-                    pass.reference_count += 1;
-                    break;
+                let write_idx = write_id.index() as usize;
+                let res = &storage.resources[write_idx];
+            
+                if res.is_external {
+                    let root_idx = res.alias_of.map_or(write_idx, |id| id.index() as usize);
+
+                    if write_idx == storage.compile_max_ext_indices[root_idx] {
+                        storage.compile_stack.push(i);
+                        pass.reference_count += 1;
+                        break;
+                    }
+
                 }
             }
         }

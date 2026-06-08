@@ -135,7 +135,17 @@ impl PassBuilder<'_, '_> {
         new_name: &'static str,
     ) -> ResourceNodeId<T> {
         self.read(input_id);
-        let new_id = self.graph.create_alias_typed(input_id, new_name);
+        let new_id = self.graph.create_alias(input_id, new_name);
+        self.write(new_id)
+    }
+
+    #[must_use = "The returned resource handle must be used for downstream wiring"]
+    pub fn replace<T: GraphResourceType>(
+        &mut self,
+        input_id: ResourceNodeId<T>,
+        new_name: &'static str,
+    ) -> ResourceNodeId<T> {
+        let new_id = self.graph.create_alias(input_id, new_name);
         self.write(new_id)
     }
 
@@ -148,6 +158,15 @@ impl PassBuilder<'_, '_> {
         self.mutate(input_id, new_name)
     }
 
+    #[must_use = "The returned TextureNodeId must be used for downstream wiring"]
+    pub fn replace_texture(
+        &mut self,
+        input_id: TextureNodeId,
+        new_name: &'static str,
+    ) -> TextureNodeId {
+        self.replace(input_id, new_name)
+    }
+
     #[must_use = "The returned BufferNodeId must be used for downstream wiring"]
     pub fn mutate_buffer(
         &mut self,
@@ -155,6 +174,15 @@ impl PassBuilder<'_, '_> {
         new_name: &'static str,
     ) -> BufferNodeId {
         self.mutate(input_id, new_name)
+    }
+
+    #[must_use = "The returned BufferNodeId must be used for downstream wiring"]
+    pub fn replace_buffer(
+        &mut self,
+        input_id: BufferNodeId,
+        new_name: &'static str,
+    ) -> BufferNodeId {
+        self.replace(input_id, new_name)
     }
 
     pub fn mark_side_effect(&mut self) {
