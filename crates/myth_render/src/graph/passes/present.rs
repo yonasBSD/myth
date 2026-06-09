@@ -1,9 +1,27 @@
-//! FXAA Feature + Ephemeral PassNode
+//! Present Feature + Ephemeral PassNode
 //!
-//! - **`FxaaFeature`** (long-lived): owns pipeline cache, bind group layout.
-//!   `extract_and_prepare()` compiles pipelines for the target quality/format.
-//! - **`FxaaPassNode`** (ephemeral per-frame): carries lightweight IDs and
-//!   a transient bind-group slot.  Created by `FxaaFeature::add_to_graph()`.
+//! Provides the single, unified entry point through which any pipeline
+//! configuration delivers its final image to the swap-chain surface (or the
+//! headless render target).  Every post-process stage renders into a transient
+//! LDR target; the Composer then appends one `PresentPass` that forwards that
+//! target onto the external surface.
+//!
+//! # Why a dedicated present stage?
+//!
+//! Centralising surface ownership decouples the Composer from the question of
+//! *which* pass happens to run last (ToneMapping, FXAA, DebugView, …).  Passes
+//! no longer need to know whether they are the final stage — they always write
+//! an intermediate, and `PresentPass` is the sole writer of the surface.
+//!
+//! # Zero runtime cost
+//!
+//! The pass is flagged [`PassBuilder::mark_pure_forwarding`].  Because the
+//! intermediate source always shares the surface's format and size, the graph
+//! compiler folds the pass away during
+//! [`RenderGraph::fold_simple_passes`](crate::graph::core::RenderGraph) —
+//! rewiring the upstream producer to target the surface directly.  The blit
+//! pipeline below therefore acts purely as a robust fallback for the rare case
+//! where folding is impossible (e.g. a format mismatch).
 
 use crate::core::gpu::{CommonSampler, Tracked};
 use crate::graph::composer::GraphBuilderContext;
@@ -13,55 +31,54 @@ use crate::graph::core::{
 use crate::pipeline::{
     ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
-use myth_resources::FxaaQuality;
 use wgpu::CommandEncoder;
 
-type FxaaL1CacheKey = (FxaaQuality, wgpu::TextureFormat);
+/// L1 cache key: the present pipeline depends only on the surface format.
+type PresentL1CacheKey = wgpu::TextureFormat;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Feature (long-lived, stored in RenderFeatures)
+// Feature (long-lived, stored in RendererState)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-pub struct FxaaFeature {
-    /// Target FXAA quality — set by the caller before extract_and_prepare.
-    pub target_quality: FxaaQuality,
-
-    // ─── Persistent Cache ──────────────────────────────────────────
-    l1_cache_key: Option<FxaaL1CacheKey>,
+/// Long-lived present feature — owns the fullscreen blit pipeline and bind
+/// group layout, recompiling only when the surface format changes.
+pub struct PresentFeature {
+    l1_cache_key: Option<PresentL1CacheKey>,
     pipeline_id: Option<RenderPipelineId>,
     bind_group_layout: Option<Tracked<wgpu::BindGroupLayout>>,
 }
 
-impl Default for FxaaFeature {
+impl Default for PresentFeature {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FxaaFeature {
+impl PresentFeature {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            target_quality: FxaaQuality::High,
             l1_cache_key: None,
             pipeline_id: None,
             bind_group_layout: None,
         }
     }
 
-    /// Pre-RDG resource preparation: create layout, compile pipeline.
+    /// Pre-RDG resource preparation: create the bind group layout and compile
+    /// the blit pipeline for the active surface format.
     pub fn extract_and_prepare(
         &mut self,
         ctx: &mut ExtractContext,
-        output_format: wgpu::TextureFormat,
+        surface_format: wgpu::TextureFormat,
     ) {
         // ── 1. Lazy-create BindGroupLayout (once) ──────────────────
         if self.bind_group_layout.is_none() {
             let layout = ctx
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("FXAA BindGroup Layout"),
+                    label: Some("Present BindGroup Layout"),
                     entries: &[
+                        // binding 0: LDR source texture
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
                             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -72,6 +89,7 @@ impl FxaaFeature {
                             },
                             count: None,
                         },
+                        // binding 1: sampler
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -83,23 +101,16 @@ impl FxaaFeature {
             self.bind_group_layout = Some(Tracked::new(layout));
         }
 
-        // ── 2. L1 Cache: compile pipeline on quality/format change ─
-        let current_key = (self.target_quality, output_format);
-
-        if self.l1_cache_key != Some(current_key) {
-            let mut options = ShaderCompilationOptions::default();
-            if self.target_quality != FxaaQuality::Medium {
-                options.add_define(self.target_quality.define_key(), "1");
-            }
-
+        // ── 2. L1 Cache: recompile pipeline on surface-format change ──
+        if self.l1_cache_key != Some(surface_format) {
             let (shader_module, shader_hash) = ctx.shader_manager.get_or_compile(
                 ctx.device,
-                ShaderSource::File("entry/post_process/fxaa"),
-                &options,
+                ShaderSource::File("entry/utility/blit.wgsl"),
+                &ShaderCompilationOptions::default(),
             );
 
             let color_target = ColorTargetKey::from(wgpu::ColorTargetState {
-                format: output_format,
+                format: surface_format,
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
             });
@@ -113,7 +124,7 @@ impl FxaaFeature {
             let pipeline_layout =
                 ctx.device
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("FXAA Pipeline Layout"),
+                        label: Some("Present Pipeline Layout"),
                         bind_group_layouts: &[self.bind_group_layout.as_deref()],
                         immediate_size: 0,
                     });
@@ -123,40 +134,43 @@ impl FxaaFeature {
                 shader_module,
                 &pipeline_layout,
                 &key,
-                &format!("FXAA Pipeline {:?}", self.target_quality),
+                "Present Pipeline",
             );
             self.pipeline_id = Some(id);
-            self.l1_cache_key = Some(current_key);
+            self.l1_cache_key = Some(surface_format);
         }
     }
 
-    /// Build the ephemeral pass node and insert it into the graph.
+    /// Append the unified present pass.
     ///
-    /// Accepts the LDR input and the target surface, performs an SSA relay
-    /// on `target_surface` (via `write_texture`), and returns the
-    /// updated surface handle. This enforces a pure dataflow chain where
-    /// every Feature explicitly produces a new resource version.
+    /// Reads `source` (the final transient LDR target) and writes a versioned
+    /// alias of `target_surface` (the external swap-chain / headless view).  The
+    /// pass is marked pure-forwarding so the graph compiler can collapse it into
+    /// the upstream producer.  Returns the surface-alias handle for downstream
+    /// wiring (e.g. UI overlay hooks), which remains valid whether or not the
+    /// pass is folded away.
     pub fn add_to_graph<'a>(
         &'a self,
         ctx: &mut GraphBuilderContext<'a, '_>,
-        input_ldr: TextureNodeId,
-        // target_surface: TextureNodeId,
+        source: TextureNodeId,
+        target_surface: TextureNodeId,
     ) -> TextureNodeId {
-        let pipeline_id = self.pipeline_id.expect("FxaaFeature not prepared");
+        let pipeline_id = self.pipeline_id.expect("PresentFeature not prepared");
         let pipeline = ctx.pipeline_cache.get_render_pipeline(pipeline_id);
         let layout = self.bind_group_layout.as_ref().unwrap();
 
-        ctx.graph.add_pass("FXAA_Pass", |builder| {
-            builder.read_texture(input_ldr);
-            // let output = builder.write_texture(target_surface);
+        ctx.graph.add_pass("Present_Pass", |builder| {
+            builder.read_texture(source);
+            // Write a versioned alias of the surface rather than the surface
+            // itself.  This gives the graph compiler a distinct "latest
+            // version" it can reroute the upstream producer onto when folding
+            // the pass away, while a non-folded blit still resolves the alias
+            // to the real swap-chain view.
+            let output = builder.replace_texture(target_surface, "Surface_Present");
+            builder.mark_pure_forwarding();
 
-            let out_desc = ctx
-                .frame_config
-                .create_surface_desc(wgpu::TextureUsages::TEXTURE_BINDING);
-            let output = builder.create_texture("LDR_Antialiased", out_desc);
-
-            let node = FxaaPassNode {
-                input_tex: input_ldr,
+            let node = PresentPassNode {
+                source_tex: source,
                 output_tex: output,
                 pipeline,
                 layout,
@@ -171,31 +185,35 @@ impl FxaaFeature {
 // PassNode (ephemeral, created per frame)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-struct FxaaPassNode<'a> {
-    input_tex: TextureNodeId,
+/// Ephemeral present pass node — zero-drop POD.
+///
+/// Only reached when compile-time folding could not eliminate the pass; in the
+/// folded fast path neither `prepare` nor `execute` runs.
+struct PresentPassNode<'a> {
+    source_tex: TextureNodeId,
     output_tex: TextureNodeId,
     pipeline: &'a wgpu::RenderPipeline,
     layout: &'a Tracked<wgpu::BindGroupLayout>,
     transient_bg: Option<&'a wgpu::BindGroup>,
 }
 
-impl<'a> PassNode<'a> for FxaaPassNode<'a> {
+impl<'a> PassNode<'a> for PresentPassNode<'a> {
     fn prepare(&mut self, ctx: &mut PrepareContext<'a>) {
         self.transient_bg = Some(
-            crate::myth_bind_group!(ctx, self.layout, Some("FXAA BindGroup"), [
-                0 => self.input_tex,
+            crate::myth_bind_group!(ctx, self.layout, Some("Present BindGroup"), [
+                0 => self.source_tex,
                 1 => CommonSampler::LinearClamp,
             ]),
         );
     }
 
     fn execute(&self, ctx: &ExecuteContext, encoder: &mut CommandEncoder) {
-        let bind_group = self.transient_bg.expect("FXAA BG not prepared!");
+        let bind_group = self.transient_bg.expect("Present BG not prepared!");
 
         let rtt = ctx.get_color_attachment(self.output_tex, RenderTargetOps::DontCare, None);
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("FXAA Pass"),
+            label: Some("Present Pass"),
             color_attachments: &[rtt],
             depth_stencil_attachment: None,
             timestamp_writes: None,

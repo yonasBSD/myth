@@ -19,9 +19,9 @@ use crate::graph::passes::GaussianSplattingFeature;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature, MsaaSyncFeature,
-    OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature, SkyboxFeature, SsaoFeature,
-    SsgiFeature, SsrFeature, SsssFeature, TaaFeature, ToneMappingFeature, TransmissionCopyFeature,
-    TransparentFeature,
+    OpaqueFeature, PrepassFeature, PresentFeature, ShadowFeature, SimpleForwardFeature,
+    SkyboxFeature, SsaoFeature, SsgiFeature, SsrFeature, SsssFeature, TaaFeature,
+    ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use myth_assets::AssetServer;
 use myth_core::Result;
@@ -117,6 +117,7 @@ struct RendererState {
     pub(crate) taa_pass: TaaFeature,
     pub(crate) cas_pass: CasFeature,
     pub(crate) tone_map_pass: ToneMappingFeature,
+    pub(crate) present_pass: PresentFeature,
     pub(crate) bloom_pass: BloomFeature,
     pub(crate) ssao_pass: SsaoFeature,
     pub(crate) hiz_pass: HiZFeature,
@@ -295,6 +296,7 @@ impl Renderer {
             taa_pass: TaaFeature::new(),
             cas_pass: CasFeature::new(),
             tone_map_pass: ToneMappingFeature::new(),
+            present_pass: PresentFeature::new(),
             bloom_pass: BloomFeature::new(),
             ssao_pass: SsaoFeature::new(),
             hiz_pass: HiZFeature::new(),
@@ -650,6 +652,13 @@ impl Renderer {
                 }
             }
 
+            // Present: unified surface blit, prepared for every render path so
+            // the Composer can always route its final image through a single
+            // surface-writing pass (folded to zero cost when possible).
+            state
+                .present_pass
+                .extract_and_prepare(&mut extract_ctx, view_format);
+
             if is_hf {
                 if let Some(taa_settins) = camera.aa_mode.taa_settings() {
                     state.taa_pass.extract_and_prepare(
@@ -823,6 +832,7 @@ impl Renderer {
             taa_pass: &mut state.taa_pass,
             cas_pass: &mut state.cas_pass,
             tone_map_pass: &mut state.tone_map_pass,
+            present_pass: &mut state.present_pass,
             bloom_pass: &mut state.bloom_pass,
             ssao_pass: &mut state.ssao_pass,
             hiz_pass: &mut state.hiz_pass,

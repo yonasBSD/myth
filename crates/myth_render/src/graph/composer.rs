@@ -67,9 +67,9 @@ use crate::graph::passes::utils::add_msaa_resolve_pass;
 use crate::graph::passes::{
     AtmosphereFeature, BloomFeature, BrdfLutFeature, CasFeature, ClusteredLightingFeature,
     ClusteredLightingInputs, EquirectToCubeFeature, FxaaFeature, HiZFeature, IblComputeFeature,
-    MsaaSyncFeature, OpaqueFeature, PrepassFeature, ShadowFeature, SimpleForwardFeature,
-    SkyboxFeature, SsaoFeature, SsgiFeature, SsrFeature, SsssFeature, TaaFeature,
-    ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
+    MsaaSyncFeature, OpaqueFeature, PrepassFeature, PresentFeature, ShadowFeature,
+    SimpleForwardFeature, SkyboxFeature, SsaoFeature, SsgiFeature, SsrFeature, SsssFeature,
+    TaaFeature, ToneMappingFeature, TransmissionCopyFeature, TransparentFeature,
 };
 use crate::pipeline::PipelineCache;
 use crate::pipeline::ShaderManager;
@@ -113,6 +113,7 @@ pub struct ComposerContext<'a> {
     pub taa_pass: &'a mut TaaFeature,
     pub cas_pass: &'a mut CasFeature,
     pub tone_map_pass: &'a mut ToneMappingFeature,
+    pub present_pass: &'a mut PresentFeature,
     pub bloom_pass: &'a mut BloomFeature,
     pub ssao_pass: &'a mut SsaoFeature,
     pub hiz_pass: &'a mut HiZFeature,
@@ -685,7 +686,9 @@ impl<'a> FrameComposer<'a> {
             #[cfg(feature = "debug_view")]
             let mut dbg_clustered_records: Option<crate::graph::core::BufferNodeId> = None;
 
-            let mut current_surface = surface_out;
+            // Final surface handle, written by the unified PresentPass at the
+            // tail of whichever pipeline path runs below.
+            let current_surface;
 
             if is_high_fidelity {
                 // ────────────────────────────────────────────────────────────
@@ -991,7 +994,12 @@ impl<'a> FrameComposer<'a> {
                 }
 
                 // ── Post-Processing Group ──────────────────────────────────
-                current_surface = graph_ctx.with_group("PostProcess", |ctx| {
+                // Every stage renders into a transient LDR target.  The unified
+                // PresentPass appended below is the sole writer of the surface,
+                // so no post-process pass needs to know whether it happens to be
+                // the final stage.
+                #[cfg_attr(not(feature = "debug_view"), allow(unused_mut))]
+                let mut current_target = graph_ctx.with_group("PostProcess", |ctx| {
                     // Bloom (internally flattened into Bloom_System subgroup)
                     if bloom_enabled {
                         active_color = self.ctx.bloom_pass.add_to_graph(
@@ -1002,33 +1010,20 @@ impl<'a> FrameComposer<'a> {
                         );
                     }
 
-                    // ToneMapping: HDR → LDR
-                    let mut surface = if fxaa_enabled {
-                        // Route through an intermediate LDR texture for FXAA input
-                        let ldr =
-                            ctx.graph
-                                .register_texture("LDR_Intermediate", surface_desc, false);
-                        self.ctx.tone_map_pass.add_to_graph(ctx, active_color, ldr)
-                    } else {
-                        self.ctx
-                            .tone_map_pass
-                            .add_to_graph(ctx, active_color, current_surface)
-                    };
+                    // ToneMapping: HDR → LDR, into a transient target.
+                    active_color = self.ctx.tone_map_pass.add_to_graph(ctx, active_color);
 
-                    // FXAA: anti-alias the LDR result onto the surface
+                    // FXAA: anti-alias the LDR result into a second transient
+                    // target.
                     if fxaa_enabled {
-                        let ldr_intermediate = surface;
-                        surface =
-                            self.ctx
-                                .fxaa_pass
-                                .add_to_graph(ctx, ldr_intermediate, current_surface);
+                        active_color = self.ctx.fxaa_pass.add_to_graph(ctx, active_color);
                     }
 
                     bb_scene_color = Some(active_color);
                     bb_scene_depth = Some(scene_depth);
                     bb_scene_hiz = scene_hiz;
 
-                    surface
+                    active_color
                 });
 
                 // ── Debug View Override ────────────────────────────────────
@@ -1073,15 +1068,25 @@ impl<'a> FrameComposer<'a> {
                             ClusteredScreenBindings::default()
                         };
 
-                        current_surface = self.ctx.debug_view_pass.add_to_graph(
+                        current_target = self.ctx.debug_view_pass.add_to_graph(
                             &mut graph_ctx,
                             src,
-                            current_surface,
+                            current_target,
                             is_depth,
                             clustered,
                         );
                     }
                 }
+
+                // ── Present ────────────────────────────────────────────────
+                // Forward the final LDR target onto the swap-chain surface.  In
+                // the common case (target already matches the surface format and
+                // size) the graph compiler folds this blit away, rewiring the
+                // last real pass to target the surface directly.
+                current_surface =
+                    self.ctx
+                        .present_pass
+                        .add_to_graph(&mut graph_ctx, current_target, surface_out);
             } else {
                 // BasicForward pipeline: single-pass LDR rendering.
 
@@ -1102,7 +1107,7 @@ impl<'a> FrameComposer<'a> {
                     None
                 };
 
-                graph_ctx.with_group("BasicForward", |c| {
+                let scene_color = graph_ctx.with_group("BasicForward", |c| {
                     let scene_lights = c.with_group("Scene_Lighting", |c| {
                         import_scene_lighting(c, self.ctx.render_lists)
                     });
@@ -1141,16 +1146,22 @@ impl<'a> FrameComposer<'a> {
                     };
                     self.ctx.simple_forward_pass.add_to_graph(
                         c,
-                        surface_out,
                         self.ctx.extracted_scene.background.clear_color(),
                         prepared_skybox,
                         shadow_output.shadow_2d,
                         shadow_output.shadow_cube,
-                        // env_dependency_base,
                         env_dependency_pmrem,
                         scene_lighting,
-                    );
+                    )
                 });
+
+                // ── Present ────────────────────────────────────────────────
+                // Forward the rendered LDR image onto the swap-chain surface
+                // (folded away at compile time in the common case).
+                current_surface =
+                    self.ctx
+                        .present_pass
+                        .add_to_graph(&mut graph_ctx, scene_color, surface_out);
             }
 
             // drop(graph_ctx);

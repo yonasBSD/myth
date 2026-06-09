@@ -188,4 +188,16 @@ impl PassBuilder<'_, '_> {
     pub fn mark_side_effect(&mut self) {
         self.graph.storage.passes[self.pass_index].has_side_effect = true;
     }
+
+    /// Flags this pass as a pure forwarding (blit/present) node.
+    ///
+    /// The pass must read exactly one source and write exactly one
+    /// destination of identical format and size.  At compile time the graph
+    /// will attempt to fold the pass away via edge contraction — rewiring the
+    /// source's producer to write the destination directly — so the forwarding
+    /// copy carries no runtime cost in the common case.  See
+    /// [`RenderGraph::fold_simple_passes`](super::graph::RenderGraph).
+    pub fn mark_pure_forwarding(&mut self) {
+        self.graph.storage.passes[self.pass_index].is_pure_forwarding = true;
+    }
 }

@@ -8,7 +8,7 @@ use crate::graph::core::arena::FrameArena;
 use super::builder::PassBuilder;
 use super::node::{NodeSlot, PassNode, PassRecord};
 use super::types::{
-    BufferDesc, BufferNodeId, ErasedResourceNodeId, GraphResourceType, ResourceKind,
+    BufferDesc, BufferNodeId, ErasedResourceNodeId, GraphResourceType, ResourceClass, ResourceKind,
     ResourceNodeId, ResourceRecord, TextureDesc, TextureNodeId,
 };
 use smallvec::SmallVec;
@@ -637,6 +637,7 @@ impl<'a> RenderGraph<'a> {
     }
 
     pub fn compile_topology(&mut self) {
+        self.fold_simple_passes();
         self.build_physical_dependencies();
         self.cull_dead_passes();
         self.topological_sort();
@@ -648,6 +649,131 @@ impl<'a> RenderGraph<'a> {
         self.compile_topology();
 
         self.allocate_physical_resources(pool, device);
+    }
+
+    /// Compile-time **edge contraction** for pure-forwarding (blit / present)
+    /// passes.
+    ///
+    /// A pass flagged via [`PassBuilder::mark_pure_forwarding`] merely copies a
+    /// single source resource into a single destination of identical format and
+    /// size — the canonical example being the unified
+    /// [`PresentFeature`](crate::graph::passes::PresentFeature), which forwards
+    /// the final post-process image onto the swap-chain surface.  When the copy
+    /// is provably redundant we eliminate it so the upstream producer renders
+    /// straight into the surface, saving a full-screen blit every frame.
+    ///
+    /// # Mechanism
+    ///
+    /// PassNodes capture their render target by resource id at build time and
+    /// are type-erased, so the producer's node cannot be rewritten directly.
+    /// The fold therefore leans on the graph's existing aliasing machinery:
+    ///
+    /// 1. **Redirect** the producer's declared writes from the source onto the
+    ///    forwarding pass's destination, so the dependency graph and dead-pass
+    ///    cull see the producer as the surface's final writer and anchor it.
+    /// 2. **Alias** the source onto the destination's physical memory
+    ///    (`alias_of` + inherited `is_external`).  The producer's node still
+    ///    references the source id, but it now resolves to the surface view at
+    ///    execute time — and because the alias inherits the surface's external
+    ///    status, the auto-deduced `StoreOp` keeps the result instead of
+    ///    discarding it as a transient.
+    /// 3. **Strip** the forwarding pass into an island for
+    ///    [`cull_dead_passes`](Self::cull_dead_passes) to remove.
+    ///
+    /// # Safety conditions
+    ///
+    /// Folding is applied only when it cannot change observable behaviour:
+    ///
+    /// 1. **Layout match** — identical class and (for textures) format/size, so
+    ///    sharing physical memory is valid; a mismatch keeps the real blit.
+    /// 2. **Unique consumer** — the source feeds only this forwarding pass; if
+    ///    anything else samples it, the intermediate must survive.
+    /// 3. **Known producer** — the source has an upstream producer to redirect.
+    ///
+    /// Runs as the first compilation stage so the rewired relationships feed
+    /// into the subsequently built physical dependency graph.
+    fn fold_simple_passes(&mut self) {
+        for i in 0..self.storage.passes.len() {
+            // ── Gate: only fold flagged single-in / single-out passes ──
+            let pass = &self.storage.passes[i];
+            if !pass.is_pure_forwarding || pass.reads.is_empty() || pass.writes.is_empty() {
+                continue;
+            }
+
+            let src_idx = pass.reads[0].index() as usize;
+            let dst_id = pass.writes[0];
+            let dst_idx = dst_id.index() as usize;
+
+            // ── Condition 1: identical physical layout ──
+            let src_res = &self.storage.resources[src_idx];
+            let dst_res = &self.storage.resources[dst_idx];
+            if src_res.class() != dst_res.class() {
+                continue;
+            }
+            let layout_match = match src_res.class() {
+                ResourceClass::Texture => {
+                    let s = src_res.texture_desc();
+                    let d = dst_res.texture_desc();
+                    s.format == d.format && s.size == d.size
+                }
+                ResourceClass::Buffer => {
+                    src_res.buffer_desc().logical_size == dst_res.buffer_desc().logical_size
+                }
+            };
+            if !layout_match {
+                continue;
+            }
+
+            // ── Condition 2: the source feeds only this forwarding pass ──
+            if src_res.consumers.len() > 1 {
+                continue;
+            }
+
+            // ── Condition 3: a known producer we can redirect ──
+            let Some(producer_idx) = src_res.producer else {
+                continue;
+            };
+
+            // ── Edge contraction ──
+            // Resolve the destination's physical root (the surface) that the
+            // producer must ultimately render into.
+            let dst_root_idx = self.resolve_alias_root(dst_idx);
+            let dst_root_id = ErasedResourceNodeId::new(dst_root_idx as u32, 0);
+            let dst_root_external = self.storage.resources[dst_root_idx].is_external;
+
+            // (1) Redirect the producer's declared outputs from `src` onto `dst`
+            //     so the dead-pass cull anchors the producer as the final writer.
+            let producer = &mut self.storage.passes[producer_idx];
+            for id in producer
+                .writes
+                .iter_mut()
+                .chain(producer.creates.iter_mut())
+            {
+                if id.index() as usize == src_idx {
+                    *id = dst_id;
+                }
+            }
+
+            // (2) Alias `src` onto the destination's physical memory.  The
+            //     producer's (type-erased) PassNode still targets `src` at
+            //     execute time; aliasing reroutes that target to the surface and
+            //     inherits its external status so the write is stored, not
+            //     discarded.
+            let src_res = &mut self.storage.resources[src_idx];
+            src_res.alias_of = Some(dst_root_id);
+            src_res.is_external = dst_root_external;
+
+            // (3) Transfer destination ownership to the producer.
+            self.storage.resources[dst_idx].producer = Some(producer_idx);
+
+            // (4) Strip the forwarding pass into an island for the dead-pass
+            //     cull to remove.
+            let folded = &mut self.storage.passes[i];
+            folded.reads.clear();
+            folded.writes.clear();
+            folded.creates.clear();
+            folded.has_side_effect = false;
+        }
     }
 
     fn build_physical_dependencies(&mut self) {
@@ -685,28 +811,25 @@ impl<'a> RenderGraph<'a> {
             }
         }
 
-        let storage = &mut self.storage;
-
-        for (i, pass) in storage.passes.iter_mut().enumerate() {
+        for (i, pass) in self.storage.passes.iter_mut().enumerate() {
             pass.reference_count = 0;
             if pass.has_side_effect {
-                storage.compile_stack.push(i);
+                self.storage.compile_stack.push(i);
                 pass.reference_count += 1;
                 continue;
             }
             for write_id in &pass.writes {
                 let write_idx = write_id.index() as usize;
-                let res = &storage.resources[write_idx];
-            
+                let res = &self.storage.resources[write_idx];
+
                 if res.is_external {
                     let root_idx = res.alias_of.map_or(write_idx, |id| id.index() as usize);
 
-                    if write_idx == storage.compile_max_ext_indices[root_idx] {
-                        storage.compile_stack.push(i);
+                    if write_idx == self.storage.compile_max_ext_indices[root_idx] {
+                        self.storage.compile_stack.push(i);
                         pass.reference_count += 1;
                         break;
                     }
-
                 }
             }
         }
@@ -1053,6 +1176,127 @@ mod tests {
         assert_ne!(
             graph.storage.resources[motion.index() as usize].first_use,
             usize::MAX
+        );
+    }
+
+    #[test]
+    fn test_fold_pure_forwarding_present() {
+        let mut storage = GraphStorage::new();
+        let arena = FrameArena::new();
+        let mut graph = begin_test_frame(&mut storage, &arena);
+
+        // External surface (swap-chain stand-in).
+        let surface = graph.register_texture("Surface", dummy_desc(), true);
+
+        // Producer renders into a transient intermediate of identical layout.
+        let intermediate = graph.add_pass("Producer", |builder| {
+            let out = builder.create_texture("LDR_Intermediate", dummy_desc());
+            (MockExec, out)
+        });
+
+        // Unified present: forward the intermediate onto the surface.
+        let present_out = graph.add_pass("Present", |builder| {
+            builder.read_texture(intermediate);
+            let out = builder.replace_texture(surface, "Surface_Present");
+            builder.mark_pure_forwarding();
+            (MockExec, out)
+        });
+
+        graph.compile_topology();
+
+        let queue_names: Vec<&str> = graph
+            .storage
+            .execution_queue
+            .iter()
+            .map(|&i| graph.storage.passes[i].name)
+            .collect();
+
+        // The present pass is edge-contracted into the producer and removed.
+        assert!(
+            !queue_names.contains(&"Present"),
+            "Present pass should be folded away, got {queue_names:?}"
+        );
+        assert!(
+            queue_names.contains(&"Producer"),
+            "Producer must survive as the surface writer, got {queue_names:?}"
+        );
+
+        // The intermediate now aliases the surface so the producer's node
+        // resolves to the swap-chain view (and stores, not discards) at execute.
+        let inter_res = &graph.storage.resources[intermediate.index() as usize];
+        assert_eq!(
+            inter_res.alias_of,
+            Some(surface.erase()),
+            "intermediate must alias the surface root after folding"
+        );
+        assert!(
+            inter_res.is_external,
+            "intermediate must inherit the surface's external status"
+        );
+
+        // The present output (a surface alias) is now owned by the producer, so
+        // any downstream reader depends on the producer rather than the
+        // eliminated present pass.
+        let producer_idx = graph
+            .storage
+            .execution_queue
+            .iter()
+            .copied()
+            .find(|&i| graph.storage.passes[i].name == "Producer")
+            .expect("Producer in execution queue");
+        assert_eq!(
+            graph.storage.resources[present_out.index() as usize].producer,
+            Some(producer_idx),
+            "the surface alias must be owned by the producer after rerouting"
+        );
+    }
+
+    #[test]
+    fn test_fold_skipped_with_extra_consumer() {
+        let mut storage = GraphStorage::new();
+        let arena = FrameArena::new();
+        let mut graph = begin_test_frame(&mut storage, &arena);
+
+        let surface = graph.register_texture("Surface", dummy_desc(), true);
+
+        let intermediate = graph.add_pass("Producer", |builder| {
+            let out = builder.create_texture("LDR_Intermediate", dummy_desc());
+            (MockExec, out)
+        });
+
+        // A second consumer of the intermediate must keep it materialised, so
+        // the forwarding pass cannot be folded.
+        graph.add_pass("Histogram", |builder| {
+            builder.read_texture(intermediate);
+            builder.mark_side_effect();
+            (MockExec, ())
+        });
+
+        graph.add_pass("Present", |builder| {
+            builder.read_texture(intermediate);
+            let out = builder.replace_texture(surface, "Surface_Present");
+            builder.mark_pure_forwarding();
+            (MockExec, out)
+        });
+
+        graph.compile_topology();
+
+        let queue_names: Vec<&str> = graph
+            .storage
+            .execution_queue
+            .iter()
+            .map(|&i| graph.storage.passes[i].name)
+            .collect();
+
+        assert!(
+            queue_names.contains(&"Present"),
+            "Present must survive when the source has another consumer, got {queue_names:?}"
+        );
+        assert!(
+            graph.storage.resources[intermediate.index() as usize]
+                .alias_of
+                .is_none(),
+            "intermediate must not be aliased onto the surface when fold is skipped"
         );
     }
 

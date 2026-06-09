@@ -119,6 +119,17 @@ pub struct PassRecord {
     pub physical_dependencies: SmallVec<[usize; 8]>,
     pub has_side_effect: bool,
     pub reference_count: u32,
+
+    /// Marks the pass as a pure forwarding (blit/present) node whose sole
+    /// purpose is to copy a single source resource into a single destination
+    /// of identical format and size.
+    ///
+    /// Such passes are candidates for compile-time **edge contraction** in
+    /// [`RenderGraph::fold_simple_passes`](super::graph::RenderGraph): the
+    /// upstream producer is rewired to write the destination directly and the
+    /// forwarding pass is stripped to an island for the subsequent dead-pass
+    /// cull, eliminating the redundant copy at zero runtime cost.
+    pub is_pure_forwarding: bool,
 }
 
 impl PassRecord {
@@ -140,6 +151,7 @@ impl PassRecord {
             physical_dependencies: SmallVec::new(),
             has_side_effect: false,
             reference_count: 0,
+            is_pure_forwarding: false,
         }
     }
 

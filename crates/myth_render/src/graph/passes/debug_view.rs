@@ -369,7 +369,7 @@ impl DebugViewFeature {
             if let Some(records) = clustered.records {
                 builder.read_buffer(records);
             }
-            let output = builder.replace_texture(target_surface, "Surface_DebugView");
+            let output = builder.replace_texture(target_surface, "DebugView_Output");
 
             let node = DebugViewPassNode {
                 source_tex,

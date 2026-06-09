@@ -465,7 +465,7 @@ impl ToneMappingFeature {
         // graph: &mut RenderGraph<'a>,
         // pipeline_cache: &'a PipelineCache,
         input_hdr: TextureNodeId,
-        target_ldr: TextureNodeId,
+        // target_ldr: TextureNodeId,
     ) -> TextureNodeId {
         let pipeline_id = self.current_pipeline.expect("ToneMapFeature not prepared");
         let pipeline = ctx.pipeline_cache.get_render_pipeline(pipeline_id);
@@ -478,7 +478,10 @@ impl ToneMappingFeature {
         ctx.graph.add_pass("ToneMap_Pass", |builder| {
             builder.read_texture(input_hdr);
 
-            let output = builder.write_texture(target_ldr);
+            let out_desc = ctx.frame_config.create_surface_desc(
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            );
+            let output = builder.create_texture("LDR_ToneMapped", out_desc);
 
             let node = ToneMapPassNode {
                 input_tex: input_hdr,

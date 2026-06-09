@@ -49,7 +49,7 @@ impl SimpleForwardFeature {
     pub fn add_to_graph<'a>(
         &'a self,
         ctx: &mut GraphBuilderContext<'a, '_>,
-        surface_out: TextureNodeId,
+        // surface_out: TextureNodeId,
         clear_color: wgpu::Color,
         prepared_skybox: Option<PreparedSkyboxDraw<'a>>,
         shadow_tex: Option<TextureNodeId>,
@@ -57,22 +57,25 @@ impl SimpleForwardFeature {
         // env_map_tex: Option<TextureNodeId>,
         pmrem_tex: Option<TextureNodeId>,
         scene_lighting: ClusteredScreenBindings,
-    ) {
+    ) -> TextureNodeId {
         let fc = ctx.frame_config;
 
-        let depth_desc = TextureDesc::new(
-            fc.width,
-            fc.height,
-            1,
-            1,
-            fc.msaa_samples,
-            wgpu::TextureDimension::D2,
-            fc.depth_format,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        );
+        // let depth_desc = TextureDesc::new(
+        //     fc.width,
+        //     fc.height,
+        //     1,
+        //     1,
+        //     fc.msaa_samples,
+        //     wgpu::TextureDimension::D2,
+        //     fc.depth_format,
+        //     wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // );
+
+        let out_desc = fc.create_surface_desc(wgpu::TextureUsages::TEXTURE_BINDING);
+        let depth_desc = fc.create_depth_desc(wgpu::TextureUsages::TEXTURE_BINDING);
 
         ctx.graph.add_pass("SimpleForward_Pass", |builder| {
-            builder.write_texture(surface_out);
+            let out = builder.create_texture("Scene_Color", out_desc);
             let scene_depth = builder.create_texture("Scene_Depth", depth_desc);
 
             if let Some(shadow) = shadow_tex {
@@ -81,9 +84,7 @@ impl SimpleForwardFeature {
             if let Some(shadow_cube) = shadow_cube_tex {
                 builder.read_texture(shadow_cube);
             }
-            // if let Some(env_map) = env_map_tex {
-            //     builder.read_texture(env_map);
-            // }
+
             if let Some(pmrem) = pmrem_tex {
                 builder.read_texture(pmrem);
             }
@@ -131,7 +132,7 @@ impl SimpleForwardFeature {
             };
 
             let node = SimpleForwardPassNode {
-                surface_out,
+                surface_out: out,
                 scene_depth,
                 msaa_view,
                 clear_color,
@@ -141,8 +142,8 @@ impl SimpleForwardFeature {
                 scene_lighting,
                 screen_bind_group: None,
             };
-            (node, ())
-        });
+            (node, out)
+        })
     }
 }
 
