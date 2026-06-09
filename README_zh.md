@@ -14,7 +14,7 @@
 
 [![Myth Engine Hero](https://raw.githubusercontent.com/panxinmiao/myth/main/docs/public/images/hero.jpg)](https://panxinmiao.github.io/myth/)
 
-[**📖 主页**](https://panxinmiao.github.io/myth/) | [**🖼️ 在线体验**](https://panxinmiao.github.io/myth/gallery/) | [**💡 示例代码**](examples/)
+[**主页**](https://panxinmiao.github.io/myth/) | [**在线体验**](https://panxinmiao.github.io/myth/gallery/) | [**示例代码**](examples/)
 
 </div>
 
