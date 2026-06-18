@@ -1,9 +1,9 @@
 //! [gallery]
 //! name = "3D Gaussian Splatting Viewer"
 //! category = "Gaussian Splatting"
-//! description = "Interactive 3DGS viewer with a bundled startup cloud and custom NPZ/PLY loading."
+//! description = "Interactive 3DGS viewer with a bundled startup cloud and custom NPZ/PLY/SPZ loading."
 //! order = 520
-//! features = ["3dgs", "gaussian-npz"]
+//! features = ["3dgs", "gaussian-npz", "gaussian-spz"]
 //!
 
 use std::any::Any;
@@ -36,6 +36,7 @@ enum LoadingState {
 enum CloudFormat {
     Npz,
     Ply,
+    Spz,
 }
 
 impl CloudFormat {
@@ -48,6 +49,7 @@ impl CloudFormat {
         {
             Some("npz") => Some(Self::Npz),
             Some("ply") => Some(Self::Ply),
+            Some("spz") => Some(Self::Spz),
             _ => None,
         }
     }
@@ -64,6 +66,7 @@ impl CloudFormat {
         match self {
             Self::Npz => assets.load_gaussian_npz(path),
             Self::Ply => assets.load_gaussian_ply(path),
+            Self::Spz => assets.load_gaussian_spz(path),
         }
     }
 
@@ -76,6 +79,7 @@ impl CloudFormat {
         let cloud = match self {
             Self::Npz => myth::load_gaussian_npz(Cursor::new(data))?,
             Self::Ply => myth::load_gaussian_ply(Cursor::new(data))?,
+            Self::Spz => myth::load_gaussian_spz(Cursor::new(data))?,
         };
 
         Ok(assets.gaussian_clouds.add(cloud))
@@ -285,7 +289,7 @@ impl GaussianSplattingDemo {
             .show(ctx, |ui| {
                 ui.label("Bundled startup cloud: examples/assets/3dgs/point_cloud.npz");
 
-                if ui.button("Open .npz / .ply...").clicked() {
+                if ui.button("Open .npz / .ply / .spz...").clicked() {
                     self.open_cloud_file(assets.clone());
                 }
 
@@ -308,7 +312,7 @@ impl GaussianSplattingDemo {
                 ui.separator();
                 ui.label("Orbit: drag mouse");
                 ui.label("Zoom: mouse wheel / touchpad");
-                ui.label("You can also drag a .npz or .ply file into the window.");
+                ui.label("You can also drag a .npz, .ply, or .spz file into the window.");
 
                 #[cfg(target_arch = "wasm32")]
                 ui.label("Web build supports file picker and in-window drop.");
@@ -320,7 +324,7 @@ impl GaussianSplattingDemo {
 
         execute_future(async move {
             let file = rfd::AsyncFileDialog::new()
-                .add_filter("3D Gaussian Splatting", &["npz", "ply"])
+                .add_filter("3D Gaussian Splatting", &["npz", "ply", "spz"])
                 .pick_file()
                 .await;
 
@@ -352,7 +356,7 @@ impl GaussianSplattingDemo {
             painter.text(
                 screen_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Drop .npz / .ply file here",
+                "Drop .npz / .ply / .spz file here",
                 egui::FontId::proportional(28.0),
                 egui::Color32::WHITE,
             );

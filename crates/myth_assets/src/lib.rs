@@ -260,3 +260,33 @@ pub fn load_gaussian_npz_from_source(
 ) -> Result<myth_resources::gaussian_splat::GaussianCloud> {
     server::get_asset_runtime().block_on(load_gaussian_npz_from_source_async(source))
 }
+
+/// Loads an SPZ v4 `.spz` from a local path or HTTP URL using [`AssetReader`].
+#[cfg(feature = "gaussian-spz")]
+pub async fn load_gaussian_spz_from_source_async(
+    source: impl io::AssetSource,
+) -> Result<myth_resources::gaussian_splat::GaussianCloud> {
+    let (bytes, uri) = read_gaussian_source_bytes(source, "SPZ").await?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let cloud = tokio::task::spawn_blocking(move || loaders::load_gaussian_spz(Cursor::new(bytes)))
+        .await
+        .map_err(|e| Error::Asset(AssetError::TaskJoin(e.to_string())))?;
+
+    #[cfg(target_arch = "wasm32")]
+    let cloud = loaders::load_gaussian_spz(Cursor::new(bytes));
+
+    cloud.map_err(|e| {
+        Error::Asset(AssetError::Format(format!(
+            "Failed to parse Gaussian SPZ '{uri}': {e}"
+        )))
+    })
+}
+
+/// Native blocking wrapper around [`load_gaussian_spz_from_source_async`].
+#[cfg(all(feature = "gaussian-spz", not(target_arch = "wasm32")))]
+pub fn load_gaussian_spz_from_source(
+    source: impl io::AssetSource,
+) -> Result<myth_resources::gaussian_splat::GaussianCloud> {
+    server::get_asset_runtime().block_on(load_gaussian_spz_from_source_async(source))
+}

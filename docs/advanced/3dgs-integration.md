@@ -9,7 +9,7 @@
 在 `Cargo.toml` 中启用相关特性：
 
 ```toml
-myth = { git = "...", branch = "main", features = ["3dgs", "gaussian-npz"] }
+myth = { git = "...", branch = "main", features = ["3dgs", "gaussian-npz", "gaussian-spz"] }
 
 ```
 
@@ -18,8 +18,9 @@ myth = { git = "...", branch = "main", features = ["3dgs", "gaussian-npz"] }
 你可以像加载普通网格体一样轻松加载点云数据，并将其放置在场景图 (Scene Graph) 中：
 
 ```rust
-// 1. 加载压缩的 NPZ 格式高斯点云
+// 1. 加载压缩的 NPZ 或 SPZ 格式高斯点云
 let cloud = engine.assets.load_gaussian_npz("assets/3dgs/point_cloud.npz".into());
+let spz_cloud = engine.assets.load_gaussian_spz("assets/3dgs/scene.spz".into());
 
 // 2. 注入场景节点
 let node = scene.add_gaussian_cloud("gaussian_cloud", cloud);

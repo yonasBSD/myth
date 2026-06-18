@@ -191,4 +191,12 @@ impl PyEngine {
     fn load_gaussian_npz(&self, path: &str) -> PyResult<crate::gaussian::PyGaussianCloud> {
         crate::gaussian::load_gaussian_npz_impl(path)
     }
+
+    /// Load an SPZ v4 compressed ``.spz`` file containing 3D Gaussian Splatting data.
+    ///
+    /// Returns a ``GaussianCloud`` object that can be added to a scene.
+    #[cfg(feature = "gaussian-spz")]
+    fn load_gaussian_spz(&self, path: &str) -> PyResult<crate::gaussian::PyGaussianCloud> {
+        crate::gaussian::load_gaussian_spz_impl(path)
+    }
 }

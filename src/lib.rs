@@ -58,6 +58,7 @@
 //! | `rdg_inspector` | no | Render graph inspector |
 //! | `3dgs` | no | 3D Gaussian Splatting support |
 //! | `gaussian-npz` | no | NPZ loader for 3D Gaussian Splatting (requires `3dgs`) |
+//! | `gaussian-spz` | no | SPZ v4 loader for 3D Gaussian Splatting (requires `3dgs`) |
 
 // ============================================================================
 // Sub-crate re-exports (facade modules matching the old monolith paths)
@@ -227,10 +228,16 @@ pub use myth_assets::load_gaussian_npz_from_source_async;
 pub use myth_assets::load_gaussian_ply_from_source;
 #[cfg(feature = "3dgs")]
 pub use myth_assets::load_gaussian_ply_from_source_async;
+#[cfg(all(feature = "gaussian-spz", not(target_arch = "wasm32")))]
+pub use myth_assets::load_gaussian_spz_from_source;
+#[cfg(feature = "gaussian-spz")]
+pub use myth_assets::load_gaussian_spz_from_source_async;
 #[cfg(feature = "gaussian-npz")]
 pub use myth_assets::loaders::npz::load_gaussian_npz;
 #[cfg(feature = "3dgs")]
 pub use myth_assets::loaders::ply::load_gaussian_ply;
+#[cfg(feature = "gaussian-spz")]
+pub use myth_assets::loaders::spz::load_gaussian_spz;
 pub use myth_assets::{AssetServer, GeometryHandle, ImageHandle, MaterialHandle, TextureHandle};
 pub use myth_assets::{
     AssetSource, ColorSpace, GaussianCloudHandle, GeometryQuery, ResolveGeometry, ResolveMaterial,

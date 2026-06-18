@@ -40,6 +40,7 @@ meshopt = { workspace = true, optional = true }
 ehttp = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["fs", "rt-multi-thread", "time", "macros"] }
@@ -58,6 +59,7 @@ gltf = ["dep:gltf"]
 gltf-meshopt = ["gltf", "dep:meshopt"]
 http = ["dep:ehttp", "dep:url"]
 gaussian-npz = ["3dgs", "dep:zip"]
+gaussian-spz = ["3dgs", "dep:zstd"]
 
 [lints]
 workspace = true

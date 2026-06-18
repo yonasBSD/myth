@@ -620,6 +620,10 @@ class Engine:
         """Load a compressed ``.npz`` file containing 3D Gaussian Splatting data."""
         ...
 
+    def load_gaussian_spz(self, path: str) -> GaussianCloud:
+        """Load an SPZ v4 compressed ``.spz`` file containing 3D Gaussian Splatting data."""
+        ...
+
     def set_title(self, title: str) -> None:
         """Set the window title (only works when using ``App``)."""
         ...
@@ -1761,7 +1765,8 @@ class TextureHandle:
 class GaussianCloud:
     """A loaded 3D Gaussian Splatting point cloud.
 
-    Obtain via ``engine.load_gaussian_ply()`` or ``engine.load_gaussian_npz()``.
+    Obtain via ``engine.load_gaussian_ply()``, ``engine.load_gaussian_npz()``, or
+    ``engine.load_gaussian_spz()``.
     Add it to a scene with ``scene.add_gaussian_cloud(name, cloud)``.
     """
 

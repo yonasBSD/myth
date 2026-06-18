@@ -182,7 +182,7 @@ impl PyGaussianCloud {
 }
 
 // ============================================================================
-// PyEngine extensions (load_gaussian_ply / load_gaussian_npz)
+// PyEngine extensions (load_gaussian_ply / load_gaussian_npz / load_gaussian_spz)
 // ============================================================================
 
 /// Load a ``.ply`` file containing 3D Gaussian Splatting data.
@@ -206,6 +206,20 @@ pub fn load_gaussian_npz_impl(path: &str) -> PyResult<PyGaussianCloud> {
     let cloud = myth_engine::load_gaussian_npz_from_source(path).map_err(|e| {
         pyo3::exceptions::PyRuntimeError::new_err(format!(
             "Failed to load Gaussian NPZ '{path}': {e}"
+        ))
+    })?;
+    let handle = with_engine(|engine| engine.assets.gaussian_clouds.add(cloud))?;
+    Ok(PyGaussianCloud { handle })
+}
+
+/// Load a ``.spz`` file containing SPZ v4 compressed 3D Gaussian Splatting data.
+///
+/// Returns a ``GaussianCloud`` object.
+#[cfg(feature = "gaussian-spz")]
+pub fn load_gaussian_spz_impl(path: &str) -> PyResult<PyGaussianCloud> {
+    let cloud = myth_engine::load_gaussian_spz_from_source(path).map_err(|e| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "Failed to load Gaussian SPZ '{path}': {e}"
         ))
     })?;
     let handle = with_engine(|engine| engine.assets.gaussian_clouds.add(cloud))?;

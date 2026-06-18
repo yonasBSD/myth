@@ -668,6 +668,39 @@ impl AssetServer {
         handle
     }
 
+    /// Loads an SPZ v4 3D Gaussian splatting cloud from a `.spz`,
+    /// returning a handle immediately.
+    ///
+    /// The underlying I/O and parse run on a background task and completed
+    /// loads are promoted by [`process_loading_events`](Self::process_loading_events).
+    /// Duplicate requests for the same URI return the same handle.
+    #[cfg(feature = "gaussian-spz")]
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn load_gaussian_spz(&self, source: impl AssetSource) -> GaussianCloudHandle {
+        let uri = source.uri().to_string();
+        let uuid = Self::generate_asset_uuid("GaussianSpz", &uri, "");
+        let (handle, is_new) = self.gaussian_clouds.reserve_with_uuid(uuid);
+        if !is_new {
+            return handle;
+        }
+
+        self.begin_background_load();
+        let tx = self.loading.gaussian_channel.sender();
+        let source_str = uri.clone();
+
+        spawn_asset_task(async move {
+            let result = crate::load_gaussian_spz_from_source_async(uri).await;
+            let event = GaussianLoadEvent {
+                handle,
+                source: source_str,
+                result: result.map_err(|e| e.to_string()),
+            };
+            let _ = tx.send(event);
+        });
+
+        handle
+    }
+
     /// Loads a glTF/GLB model, returning a [`PrefabHandle`] immediately.
     ///
     /// The handle can be polled via [`AssetStorage::get`] on
@@ -918,6 +951,18 @@ impl AssetServer {
         source: impl AssetSource,
     ) -> Result<GaussianCloudHandle> {
         let handle = self.load_gaussian_npz(source);
+        self.wait_for_gaussian_cloud(handle).await?;
+        Ok(handle)
+    }
+
+    /// Asynchronously loads an SPZ v4 3D Gaussian splatting cloud from a `.spz`
+    /// and waits for it to finish parsing.
+    #[cfg(feature = "gaussian-spz")]
+    pub async fn load_gaussian_spz_async(
+        &self,
+        source: impl AssetSource,
+    ) -> Result<GaussianCloudHandle> {
+        let handle = self.load_gaussian_spz(source);
         self.wait_for_gaussian_cloud(handle).await?;
         Ok(handle)
     }

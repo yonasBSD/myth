@@ -27,5 +27,6 @@ parking_lot = "0.12"
 # myth-engine = { path = "../../" }
 
 [features]
-default = ["gaussian-npz"]
+default = ["gaussian-npz", "gaussian-spz"]
 gaussian-npz = ["myth_engine/gaussian-npz"]
+gaussian-spz = ["myth_engine/gaussian-spz"]
