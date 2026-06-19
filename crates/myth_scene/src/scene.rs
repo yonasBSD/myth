@@ -308,6 +308,8 @@ impl Scene {
             self.names.remove(node_handle);
             self.animation_mixers.remove(node_handle);
             self.rest_transforms.remove(node_handle);
+            #[cfg(feature = "3dgs")]
+            self.gaussian_clouds.remove(node_handle);
 
             self.nodes.remove(node_handle);
         }
@@ -1036,5 +1038,25 @@ impl AnimationTarget for Scene {
 
     fn morph_weights_mut(&mut self, handle: NodeHandle) -> &mut Vec<f32> {
         self.morph_weights.entry(handle).unwrap().or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "3dgs")]
+    #[test]
+    fn remove_node_clears_gaussian_cloud_component() {
+        let mut scene = Scene::new();
+        let cloud = GaussianCloudHandle::from(slotmap::KeyData::from_ffi(0x0000_0001_0000_0001));
+        let node = scene.add_gaussian_cloud("cloud", cloud);
+
+        assert_eq!(scene.get_gaussian_cloud(node), Some(cloud));
+
+        scene.remove_node(node);
+
+        assert!(scene.get_gaussian_cloud(node).is_none());
+        assert!(!scene.gaussian_clouds.contains_key(node));
     }
 }

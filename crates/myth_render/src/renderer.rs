@@ -556,24 +556,25 @@ impl Renderer {
                 );
             }
 
-            #[cfg(feature = "3dgs")]
             // Gaussian Splatting
-            if scene.has_gaussian_clouds() {
+            #[cfg(feature = "3dgs")]
+            {
                 let mut cloud_entries = Vec::new();
                 for (node_handle, cloud_handle) in &scene.gaussian_clouds {
+                    let Some(node) = scene.get_node(node_handle) else {
+                        continue;
+                    };
+                    if !node.visible {
+                        continue;
+                    }
                     if let Some(cloud) = assets.gaussian_clouds.get(*cloud_handle) {
-                        let world_matrix = scene
-                            .get_node(node_handle)
-                            .map(|node| glam::Mat4::from(*node.world_matrix()))
-                            .unwrap_or(glam::Mat4::IDENTITY);
+                        let world_matrix = glam::Mat4::from(*node.world_matrix());
                         cloud_entries.push((*cloud_handle, cloud, world_matrix));
                     }
                 }
-                if !cloud_entries.is_empty() {
-                    state
-                        .gaussian_splatting_pass
-                        .extract_and_prepare(&mut extract_ctx, &cloud_entries);
-                }
+                state
+                    .gaussian_splatting_pass
+                    .extract_and_prepare(&mut extract_ctx, &cloud_entries);
             }
 
             // Present: unified surface blit, prepared for every render path so
