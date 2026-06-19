@@ -15,7 +15,7 @@ use myth_resources::gaussian_splat::GaussianCloud;
 use myth_resources::geometry::Geometry;
 use myth_resources::image::{ColorSpace, Image, ImageDimension, PixelFormat};
 use myth_resources::material::Material;
-use myth_resources::screen_space::SssRegistry;
+use myth_resources::ssss::SssRegistry;
 use myth_resources::texture::Texture;
 use myth_resources::{GeometryHandle, ImageHandle, MaterialHandle, PrefabHandle, TextureHandle};
 

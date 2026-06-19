@@ -11,7 +11,7 @@ use crate::graph::composer::ComposerContext;
 use crate::graph::core::allocator::TransientPool;
 use crate::graph::core::arena::FrameArena;
 use crate::graph::core::graph::GraphStorage;
-use crate::graph::frame::RenderLists;
+use crate::graph::frame::{RenderFrameFeatureConfig, RenderLists};
 #[cfg(feature = "debug_view")]
 use crate::graph::passes::DebugViewFeature;
 #[cfg(feature = "3dgs")]
@@ -392,6 +392,17 @@ impl Renderer {
 
         let surface_size = state.wgpu_ctx.size();
         let max_extracted_lights = max_extracted_light_count(&state.wgpu_ctx.device);
+        let requested_msaa = camera.aa_mode.msaa_sample_count();
+        if state.wgpu_ctx.msaa_samples != requested_msaa {
+            state.wgpu_ctx.msaa_samples = requested_msaa;
+            state.wgpu_ctx.pipeline_settings_version += 1;
+        }
+
+        let feature_config = RenderFrameFeatureConfig {
+            clustered_shading: self.settings.clustered_shading,
+            render_path: state.wgpu_ctx.render_path,
+            msaa_samples: state.wgpu_ctx.msaa_samples,
+        };
         state.render_frame.extract_and_prepare(
             &mut state.resource_manager,
             scene,
@@ -401,103 +412,8 @@ impl Renderer {
             &mut state.render_lists,
             surface_size,
             max_extracted_lights,
+            feature_config,
         );
-
-        let requested_msaa = camera.aa_mode.msaa_sample_count();
-        if state.wgpu_ctx.msaa_samples != requested_msaa {
-            state.wgpu_ctx.msaa_samples = requested_msaa;
-            state.wgpu_ctx.pipeline_settings_version += 1;
-        }
-
-        let active_local_light_count =
-            state.render_frame.extracted_scene.local_light_count() as u32;
-        let clustered_lighting_enabled = self
-            .settings
-            .clustered_shading
-            .is_enabled(active_local_light_count)
-            && active_local_light_count > 0;
-
-        if clustered_lighting_enabled {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .insert(SceneFeatures::USE_CLUSTERED_SHADING);
-        } else {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .remove(SceneFeatures::USE_CLUSTERED_SHADING);
-        }
-
-        let ssgi_supported = state.wgpu_ctx.render_path.supports_post_processing()
-            && state.wgpu_ctx.msaa_samples <= 1;
-        let ssgi_enabled = scene.ssgi.enabled && ssgi_supported;
-        let ssr_supported = state.wgpu_ctx.render_path.supports_post_processing()
-            && state.wgpu_ctx.msaa_samples <= 1;
-        let ssr_enabled = scene.screen_space.enable_ssr && ssr_supported;
-        if ssgi_enabled {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .insert(SceneFeatures::USE_SSGI);
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .set("USE_SSGI", "1");
-        } else {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .remove(SceneFeatures::USE_SSGI);
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .remove("USE_SSGI");
-        }
-
-        if ssr_enabled {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .insert(SceneFeatures::USE_SSR);
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .set("USE_SSR", "1");
-        } else {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_variants
-                .remove(SceneFeatures::USE_SSR);
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .remove("USE_SSR");
-        }
-
-        if scene.screen_space.enable_sss || ssr_enabled {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .set("USE_SCREEN_SPACE_FEATURES", "1");
-        } else {
-            state
-                .render_frame
-                .extracted_scene
-                .scene_defines
-                .remove("USE_SCREEN_SPACE_FEATURES");
-        }
 
         // ── Phase 2: Cull + sort + command generation ───────────────────
         crate::graph::culling::cull_and_sort(
@@ -511,6 +427,14 @@ impl Renderer {
             &camera,
             assets,
         );
+
+        let active_local_light_count =
+            state.render_frame.extracted_scene.local_light_count() as u32;
+        let clustered_lighting_enabled = state
+            .render_frame
+            .extracted_scene
+            .scene_variants
+            .contains(SceneFeatures::USE_CLUSTERED_SHADING);
 
         // ── Phase 2.5: Feature extract & prepare ────────────────────────
         //
@@ -539,7 +463,7 @@ impl Renderer {
                 .scene_variants
                 .contains(SceneFeatures::USE_SSR);
             let needs_scene_hiz = ssgi_enabled || ssr_enabled;
-            let needs_feature_id = is_hf && (scene.screen_space.enable_sss || ssr_enabled);
+            let needs_feature_id = is_hf && (scene.ssss.enabled || ssr_enabled);
 
             // Sync camera debug settings → RenderState before borrowing it.
             #[cfg(feature = "debug_view")]
@@ -747,7 +671,7 @@ impl Renderer {
                 // MSAA Sync — needed when SSSS modifies the resolved HDR
                 // buffer and subsequent passes re-enter the MSAA context.
                 let msaa = state.wgpu_ctx.msaa_samples;
-                let needs_specular = scene.screen_space.enable_sss;
+                let needs_specular = scene.ssss.enabled;
                 if msaa > 1 && needs_specular {
                     state
                         .msaa_sync_pass

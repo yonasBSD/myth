@@ -316,13 +316,13 @@ impl ExtractedScene {
             self.scene_variants.insert(SceneFeatures::USE_SSGI);
         }
 
-        if scene.screen_space.enable_sss {
+        if scene.ssss.enabled {
             self.scene_defines.set("USE_SCREEN_SPACE_FEATURES", "1");
             self.scene_defines.set("USE_SSS", "1");
             self.scene_variants.insert(SceneFeatures::USE_SSS);
         }
 
-        if scene.screen_space.enable_ssr {
+        if scene.ssr.enabled {
             self.scene_defines.set("USE_SCREEN_SPACE_FEATURES", "1");
             self.scene_defines.set("USE_SSR", "1");
             self.scene_variants.insert(SceneFeatures::USE_SSR);

@@ -350,9 +350,9 @@ struct GltfViewer {
 
     // === SSS Profiles ===
     sss_profiles: Vec<(
-        myth::resources::screen_space::FeatureId,
+        myth::resources::ssss::FeatureId,
         String,
-        myth::resources::screen_space::SssProfile,
+        myth::resources::ssss::SssProfile,
     )>,
 
     // === Debug View (compile-time gated) ===
@@ -2151,7 +2151,7 @@ impl GltfViewer {
                                 // ScreenSpace Subsurface Scattering (SSSS)
                                 ui.horizontal(|ui| {
                                     ui.checkbox(
-                                        &mut scene.screen_space.enable_sss,
+                                        &mut scene.ssss.enabled,
                                         "Screen-Space Subsurface Scattering (SSSS)",
                                     )
                                 });
@@ -2641,7 +2641,7 @@ impl GltfViewer {
                             });
 
                         if ui.button("New Profile").clicked() {
-                            let new_profile = myth::resources::screen_space::SssProfile::new(
+                            let new_profile = myth::resources::ssss::SssProfile::new(
                                 Vec3::new(0.85, 0.25, 0.15),
                                 0.15,
                             );

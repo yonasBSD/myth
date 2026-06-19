@@ -125,7 +125,7 @@ fn main() {
         scene.ssao.set_intensity(1.5);
 
         // ── Subsurface skin shading
-        scene.screen_space.enable_sss = true;
+        scene.ssss.set_enabled(true);
 
         // ── Camera (same framing as showcase's initial OrbitControls pose)
         let mut camera = Camera::new_perspective(45.0, 1.0, 0.01);
@@ -160,7 +160,7 @@ fn main() {
 
         // Subsurface skin profile on the body mesh (mirrors showcase).
         let skin_profile =
-            myth::resources::screen_space::SssProfile::new(Vec3::new(0.85, 0.25, 0.15), 0.15);
+            myth::resources::ssss::SssProfile::new(Vec3::new(0.85, 0.25, 0.15), 0.15);
         if let Some(model_node) = scene.find_node_by_name("Object_9") {
             if let Some(mesh) = scene.meshes.get(model_node) {
                 if let Some(material) = engine.assets.materials.get(mesh.material) {

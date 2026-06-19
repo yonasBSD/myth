@@ -7,7 +7,7 @@
   - **Hierarchical Screen-Space Tracing:** Uses Hi-Z ray marching against the scene depth pyramid to trace glossy and mirror-like reflections efficiently.
   - **Spatiotemporal Stabilization:** Combines history reprojection, temporal accumulation, and roughness-aware spatial cleanup to reduce shimmer and preserve stable reflection energy.
   - **Scalable Quality Tiers:** Provides Low / Medium / High / Ultra presets that scale trace distance, ray budget, trace resolution, and denoiser cost across different hardware targets.
-  - **Scene-Level Controls:** Exposed through `ScreenSpaceSettings::enable_ssr` and `SsrSettings`, allowing per-scene tuning of intensity, distance, thickness, and denoising behaviour.
+  - **Scene-Level Controls:** Exposed through `SsrSettings`, allowing per-scene enablement and tuning of intensity, distance, thickness, and denoising behaviour.
   - **Debugging & Validation Workflow:** Includes dedicated debug views together with the `examples/ssr_showroom.rs` reference scene for tuning and regression checks.
 
 - Introduced **SSGI (Screen Space Global Illumination)** as a first-class real-time global illumination feature in Myth's high-fidelity renderer.

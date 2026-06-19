@@ -194,7 +194,7 @@ impl AppHandler for SsrShowroomDemo {
         ];
 
         let scene = engine.scene_manager.create_active();
-        scene.screen_space.enable_ssr = true;
+        scene.ssr.set_enabled(true);
         scene.ssr.set_quality(SsrQuality::Ultra);
         scene.ssr.set_thickness(0.01);
         scene.environment.set_ambient_light(Vec3::splat(0.008));
@@ -431,7 +431,7 @@ impl AppHandler for SsrShowroomDemo {
         self.time += frame.dt;
 
         if engine.input.get_key_down(Key::T) {
-            scene.screen_space.enable_ssr = !scene.screen_space.enable_ssr;
+            scene.ssr.set_enabled(!scene.ssr.enabled);
         }
 
         if engine.input.get_key_down(Key::Q) {
@@ -494,11 +494,7 @@ impl AppHandler for SsrShowroomDemo {
             #[cfg(not(feature = "debug_view"))]
             let debug_label = "Final Image";
 
-            let ssr_label = if scene.screen_space.enable_ssr {
-                "On"
-            } else {
-                "Off"
-            };
+            let ssr_label = if scene.ssr.enabled { "On" } else { "Off" };
             let aa_label = scene
                 .query_main_camera_bundle()
                 .map(|(_, camera)| {

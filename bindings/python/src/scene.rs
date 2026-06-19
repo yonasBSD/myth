@@ -412,7 +412,7 @@ impl PyScene {
     ) -> PyResult<()> {
         let quality = quality.map(parse_ssr_quality).transpose()?;
         with_active_scene(|scene| {
-            scene.screen_space.enable_ssr = enabled;
+            scene.ssr.set_enabled(enabled);
             if let Some(q) = quality {
                 scene.ssr.set_quality(q);
             }
@@ -433,9 +433,7 @@ impl PyScene {
     }
 
     fn set_ssr_enabled(&self, enabled: bool) -> PyResult<()> {
-        with_active_scene(|scene| {
-            scene.screen_space.enable_ssr = enabled;
-        })?;
+        with_active_scene(|scene| scene.ssr.set_enabled(enabled))?;
         Ok(())
     }
 

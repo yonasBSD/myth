@@ -513,8 +513,7 @@ impl<'a> FrameComposer<'a> {
                 .contains(SceneFeatures::USE_SSR);
         let needs_scene_hiz = ssgi_enabled || ssr_enabled;
 
-        let needs_feature_id =
-            is_high_fidelity && (self.ctx.scene.screen_space.enable_sss || ssr_enabled);
+        let needs_feature_id = is_high_fidelity && (self.ctx.scene.ssss.enabled || ssr_enabled);
 
         #[cfg(feature = "debug_view")]
         let (dbg_needs_normal, dbg_needs_velocity) = {
@@ -535,7 +534,7 @@ impl<'a> FrameComposer<'a> {
 
         // let needs_normal = ssao_enabled || needs_feature_id;
         let needs_skybox = self.ctx.scene.background.needs_skybox_pass();
-        let ssss_enabled = self.ctx.scene.screen_space.enable_sss;
+        let ssss_enabled = self.ctx.scene.ssss.enabled;
         let has_transmission = self.ctx.render_lists.use_transmission;
         let bloom_enabled = self.ctx.scene.bloom.enabled && is_high_fidelity;
         let has_active_environment = matches!(

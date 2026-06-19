@@ -36,6 +36,7 @@ SSAO reuses the depth and normal buffers produced by the Pre Pass, and is blurre
 SSR traces rays in screen space to provide real-time reflections for wet floors, polished metal, and similar surfaces:
 
 ```rust
+scene.ssr.set_enabled(true);
 scene.ssr.set_quality(SsrQuality::Ultra); // Low / Medium / High / Ultra
 scene.ssr.set_thickness(0.01);            // thickness threshold, affects intersection
 ```
@@ -56,6 +57,10 @@ scene.ssgi.set_quality(SsgiQuality::Ultra);
 ## 5. SSSS (Screen-Space Subsurface Scattering)
 
 SSSS simulates light scattering inside translucent materials like skin, wax, and marble — critical for character skin rendering. It depends on Pre Pass normals and Feature ID, performing horizontal / vertical blur passes after opaque shading.
+
+```rust
+scene.ssss.set_enabled(true);
+```
 
 ## 6. Anti-Aliasing: TAA / FXAA / MSAA
 

@@ -47,7 +47,7 @@ use crate::graph::core::{
 use crate::pipeline::{
     ColorTargetKey, FullscreenPipelineKey, RenderPipelineId, ShaderCompilationOptions, ShaderSource,
 };
-use myth_resources::screen_space::SssProfileData;
+use myth_resources::ssss::SssProfileData;
 use std::mem::size_of;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

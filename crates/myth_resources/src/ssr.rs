@@ -1,8 +1,7 @@
 //! SSR (Screen Space Reflections) configuration.
 //!
-//! The scene-level toggle remains in `ScreenSpaceSettings::enable_ssr` so SSR
-//! can share the existing screen-space feature routing. This module stores the
-//! per-frame GPU tuning parameters and quality presets used by the renderer.
+//! This module stores both the scene-level enable state and the per-frame GPU
+//! tuning parameters used by the renderer.
 
 use glam::{UVec4, Vec4};
 
@@ -62,6 +61,8 @@ pub struct SsrUniforms {
 /// Scene-level SSR tuning state.
 #[derive(Debug, Clone)]
 pub struct SsrSettings {
+    /// Whether SSR is enabled.
+    pub enabled: bool,
     quality: SsrQuality,
 
     #[doc(hidden)]
@@ -82,6 +83,7 @@ impl Default for SsrSettings {
         };
 
         Self {
+            enabled: false,
             quality: SsrQuality::High,
             uniforms: CpuBuffer::new(
                 uniforms,
@@ -96,6 +98,10 @@ impl SsrSettings {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 
     #[must_use]

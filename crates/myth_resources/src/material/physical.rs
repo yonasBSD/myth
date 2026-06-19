@@ -4,7 +4,7 @@ use myth_macros::myth_material;
 use parking_lot::RwLock;
 
 use crate::ShaderDefines;
-use crate::screen_space::FeatureId;
+use crate::ssss::FeatureId;
 use crate::uniforms::Mat3Uniform;
 
 bitflags! {
@@ -411,7 +411,7 @@ impl PhysicalMaterial {
     /// Sets the subsurface scattering feature ID.
     pub fn set_sss_id(&self, id: Option<FeatureId>) {
         let mut u = self.uniforms.write();
-        u.sss_id = id.map_or(0, super::super::screen_space::FeatureId::to_u32);
+        u.sss_id = id.map_or(0, FeatureId::to_u32);
         self.version
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.toggle_feature(PhysicalFeatures::SSS, id.is_some());
@@ -426,7 +426,7 @@ impl PhysicalMaterial {
     /// Sets the screen-space reflections feature ID.
     pub fn set_ssr_id(&self, id: Option<FeatureId>) {
         let mut u = self.uniforms.write();
-        u.ssr_id = id.map_or(0, super::super::screen_space::FeatureId::to_u32);
+        u.ssr_id = id.map_or(0, FeatureId::to_u32);
         self.version
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.toggle_feature(PhysicalFeatures::SSR, id.is_some());

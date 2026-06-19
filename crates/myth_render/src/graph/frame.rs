@@ -21,12 +21,13 @@ use crate::core::{BindGroupContext, RenderView, ResourceManager};
 use crate::graph::core::TextureNodeId;
 use crate::pipeline::RenderPipelineId;
 use crate::renderer::FrameTime;
+use crate::settings::{ClusteredShadingMode, RenderPath};
 use myth_assets::{AssetServer, GeometryHandle, MaterialHandle};
 use myth_resources::buffer::CpuBuffer;
 use myth_scene::Scene;
 use myth_scene::camera::RenderCamera;
 
-use super::extracted::ExtractedScene;
+use super::extracted::{ExtractedScene, SceneFeatures};
 use super::render_state::RenderState;
 use super::shadow_utils;
 
@@ -68,6 +69,14 @@ pub struct ShadowRenderCommand {
     /// Pipeline handle (index into [`PipelineCache`] storage).
     pub pipeline_id: RenderPipelineId,
     pub dynamic_offset: u32,
+}
+
+/// Frame-scoped feature inputs that affect scene shader variants.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderFrameFeatureConfig {
+    pub clustered_shading: ClusteredShadingMode,
+    pub render_path: RenderPath,
+    pub msaa_samples: u32,
 }
 
 // ============================================================================
@@ -430,17 +439,19 @@ impl RenderFrame {
     ///
     /// 1. **Extract** — Pull rendering data from the [`Scene`] into
     ///    [`ExtractedScene`].
-    /// 2. **Light Ordering** — Keep local lights packed at the front of the
+    /// 2. **Feature Variants** — Resolve frame-dependent scene shader
+    ///    variants such as clustered lighting and screen-space effects.
+    /// 3. **Light Ordering** — Keep local lights packed at the front of the
     ///    extracted list and pre-sort dense local-light sets by camera-
     ///    weighted importance so they can be short-circuited directly into
     ///    the clustered local-light track when no GPU merge is needed.
-    /// 3. **Shadow View Generation** — Build [`RenderView`]s for all
+    /// 4. **Shadow View Generation** — Build [`RenderView`]s for all
     ///    shadow-casting lights (pure math, no GPU work).
-    /// 4. **Shadow Metadata** — Write per-light shadow layer indices,
+    /// 5. **Shadow Metadata** — Write per-light shadow layer indices,
     ///    cascade matrices and split distances into the directional / local
     ///    light tracks so both the global bind group and the RDG local-light
     ///    path already contain correct data.
-    /// 5. **Global Prepare** — Upload camera / scene / light uniforms and
+    /// 6. **Global Prepare** — Upload camera / scene / light uniforms and
     ///    create the global bind group (Group 0).
     ///
     /// # Note
@@ -457,6 +468,7 @@ impl RenderFrame {
         render_lists: &mut RenderLists,
         surface_size: (u32, u32),
         max_extracted_lights: usize,
+        feature_config: RenderFrameFeatureConfig,
     ) {
         use crate::core::view::RenderView;
 
@@ -471,7 +483,10 @@ impl RenderFrame {
             max_extracted_lights,
         );
 
-        // ── 2. Resolve GPU environment + BRDF LUT ─────────────────────
+        // ── 2. Resolve frame-dependent shader variants ────────────────
+        self.resolve_scene_feature_variants(scene, feature_config);
+
+        // ── 3. Resolve GPU environment + BRDF LUT ─────────────────────
         let env_max_mip = resource_manager.resolve_gpu_environment(
             scene.id(),
             assets,
@@ -481,7 +496,7 @@ impl RenderFrame {
         resource_manager.ensure_brdf_lut();
         self.extracted_scene.prepare_gpu_scene_inputs(env_max_mip);
 
-        // ── 3. Build shadow views (pure math) ──────────────────────────
+        // ── 4. Build shadow views (pure math) ──────────────────────────
         render_lists.clear();
         render_lists.active_views.push(RenderView::new_main_camera(
             camera.view_projection_matrix,
@@ -495,21 +510,21 @@ impl RenderFrame {
             render_lists.active_views.len(),
         );
 
-        // ── 4. Shadow map allocation is deferred to RDG ─────────────────
+        // ── 5. Shadow map allocation is deferred to RDG ─────────────────
         // The physical shadow texture is now a transient RDG resource,
         // allocated by the graph compiler after topology compilation.
         // No `ensure_shadow_maps()` call is needed here.
 
         render_lists.active_views.extend(shadow_views);
 
-        // ── 5. Update light storage buffer with shadow metadata ────────
+        // ── 6. Update light storage buffer with shadow metadata ────────
         Self::update_light_shadow_metadata(
             &render_lists.active_views,
             &mut self.extracted_scene,
             resource_manager,
         );
 
-        // ── 6. Global GPU resources ────────────────────────────────────
+        // ── 7. Global GPU resources ────────────────────────────────────
         self.render_state.update(camera, frame_time, surface_size);
         resource_manager.prepare_global(assets, &self.extracted_scene, &self.render_state);
         resource_manager.ensure_buffer(&self.extracted_scene.local_light_metadata_buffer);
@@ -522,6 +537,52 @@ impl RenderFrame {
             resource_manager,
             &self.extracted_scene.local_light_storage_buffer,
         );
+    }
+
+    fn resolve_scene_feature_variants(
+        &mut self,
+        scene: &Scene,
+        feature_config: RenderFrameFeatureConfig,
+    ) {
+        let active_local_light_count = self.extracted_scene.local_light_count() as u32;
+        let clustered_lighting_enabled = feature_config
+            .clustered_shading
+            .is_enabled(active_local_light_count)
+            && active_local_light_count > 0;
+
+        if clustered_lighting_enabled {
+            self.extracted_scene
+                .scene_variants
+                .insert(SceneFeatures::USE_CLUSTERED_SHADING);
+        }
+
+        let screen_space_supported = feature_config.render_path.supports_post_processing()
+            && feature_config.msaa_samples <= 1;
+
+        if !(screen_space_supported && scene.ssgi.enabled) {
+            self.extracted_scene
+                .scene_variants
+                .remove(SceneFeatures::USE_SSGI);
+            self.extracted_scene.scene_defines.remove("USE_SSGI");
+        }
+
+        let ssr_enabled = screen_space_supported && scene.ssr.enabled;
+        if !ssr_enabled {
+            self.extracted_scene
+                .scene_variants
+                .remove(SceneFeatures::USE_SSR);
+            self.extracted_scene.scene_defines.remove("USE_SSR");
+        }
+
+        if scene.ssss.enabled || ssr_enabled {
+            self.extracted_scene
+                .scene_defines
+                .set("USE_SCREEN_SPACE_FEATURES", "1");
+        } else {
+            self.extracted_scene
+                .scene_defines
+                .remove("USE_SCREEN_SPACE_FEATURES");
+        }
     }
 
     /// Build [`RenderView`]s for all shadow-casting lights.

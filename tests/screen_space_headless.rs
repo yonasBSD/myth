@@ -19,7 +19,7 @@ fn screen_space_effects_headless_smoke() {
     scene.ssao.set_enabled(true);
     scene.ssgi.set_enabled(true);
     scene.ssgi.set_quality(SsgiQuality::Low);
-    scene.screen_space.enable_ssr = true;
+    scene.ssr.set_enabled(true);
     scene.ssr.set_max_steps(12);
     scene.ssr.set_spatial_radius(1);
 

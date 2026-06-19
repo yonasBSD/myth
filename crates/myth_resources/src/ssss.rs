@@ -1,24 +1,32 @@
+//! SSSS (Screen-Space Subsurface Scattering) configuration.
+//!
+//! This module owns both scene-level SSSS enablement and the SSS profile
+//! registry consumed by the screen-space blur pass.
+
 use glam::Vec3;
 use std::num::NonZeroU8;
 
 // ============================================================================
-// 1. Basic Types: Globally Stable 8-bit ID
+// Basic Types: Globally Stable 8-bit ID
 // ============================================================================
 
 /// Strongly-typed feature ID wrapping `NonZeroU8`, so `Option<FeatureId>` is only 1 byte.
-/// Valid range: 1–255. 0 represents no feature.
+///
+/// Valid range: 1-255. 0 represents no feature.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FeatureId(pub NonZeroU8);
 
 impl FeatureId {
-    /// Converts the strongly-typed ID to the underlying `u32` required by shaders
+    /// Converts the strongly-typed ID to the underlying `u32` required by shaders.
     #[inline]
     #[must_use]
     pub fn to_u32(self) -> u32 {
         u32::from(self.0.get())
     }
 
-    /// Attempts to reconstruct the strongly-typed ID from a shader's `u32` value (0 becomes `None`)
+    /// Attempts to reconstruct the strongly-typed ID from a shader's `u32` value.
+    ///
+    /// `0` maps to `None`.
     #[inline]
     pub fn from_u32(val: u32) -> Option<Self> {
         std::num::NonZeroU8::new(val as u8).map(FeatureId)
@@ -26,15 +34,15 @@ impl FeatureId {
 }
 
 // ============================================================================
-// 2. SSS (Subsurface Scattering) Dedicated Structures and Registry
+// SSS Profile Data and Registry
 // ============================================================================
 
-/// GPU-side SSS data structure (16 bytes)
+/// GPU-side SSS profile data (16 bytes).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct SssProfileData {
-    pub scatter_color: [f32; 3], // Scatter color
-    pub scatter_radius: f32,     // Scatter radius (screen-space percentage or world-space units)
+    pub scatter_color: [f32; 3],
+    pub scatter_radius: f32,
 }
 
 impl Default for SssProfileData {
@@ -46,7 +54,7 @@ impl Default for SssProfileData {
     }
 }
 
-/// User-facing SSS profile asset
+/// User-facing SSS profile asset.
 #[derive(Clone, Debug)]
 pub struct SssProfile {
     pub scatter_color: Vec3,
@@ -71,13 +79,13 @@ impl SssProfile {
     }
 }
 
-/// SSS-dedicated global fixed-length allocator
+/// SSS-dedicated global fixed-length allocator.
 pub struct SssRegistry {
-    /// GPU-layout-aligned array; ID 0 is always the default
+    /// GPU-layout-aligned array; ID 0 is always the default.
     pub buffer_data: [SssProfileData; 256],
-    /// Free ID list
+    /// Free ID list.
     free_list: Vec<u8>,
-    /// Version number used to trigger GPU buffer uploads (diff-sync)
+    /// Version number used to trigger GPU buffer uploads.
     pub version: u64,
 }
 
@@ -90,7 +98,6 @@ impl Default for SssRegistry {
 impl SssRegistry {
     #[must_use]
     pub fn new() -> Self {
-        // From 255 down to 1, so pop() allocates lower IDs first
         let free_list = (1..=255).rev().collect();
         Self {
             buffer_data: [SssProfileData::default(); 256],
@@ -99,7 +106,7 @@ impl SssRegistry {
         }
     }
 
-    /// Registers a new SSS profile and returns a globally stable ID
+    /// Registers a new SSS profile and returns a globally stable ID.
     pub fn add(&mut self, profile: &SssProfile) -> Option<FeatureId> {
         if let Some(id) = self.free_list.pop() {
             self.buffer_data[id as usize] = profile.to_gpu_data();
@@ -111,13 +118,13 @@ impl SssRegistry {
         }
     }
 
-    /// Updates an existing profile (e.g., for dynamic UI adjustments)
+    /// Updates an existing profile.
     pub fn update(&mut self, id: FeatureId, profile: &SssProfile) {
         self.buffer_data[id.0.get() as usize] = profile.to_gpu_data();
         self.version += 1;
     }
 
-    /// Removes a profile and recycles its ID for future reuse
+    /// Removes a profile and recycles its ID for future reuse.
     pub fn remove(&mut self, id: FeatureId) {
         let index = id.0.get();
         self.buffer_data[index as usize] = SssProfileData::default();
@@ -126,11 +133,22 @@ impl SssRegistry {
     }
 }
 
-// ============================================================================
-// 3. Scene-Level Global Toggles
-// ============================================================================
-#[derive(Default, Clone, Debug)]
-pub struct ScreenSpaceSettings {
-    pub enable_sss: bool,
-    pub enable_ssr: bool,
+/// Scene-level SSSS settings.
+///
+/// The feature is disabled by default and must be explicitly enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SsssSettings {
+    /// Whether screen-space subsurface scattering is enabled.
+    pub enabled: bool,
+}
+
+impl SsssSettings {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { enabled: false }
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
 }

@@ -8,11 +8,11 @@ use myth_resources::GaussianCloudHandle;
 use myth_resources::Input;
 use myth_resources::bloom::BloomSettings;
 use myth_resources::mesh::Mesh;
-use myth_resources::screen_space::ScreenSpaceSettings;
 use myth_resources::shader_defines::ShaderDefines;
 use myth_resources::ssao::SsaoSettings;
 use myth_resources::ssgi::SsgiSettings;
 use myth_resources::ssr::SsrSettings;
+use myth_resources::ssss::SsssSettings;
 use myth_resources::tone_mapping::ToneMappingSettings;
 
 use crate::background::{BackgroundMode, BackgroundSettings};
@@ -147,8 +147,8 @@ pub struct Scene {
     pub ssgi: SsgiSettings,
     /// SSR (Screen Space Reflections) tuning settings
     pub ssr: SsrSettings,
-    /// Screen space effects settings (SSS, SSR)
-    pub screen_space: ScreenSpaceSettings,
+    /// SSSS (Screen Space Subsurface Scattering) settings
+    pub ssss: SsssSettings,
     /// Background rendering settings (mode + skybox uniform buffer)
     pub background: BackgroundSettings,
     /// Currently active camera for rendering
@@ -201,7 +201,7 @@ impl Scene {
             ssao: SsaoSettings::default(),
             ssgi: SsgiSettings::default(),
             ssr: SsrSettings::default(),
-            screen_space: ScreenSpaceSettings::default(),
+            ssss: SsssSettings::default(),
             background: BackgroundSettings::default(),
 
             active_camera: None,

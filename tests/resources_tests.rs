@@ -9,7 +9,7 @@
 
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
-use myth::resources::screen_space::{FeatureId, SssProfile, SssProfileData, SssRegistry};
+use myth::resources::ssss::{FeatureId, SssProfile, SssProfileData, SssRegistry};
 use myth::resources::uniforms::{Mat3Padded, Mat3Uniform};
 use myth::resources::version_tracker::{ChangeTracker, MutGuard};
 use myth::resources::{TextureSlot, TextureTransform};

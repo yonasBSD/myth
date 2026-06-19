@@ -626,7 +626,7 @@ impl ShowcaseApp {
             scene.ssao.set_intensity(p.ssao_intensity);
         }
 
-        scene.screen_space.enable_sss = p.ssss_enabled;
+        scene.ssss.set_enabled(p.ssss_enabled);
     }
 
     /// Returns `true` when the model and the default preset's critical resources
@@ -671,7 +671,7 @@ impl ShowcaseApp {
         }
 
         let skin_profile =
-            myth::resources::screen_space::SssProfile::new(Vec3::new(0.85, 0.25, 0.15), 0.15);
+            myth::resources::ssss::SssProfile::new(Vec3::new(0.85, 0.25, 0.15), 0.15);
 
         if let Some(model_node) = scene.find_node_by_name("Object_9") {
             if let Some(mesh) = scene.meshes.get(model_node) {
